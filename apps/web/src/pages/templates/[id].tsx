@@ -27,7 +27,14 @@ import useSWR from 'swr';
 import {TemplateSchemas, detectUnsubscribeSignal} from '@plunk/shared';
 import {useActiveProject} from '../../lib/contexts/ActiveProjectProvider';
 
+// Going from one template to another keeps this page mounted: the key starts the form again, so
+// saving can't write the first template's fields over the second.
 export default function TemplateEditorPage() {
+  const {id} = useRouter().query;
+  return <TemplateEditor key={String(id)} />;
+}
+
+function TemplateEditor() {
   const router = useRouter();
   const {id} = router.query;
   const {activeProject} = useActiveProject();

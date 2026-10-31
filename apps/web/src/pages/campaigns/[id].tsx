@@ -174,7 +174,14 @@ function UnsubscribedNotice({campaignId}: {campaignId: string}) {
   );
 }
 
+// Going from one campaign to another keeps this page mounted: the key starts the form again, so
+// saving can't write the first campaign's fields over the second.
 export default function CampaignDetailsPage() {
+  const {id} = useRouter().query;
+  return <CampaignDetails key={String(id)} />;
+}
+
+function CampaignDetails() {
   const router = useRouter();
   const {id} = router.query;
   const {activeProject} = useActiveProject();
