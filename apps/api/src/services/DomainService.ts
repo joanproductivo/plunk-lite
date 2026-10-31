@@ -6,7 +6,7 @@ import {UtilitySchemas} from '@plunk/shared';
 import {DASHBOARD_URI, LANDING_URI} from '../app/constants.js';
 import {prisma} from '../database/prisma.js';
 import {redis, wrapRedis} from '../database/redis.js';
-import {HttpException} from '../exceptions/index.js';
+import {ErrorCode, HttpException} from '../exceptions/index.js';
 import {Keys} from './keys.js';
 import {MembershipService} from './MembershipService.js';
 import {NtfyService} from './NtfyService.js';
@@ -350,7 +350,9 @@ export class DomainService {
    */
   public static async verifyEmailDomain(email: string, projectId: string) {
     if (!UtilitySchemas.email.shape.email.safeParse(email).success) {
-      throw new HttpException(400, 'Invalid email format');
+      throw new HttpException(400, 'Invalid email format in the From address', ErrorCode.VALIDATION_ERROR, {
+        field: 'from',
+      });
     }
 
     // Extract domain from email

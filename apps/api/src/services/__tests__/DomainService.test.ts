@@ -118,7 +118,11 @@ describe('DomainService', () => {
 
       await expect(
         DomainService.verifyEmailDomain('x\nBcc: y@line-break.example.com', project.id),
-      ).rejects.toThrow('Invalid email format');
+      ).rejects.toMatchObject({
+        message: 'Invalid email format in the From address',
+        code: 400,
+        errorCode: 'VALIDATION_ERROR',
+      });
     });
 
     it('should throw error for invalid email format', async () => {
