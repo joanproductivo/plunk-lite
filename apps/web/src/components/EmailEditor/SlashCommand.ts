@@ -100,6 +100,13 @@ const SLASH_ITEMS: SlashItem[] = [
     offered: takesBlocks,
     run: (editor, range) => replaceQuery(editor, range).toggleBlockquote().run(),
   },
+  {
+    label: 'Code block',
+    syntax: '```',
+    aliases: ['pre', 'snippet'],
+    offered: takesBlocks,
+    run: (editor, range) => replaceQuery(editor, range).setCodeBlock().run(),
+  },
   {label: 'Button', aliases: ['cta', 'link'], offered: takesBlocks, run: requestsBlock('button')},
   {
     label: 'Image',
