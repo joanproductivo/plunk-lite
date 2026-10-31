@@ -7,7 +7,7 @@ import {DomainService} from '../services/DomainService.js';
 import {TemplateService} from '../services/TemplateService.js';
 import {CatchAsync} from '../utils/asyncHandler.js';
 import {parseListSort} from '../utils/listSort.js';
-import {assertValidTemplateSyntax} from '../utils/templateValidation.js';
+import {assertValidReplyTo, assertValidTemplateSyntax} from '../utils/templateValidation.js';
 
 @Controller('templates')
 export class Templates {
@@ -86,6 +86,7 @@ export class Templates {
     }
 
     assertValidTemplateSyntax({subject, body});
+    assertValidReplyTo(replyTo);
 
     // Verify domain ownership and verification
     await DomainService.verifyEmailDomain(from, auth.projectId!);
@@ -121,6 +122,7 @@ export class Templates {
     }
 
     assertValidTemplateSyntax({subject, body});
+    assertValidReplyTo(replyTo);
 
     // Verify domain ownership and verification if 'from' is being updated
     if (from) {

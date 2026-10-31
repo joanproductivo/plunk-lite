@@ -10,7 +10,7 @@ import {CampaignService} from '../services/CampaignService.js';
 import {DomainService} from '../services/DomainService.js';
 import {CatchAsync} from '../utils/asyncHandler.js';
 import {parseListSort} from '../utils/listSort.js';
-import {assertValidTemplateSyntax} from '../utils/templateValidation.js';
+import {assertValidReplyTo, assertValidTemplateSyntax} from '../utils/templateValidation.js';
 
 @Controller('campaigns')
 export class Campaigns {
@@ -23,6 +23,8 @@ export class Campaigns {
   @CatchAsync
   private async create(req: Request, res: Response, _next: NextFunction) {
     const auth = res.locals.auth;
+    // Before the schema, whose error doesn't say which field it refused
+    assertValidReplyTo(req.body?.replyTo);
     const {name, description, subject, body, from, fromName, replyTo, type, audienceType, audienceCondition, segmentId} =
       CampaignSchemas.create.parse(req.body);
 
@@ -177,6 +179,7 @@ export class Campaigns {
     }
 
     assertValidTemplateSyntax({subject, body});
+    assertValidReplyTo(replyTo);
 
     // Verify domain ownership and verification if 'from' is being updated
     if (from) {

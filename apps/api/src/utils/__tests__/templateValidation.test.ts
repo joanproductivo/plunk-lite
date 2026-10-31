@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 
 import {HttpException} from '../../exceptions/index.js';
-import {assertValidTemplateSyntax} from '../templateValidation.js';
+import {assertValidReplyTo, assertValidTemplateSyntax} from '../templateValidation.js';
 
 /**
  * Rendering is intentionally forgiving — a broken template still sends, falling back to
@@ -60,5 +60,25 @@ describe('assertValidTemplateSyntax', () => {
 
   it('reports the first offending field', () => {
     expect(() => assertValidTemplateSyntax({subject: '{% if %}', body: 'fine'})).toThrow(/subject/);
+  });
+});
+
+describe('assertValidReplyTo', () => {
+  it.each(['info@example.org', 'Info+x@Some-Domain.example.org', null, undefined])('accepts %j', replyTo => {
+    expect(() => assertValidReplyTo(replyTo)).not.toThrow();
+  });
+
+  it.each([
+    'info',
+    'info@example',
+    '',
+    'a@b.com\nBcc: x@y.com',
+    'a@b.com\r\nBcc: x@y.com',
+    'a@b.com\n',
+    123,
+    ['a@b.com'],
+  ])('refuses %j with a message that names the field', replyTo => {
+    expect(() => assertValidReplyTo(replyTo)).toThrow('Reply-To must be a valid email address');
+    expect(() => assertValidReplyTo(replyTo)).toThrow(HttpException);
   });
 });

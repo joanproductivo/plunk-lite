@@ -112,6 +112,15 @@ describe('DomainService', () => {
   // VERIFY EMAIL DOMAIN
   // ========================================
   describe('verifyEmailDomain', () => {
+    it('should refuse an address with a line break, on a verified domain too', async () => {
+      const {project} = await factories.createUserWithProject();
+      await factories.createDomain({projectId: project.id, domain: 'line-break.example.com', verified: true});
+
+      await expect(
+        DomainService.verifyEmailDomain('x\nBcc: y@line-break.example.com', project.id),
+      ).rejects.toThrow('Invalid email format');
+    });
+
     it('should throw error for invalid email format', async () => {
       const {project} = await factories.createUserWithProject();
 

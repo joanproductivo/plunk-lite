@@ -558,7 +558,7 @@ export const CampaignSchemas = {
     body: z.string().optional(),
     from: z.string().optional(),
     fromName: z.string().max(100).nullish(),
-    replyTo: z.string().nullish(),
+    replyTo: email.nullish(),
     type: z.nativeEnum(TemplateType).optional(),
     audienceType: z.nativeEnum(CampaignAudienceType).optional(),
     audienceCondition: filterConditionSchema.optional(),

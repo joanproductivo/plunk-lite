@@ -1,4 +1,4 @@
-import {validateTemplate} from '@plunk/shared';
+import {TemplateSchemas, validateTemplate} from '@plunk/shared';
 
 import {ErrorCode, HttpException} from '../exceptions/index.js';
 
@@ -32,5 +32,16 @@ export function assertValidTemplateSyntax(fields: Record<string, unknown>): void
         {field, line: result.line, column: result.column},
       );
     }
+  }
+}
+
+/**
+ * Reject a Reply-To that isn't one plain address. Unlike From, it may be on any domain.
+ */
+export function assertValidReplyTo(replyTo: unknown): void {
+  if (!TemplateSchemas.update.shape.replyTo.safeParse(replyTo).success) {
+    throw new HttpException(400, 'Reply-To must be a valid email address', ErrorCode.VALIDATION_ERROR, {
+      field: 'replyTo',
+    });
   }
 }
