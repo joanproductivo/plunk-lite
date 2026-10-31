@@ -76,6 +76,7 @@ export class Contacts {
     // one, and `?subscribed=true|false` is kept working for callers written before snoozing
     // existed. `status` wins when both are present. Plunk Lite: `?status=pending`, the contacts
     // waiting to confirm a sign-up, has a query of its own; `unsubscribed` still includes them.
+    // `?status=suppressed` overlaps the others too: they are usually `unsubscribed`.
     const statusParam = req.query.status as ContactSubscriptionStatus | undefined;
     const status = statusParam && CONTACT_SUBSCRIPTION_STATUSES.includes(statusParam) ? statusParam : undefined;
     const subscribedParam = req.query.subscribed as string | undefined;
@@ -97,14 +98,23 @@ export class Contacts {
         ? await OptInService.listPending(auth.projectId!, {limit, cursor, search, segmentId, sort, dir})
         : await ContactService.list(auth.projectId!, limit, cursor, search, {status, subscribed, segmentId, sort, dir});
 
-    // Plunk Lite: each row says whether it waits to confirm a sign-up, which its status shows
+    // Plunk Lite: each row says whether it waits to confirm a sign-up and whether its address is
+    // suppressed, which its status shows
     const pending = await OptInService.pendingAmong(
       auth.projectId!,
       result.data.map(contact => contact.id),
     );
+    const suppressed = await SuppressionService.suppressedAmong(
+      auth.projectId!,
+      result.data.map(contact => contact.email),
+    );
     return res.status(200).json({
       ...result,
-      data: result.data.map(contact => ({...contact, pendingConfirmation: pending.has(contact.id)})),
+      data: result.data.map(contact => ({
+        ...contact,
+        pendingConfirmation: pending.has(contact.id),
+        suppression: suppressed.get(ContactService.normalizeEmail(contact.email)) ?? null,
+      })),
     });
   }
 
@@ -619,9 +629,9 @@ export class Contacts {
 
   /**
    * DELETE /contacts/:id/suppression
-   * Take the contact's address off the project's suppression list, so it can be subscribed and
-   * emailed again. Only from a dashboard session: an API key is how addresses are resubscribed
-   * in passing, which the list exists to stop.
+   * Take the contact's address off the project's suppression list and the account's at SES, so it
+   * can be subscribed and emailed again (see SuppressionService.lift). Only from a dashboard
+   * session: an API key is how addresses are resubscribed in passing, which the list exists to stop.
    */
   @Delete(':id/suppression')
   @Middleware([requireAuth, requireEmailVerified])
@@ -635,9 +645,9 @@ export class Contacts {
     }
 
     const contact = await ContactService.get(auth.projectId!, contactId!);
-    const lifted = await SuppressionService.lift(auth.projectId!, contact.email);
+    const result = await SuppressionService.lift(auth.projectId!, contact.email, {ses: 'any'});
 
-    return res.status(200).json({success: true, lifted});
+    return res.status(200).json({success: true, ...result});
   }
 
   /**

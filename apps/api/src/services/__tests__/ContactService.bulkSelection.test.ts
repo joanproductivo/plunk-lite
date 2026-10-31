@@ -1,12 +1,14 @@
 import type {ContactListFilter} from '@plunk/types';
+import {contactStatus} from '@plunk/types';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {factories, getPrismaClient} from '../../../../../test/helpers';
 import {ContactService} from '../ContactService.js';
+import {SuppressionService} from '../SuppressionService.js';
 
 /**
  * "Select all matching" bulk actions have to reach exactly the contacts the list shows.
  *
- * The dashboard's Status facet has three buckets, but the selector used to carry only the
+ * The dashboard's Status facet had three buckets, but the selector used to carry only the
  * `subscribed` boolean, so a select-all on Snoozed also hit permanently unsubscribed contacts
  * (and Unsubscribed also hit snoozed ones): bulk-subscribe on Snoozed resubscribed people who
  * had opted out, and bulk-delete on Unsubscribed deleted snoozed contacts.
@@ -37,7 +39,7 @@ describe('Bulk contact actions - select all matching', () => {
 
   const emailsFor = async (filter: ContactListFilter, excludeIds?: string[]) => {
     const contacts = await prisma.contact.findMany({
-      where: ContactService.buildQueryWhere(projectId, {mode: 'query', filter, excludeIds}),
+      where: await ContactService.buildQueryWhere(projectId, {mode: 'query', filter, excludeIds}),
       select: {email: true},
     });
     return contacts.map(c => c.email).sort();
@@ -105,7 +107,7 @@ describe('Contacts list filters - segment', () => {
 
   const emailsFor = async (filter: ContactListFilter) => {
     const contacts = await prisma.contact.findMany({
-      where: ContactService.buildQueryWhere(projectId, {mode: 'query', filter}),
+      where: await ContactService.buildQueryWhere(projectId, {mode: 'query', filter}),
       select: {email: true},
     });
     return contacts.map(c => c.email).sort();
@@ -128,5 +130,69 @@ describe('Contacts list filters - segment', () => {
 
     expect(page.data.map(c => c.email)).toEqual(['member@example.com']);
     expect(page.total).toBe(1);
+  });
+});
+
+/** The Suppressed facet (Plunk Lite): the addresses on the project's list, wherever they are told apart */
+describe('ContactService.buildQueryWhere with the Suppressed facet', () => {
+  const prisma = getPrismaClient();
+  let projectId: string;
+
+  const emailsFor = async (filter: ContactListFilter, excludeIds?: string[]) => {
+    const contacts = await prisma.contact.findMany({
+      where: await ContactService.buildQueryWhere(projectId, {mode: 'query', filter, excludeIds}),
+      select: {email: true},
+    });
+    return contacts.map(c => c.email).sort();
+  };
+
+  beforeEach(async () => {
+    const {project} = await factories.createUserWithProject();
+    projectId = project.id;
+    await factories.createContact({projectId, email: 'fine@example.com'});
+  });
+
+  it('selects no one in a project with nothing suppressed, rather than everyone', async () => {
+    expect(await emailsFor({status: 'suppressed'})).toEqual([]);
+  });
+
+  it('selects only the suppressed, with the search, the segment and the exclusions', async () => {
+    const bounced = await factories.createContact({projectId, email: 'bounced@example.com', subscribed: false});
+    await factories.createContact({projectId, email: 'kept@sample.com', subscribed: false});
+    await SuppressionService.record(prisma, projectId, ['bounced@example.com', 'kept@sample.com'], 'BOUNCE', null);
+    const segment = await prisma.segment.create({data: {projectId, name: 'Static', type: 'STATIC'}});
+    await prisma.segmentMembership.create({data: {segmentId: segment.id, contactId: bounced.id}});
+
+    expect(await emailsFor({status: 'suppressed'})).toEqual(['bounced@example.com', 'kept@sample.com']);
+    expect(await emailsFor({status: 'suppressed', search: 'SAMPLE'})).toEqual(['kept@sample.com']);
+    expect(await emailsFor({status: 'suppressed', search: 'fine'})).toEqual([]);
+    expect(await emailsFor({status: 'suppressed', segmentId: segment.id})).toEqual(['bounced@example.com']);
+    expect(await emailsFor({status: 'suppressed'}, [bounced.id])).toEqual(['kept@sample.com']);
+  });
+
+  it('wins over the legacy subscribed filter, and leaves the Unsubscribed facet as it was', async () => {
+    await factories.createContact({projectId, email: 'odd@example.com', subscribed: true});
+    await factories.createContact({projectId, email: 'gone@example.com', subscribed: false});
+    await SuppressionService.record(prisma, projectId, ['odd@example.com', 'gone@example.com'], 'COMPLAINT', null);
+
+    expect(await emailsFor({status: 'suppressed', subscribed: false})).toEqual(['gone@example.com', 'odd@example.com']);
+    expect(await emailsFor({status: 'unsubscribed'})).toEqual(['gone@example.com']);
+    expect(await emailsFor({status: 'subscribed'})).toEqual(['fine@example.com', 'odd@example.com']);
+  });
+
+  it('refuses a status it does not know, rather than select everyone', async () => {
+    await expect(emailsFor({status: 'archived' as never})).rejects.toMatchObject({code: 400});
+  });
+});
+
+describe('contactStatus', () => {
+  it('reads as suppressed before any other state', () => {
+    const suppression = {reason: 'BOUNCE' as const};
+    expect(contactStatus({subscribed: true, snoozedUntil: null, suppression})).toBe('suppressed');
+    expect(contactStatus({subscribed: false, snoozedUntil: new Date(), suppression})).toBe('suppressed');
+    expect(contactStatus({subscribed: false, snoozedUntil: null, pendingConfirmation: true, suppression})).toBe(
+      'suppressed',
+    );
+    expect(contactStatus({subscribed: true, snoozedUntil: null, suppression: null})).toBe('subscribed');
   });
 });

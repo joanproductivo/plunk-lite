@@ -5,6 +5,7 @@ import {parseImportCsv, splitImportRecord} from '../../jobs/import-csv.js';
 import {ContactExportService} from '../ContactExportService.js';
 import {ContactService} from '../ContactService.js';
 import {SegmentService} from '../SegmentService.js';
+import {SuppressionService} from '../SuppressionService.js';
 
 /**
  * The contacts export: one streaming pass over the selected contacts, with their static and
@@ -184,6 +185,38 @@ describe('ContactExportService', () => {
       handle: '@ana',
       note: 'a, "quoted"\nline',
       phone: '+34 600 00 00 00',
+    });
+  });
+
+  describe('suppressed addresses (Plunk Lite)', () => {
+    beforeEach(async () => {
+      await factories.createContact({projectId, email: 'fine@example.com'});
+      await factories.createContact({projectId, email: 'bounced@example.com', subscribed: false});
+      // Subscribed, as a complaint taken back from the dead-letter queue can leave a contact
+      await factories.createContact({projectId, email: 'spam@example.com', subscribed: true});
+      await SuppressionService.record(prisma, projectId, ['bounced@example.com'], 'BOUNCE', null);
+      await SuppressionService.record(prisma, projectId, ['spam@example.com'], 'COMPLAINT', null);
+    });
+
+    it('exports only them with the filter, in cells the import reads as their reason', async () => {
+      const {records, rows} = await exportCsv({mode: 'query', filter: {status: 'suppressed'}});
+
+      expect(rows).toBe(2);
+      const imported = records.map(record => splitImportRecord(record));
+      expect(imported.map(({email, suppression}) => [email, suppression])).toEqual([
+        ['bounced@example.com', 'BOUNCE'],
+        ['spam@example.com', 'COMPLAINT'],
+      ]);
+    });
+
+    it('leaves the status of the others as it was', async () => {
+      const {records} = await exportCsv(all);
+
+      expect(records.map(record => [record.email, record.status])).toEqual([
+        ['bounced@example.com', 'bounced'],
+        ['fine@example.com', 'subscribed'],
+        ['spam@example.com', 'complained'],
+      ]);
     });
   });
 });

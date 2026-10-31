@@ -135,7 +135,7 @@ export async function processBulkContactAction(job: Job<BulkContactActionJobData
       await job.updateProgress(Math.round(((i + batchIds.length) / contactIds.length) * 100));
     }
   } else {
-    const where = ContactService.buildQueryWhere(projectId, selector);
+    const where = await ContactService.buildQueryWhere(projectId, selector);
     // A resumed job keeps the total it started with: the matches may have shrunk since (a
     // removal from the segment the list is filtered by takes contacts out of the filter).
     const total = resume ? result.totalRequested : await prisma.contact.count({where});

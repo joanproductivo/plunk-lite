@@ -3,6 +3,7 @@ import type {Job} from 'bullmq';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {createMockJob, factories, getPrismaClient} from '../../../../../test/helpers';
 import {QueueService} from '../../services/QueueService';
+import {SuppressionService} from '../../services/SuppressionService';
 import {processBulkContactAction} from '../bulk-contact-processor.js';
 
 describe('processBulkContactAction - static segments', () => {
@@ -213,5 +214,31 @@ describe('processBulkContactAction - static segments', () => {
 
     expect(result).toMatchObject({successCount: 1});
     expect(job.updateData).not.toHaveBeenCalled();
+  });
+
+  it('deletes only the suppressed contacts with that filter, minus the unticked, over several batches', async () => {
+    const suppressed = await factories.createContacts(projectId, 103, {subscribed: false});
+    const [kept] = await factories.createContacts(projectId, 1, {subscribed: false});
+    const unticked = suppressed[0]!;
+    await SuppressionService.record(
+      prisma,
+      projectId,
+      suppressed.map(contact => contact.email),
+      'BOUNCE',
+      null,
+    );
+
+    const result = await processBulkContactAction(
+      jobFor({
+        projectId,
+        operation: 'delete',
+        selector: {mode: 'query', filter: {status: 'suppressed'}, excludeIds: [unticked.id]},
+      }),
+    );
+
+    expect(result).toMatchObject({totalRequested: 102, successCount: 102, failureCount: 0});
+    expect((await prisma.contact.findMany({where: {projectId}})).map(c => c.id).sort()).toEqual(
+      [kept!.id, unticked.id].sort(),
+    );
   });
 });

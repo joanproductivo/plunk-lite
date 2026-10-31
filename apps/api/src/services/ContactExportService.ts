@@ -1,5 +1,5 @@
 import type {Prisma} from '@plunk/db';
-import type {BulkContactActionSelector, SegmentRef} from '@plunk/types';
+import type {BulkContactActionSelector, ContactSuppression, SegmentRef} from '@plunk/types';
 import {contactStatus} from '@plunk/types';
 
 import {prisma} from '../database/prisma.js';
@@ -7,6 +7,7 @@ import {csvRow} from '../utils/csv.js';
 import {ContactSegmentsService} from './ContactSegmentsService.js';
 import {ContactService} from './ContactService.js';
 import {OptInService} from './OptInService.js';
+import {SuppressionService} from './SuppressionService.js';
 
 /** Fixed columns, in order. Custom `data` fields follow them, sorted by key. */
 const FIXED_COLUMNS = ['email', 'subscribed', 'status', 'createdAt', 'updatedAt', 'segments', 'dynamicSegments'];
@@ -54,7 +55,7 @@ export class ContactExportService {
     const where: Prisma.ContactWhereInput =
       selector.mode === 'ids'
         ? {projectId, id: {in: selector.contactIds}}
-        : ContactService.buildQueryWhere(projectId, selector);
+        : await ContactService.buildQueryWhere(projectId, selector);
 
     const customKeys = await ContactService.getCustomFieldKeys(projectId);
     const fixed = new Set(FIXED_COLUMNS.map(column => column.toLowerCase()));
@@ -90,12 +91,20 @@ export class ContactExportService {
           const dynamicMatches = await ContactSegmentsService.dynamicSegmentsOf(projectId, ids, dynamicSegments);
           // Plunk Lite: the contacts still to confirm a sign-up read `pending` in the status column
           const pending = await OptInService.pendingAmong(projectId, ids);
+          const suppressed = await SuppressionService.suppressedAmong(
+            projectId,
+            contacts.map(contact => contact.email),
+          );
 
           let chunk = '';
           for (const contact of contacts) {
             chunk += csvRow(
               ContactExportService.rowFor(
-                {...contact, pendingConfirmation: pending.has(contact.id)},
+                {
+                  ...contact,
+                  pendingConfirmation: pending.has(contact.id),
+                  suppression: suppressed.get(ContactService.normalizeEmail(contact.email)),
+                },
                 customKeys,
                 staticSegments,
                 dynamicMatches,
@@ -116,7 +125,7 @@ export class ContactExportService {
   }
 
   private static rowFor(
-    contact: ExportedContact & {pendingConfirmation: boolean},
+    contact: ExportedContact & {pendingConfirmation: boolean; suppression?: ContactSuppression},
     customKeys: string[],
     staticSegments: Map<string, SegmentRef[]>,
     dynamicSegments: Map<string, SegmentRef[]>,
@@ -129,7 +138,13 @@ export class ContactExportService {
     return [
       contact.email,
       contact.subscribed,
-      contactStatus(contact),
+      // Plunk Lite: a suppressed address reads as what the import takes back onto the list, with
+      // its reason, whatever the `subscribed` cell says
+      contact.suppression
+        ? contact.suppression.reason === 'COMPLAINT'
+          ? 'complained'
+          : 'bounced'
+        : contactStatus(contact),
       contact.createdAt,
       contact.updatedAt,
       namesOf(staticSegments.get(contact.id)),

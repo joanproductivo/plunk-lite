@@ -2,6 +2,7 @@ import type {EventType} from '@aws-sdk/client-ses';
 import {SES} from '@aws-sdk/client-ses';
 import {SESv2} from '@aws-sdk/client-sesv2';
 import {STS} from '@aws-sdk/client-sts';
+import type {SuppressionLift} from '@plunk/types';
 import signale from 'signale';
 
 import {
@@ -39,6 +40,18 @@ const SES_CLIENT_CONFIG = {apiVersion: '2010-12-01', ...AWS_CLIENT_CONFIG};
  * shutdown timeout, so a send cut short by a deploy is settled before the process exits.
  */
 export const SES_HTTP_OPTIONS = {connectionTimeout: 5_000, requestTimeout: 15_000, throwOnRequestTimeout: true};
+
+const AWS_ACCESS_ERRORS = new Set(['AccessDenied', 'AccessDeniedException']);
+
+/**
+ * Whether AWS refused the call for lack of permission: by the error's name, or by a 403 that names
+ * nothing more precise (an invalid or expired key, a skewed clock, are 403s with names of their own)
+ */
+export function isAwsAccessError(error: unknown): boolean {
+  const name = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
+  const status = (error as {$metadata?: {httpStatusCode?: unknown}} | undefined)?.$metadata?.httpStatusCode;
+  return AWS_ACCESS_ERRORS.has(name) || (status === 403 && (name === '' || name === 'Error'));
+}
 
 /** Ceiling on a whole send, under the worker's shutdown timeout like the request timeout */
 const SEND_TIMEOUT_MS = 20_000;
@@ -554,7 +567,7 @@ export const verifyConfigurationSets = async (): Promise<string[] | undefined> =
         problems.push(
           `Configuration set "${name}" from ${envVar} does not exist in ${AWS_SES_REGION}: emails sent through it fail until it is created or ${envVar} is corrected.`,
         );
-      } else if (errorName === 'AccessDenied' || errorName === 'AccessDeniedException') {
+      } else if (isAwsAccessError(error)) {
         // Older IAM policies predate this check, so a missing permission is not a misconfiguration
         signale.info('[SES] Skipped configuration set check: grant ses:DescribeConfigurationSet to enable it');
         return undefined;
@@ -592,10 +605,43 @@ export async function getDailyQuotaQuick(): Promise<{max24HourSend: number; sent
 }
 
 /**
- * Plunk Lite: SES API v2, only to read the account's status. One attempt, like the send client: the
- * question is asked again soon enough.
+ * Plunk Lite: SES API v2, to read the account's status and remove an address from its suppression
+ * list. One attempt, like the send client: the status is asked again soon enough, and a removal is
+ * tried again by whoever asked for it.
  */
 const sesv2 = new SESv2({...AWS_CLIENT_CONFIG, maxAttempts: 1, requestHandler: SES_HTTP_OPTIONS});
+
+/**
+ * Plunk Lite: remove an address from the account's suppression list at SES. At most 2 seconds, and
+ * on 'unavailable' try again: SES may or may not have done it. 'not_allowed': the IAM policy lacks
+ * ses:DeleteSuppressedDestination. An address SES refuses as invalid cannot be on the list.
+ */
+export async function removeFromAccountSuppressionList(
+  email: string,
+): Promise<NonNullable<SuppressionLift['ses']> | 'unavailable'> {
+  try {
+    await sesv2.deleteSuppressedDestination({EmailAddress: email}, {abortSignal: AbortSignal.timeout(2000)});
+    return 'removed';
+  } catch (error) {
+    const name = error instanceof Error ? error.name : '';
+    const message = error instanceof Error ? error.message : String(error);
+    if (name === 'NotFoundException') {
+      return 'not_listed';
+    }
+    if (name === 'BadRequestException') {
+      signale.warn(`[SES] Refused removing ${email} from the suppression list: ${message}`);
+      return 'not_listed';
+    }
+    if (isAwsAccessError(error)) {
+      signale.warn(
+        `[SES] Could not remove ${email} from the suppression list (${name}): grant ses:DeleteSuppressedDestination`,
+      );
+      return 'not_allowed';
+    }
+    signale.warn(`[SES] Could not remove ${email} from the suppression list: ${message}`);
+    return 'unavailable';
+  }
+}
 
 /**
  * Plunk Lite: whether the account is paused, from GetAccount (SES API v2): 'paused' when SES has
