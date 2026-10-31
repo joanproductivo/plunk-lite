@@ -71,7 +71,7 @@ describe('renderBody', () => {
       expect(html).not.toContain('box-sizing');
     });
 
-    it('indents the quote and draws its bar, leaving out the quote marks, which cannot be inlined', () => {
+    it('draws the bar of the quote without indenting it, as the editor does, and leaves out the quote marks', () => {
       const html = renderBody('<blockquote><p>Quote</p></blockquote>');
       const style = html.match(/<div style="([^"]*font-style: italic[^"]*)"><p/)?.[1] ?? '';
 
@@ -81,8 +81,7 @@ describe('renderBody', () => {
 
       expect(style).toContain('font-style: italic');
       expect(style).toContain('border-left-style: solid');
-      // Explicit, as a <div> has no default indent
-      expect(style).toContain('margin-left: 40px');
+      expect(style).toContain('margin-left: 0');
       expect(style).not.toContain('quotes');
     });
 
