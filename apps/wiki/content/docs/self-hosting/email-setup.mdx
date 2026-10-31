@@ -27,7 +27,8 @@ description: Configure email delivery
         "ses:ListIdentities",
         "ses:SetIdentityFeedbackForwardingEnabled",
         "ses:DescribeConfigurationSet",
-        "ses:GetAccount"
+        "ses:GetAccount",
+        "ses:DeleteSuppressedDestination"
       ],
       "Resource": "*"
     }
@@ -36,6 +37,8 @@ description: Configure email delivery
 ```
 
 `ses:GetAccount` is for Plunk Lite: with it, the email queue asks SES whether the account is paused (its enforcement status) when an email is refused, instead of telling only from the refusals. Without it, everything else still works.
+
+`ses:DeleteSuppressedDestination` is for Plunk Lite too: **Remove suppression** on a contact's page also takes the address off the account's suppression list at SES. Without it, the page says so.
 
 ## 2. Create SNS Topic
 

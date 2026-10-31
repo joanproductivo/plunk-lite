@@ -1386,9 +1386,9 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": ["subscribed", "snoozed", "unsubscribed", "pending"]
+              "enum": ["subscribed", "snoozed", "unsubscribed", "pending", "suppressed"]
             },
-            "description": "Filter by status; wins over `subscribed`. `pending` (Plunk Lite) lists the contacts waiting to confirm a sign-up of the double opt-in, who are also `unsubscribed`. Every row carries `pendingConfirmation`."
+            "description": "Filter by status; wins over `subscribed`. `pending` (Plunk Lite) lists the contacts waiting to confirm a sign-up of the double opt-in, who are also `unsubscribed`. `suppressed` (Plunk Lite) lists the addresses on the project's suppression list, who are usually `unsubscribed` too. Every row carries `pendingConfirmation` and `suppression`."
           },
           {
             "name": "sort",
