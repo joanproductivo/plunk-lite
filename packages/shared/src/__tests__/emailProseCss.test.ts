@@ -18,6 +18,13 @@ describe('emailProseCss', () => {
     expect(css).toContain(`font-family: ${EMAIL_FONT_FAMILY};`);
   });
 
+  it('sets body text at 16px', () => {
+    const css = emailProseCss();
+
+    expect(rule(css, '.prose-base')).toContain('font-size: 16px;');
+    expect(rule(css, '.prose-base')).toContain('line-height: 1.6;');
+  });
+
   it('keeps the box-sizing reset and the quote marks in the preview', () => {
     const css = emailProseCss(BRAND_DEFAULTS, {preview: true});
 

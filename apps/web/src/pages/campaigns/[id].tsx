@@ -1470,7 +1470,7 @@ function CampaignDetails() {
                 <p className="text-sm font-medium text-neutral-700 mb-3">Message content</p>
                 <div className="border-2 border-neutral-200 rounded-lg overflow-hidden bg-white">
                   <div className="p-6 max-h-96 overflow-y-auto">
-                    <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{__html: DOMPurify.sanitize(c.body)}} />
+                    <div className="prose prose-base max-w-none" dangerouslySetInnerHTML={{__html: DOMPurify.sanitize(c.body)}} />
                   </div>
                 </div>
               </div>
