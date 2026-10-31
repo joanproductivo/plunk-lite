@@ -25,6 +25,18 @@ describe('emailProseCss', () => {
     expect(rule(css, '.prose-base')).toContain('line-height: 1.6;');
   });
 
+  it('spaces blocks as the editor does', () => {
+    const css = emailProseCss();
+
+    expect(rule(css, '.prose > :first-child:not(img):not(table)')).toContain('margin-top: 0;');
+    expect(rule(css, '.prose > :last-child:not(img):not(table)')).toContain('margin-bottom: 0;');
+    expect(rule(css, '.prose h2 + *, .prose h3 + *, .prose h4 + *, .prose hr:not(.email-spacer) + *')).toContain(
+      'margin-top: 0;',
+    );
+    expect(rule(css, '.prose blockquote')).toContain('margin-left: 0;');
+    expect(css).not.toContain('::before');
+  });
+
   it('keeps the box-sizing reset and the quote marks in the preview', () => {
     const css = emailProseCss(BRAND_DEFAULTS, {preview: true});
 

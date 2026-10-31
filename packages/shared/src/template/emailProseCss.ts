@@ -99,8 +99,8 @@ export function emailProseCss(brand: EmailBrand = BRAND_DEFAULTS, {preview = fal
   border-left-color: #e5e7eb;${preview ? '\n  quotes: "\\201C""\\201D""\\2018""\\2019";' : ''}
   margin-top: 1.6em;
   margin-bottom: 1.6em;
-  margin-left: 40px;
-  margin-right: 40px;
+  margin-left: 0;
+  margin-right: 0;
   padding-left: 1em;
 }
 .prose h1 {
@@ -151,12 +151,6 @@ export function emailProseCss(brand: EmailBrand = BRAND_DEFAULTS, {preview = fal
   font-weight: 600;
   font-size: 0.875em;
 }
-.prose code::before {
-  content: "\`";
-}
-.prose code::after {
-  content: "\`";
-}
 .prose pre {
   color: #e5e7eb;
   background-color: #1f2937;
@@ -181,12 +175,6 @@ export function emailProseCss(brand: EmailBrand = BRAND_DEFAULTS, {preview = fal
   font-size: inherit;
   font-family: inherit;
   line-height: inherit;
-}
-.prose pre code::before {
-  content: none;
-}
-.prose pre code::after {
-  content: none;
 }
 .prose table {
   width: 100%;
@@ -219,10 +207,6 @@ export function emailProseCss(brand: EmailBrand = BRAND_DEFAULTS, {preview = fal
 }
 .prose tbody td {
   vertical-align: top;
-  padding-top: 0.5714286em;
-  padding-right: 0.5714286em;
-  padding-bottom: 0.5714286em;
-  padding-left: 0.5714286em;
 }
 .prose p {
   margin-top: 1.25em;
@@ -273,6 +257,20 @@ export function emailProseCss(brand: EmailBrand = BRAND_DEFAULTS, {preview = fal
 .prose-base li {
   margin-top: 0.5em;
   margin-bottom: 0.5em;
+}
+
+/* What Tailwind Typography does in the editor. Images and tables keep their own margins there */
+.prose > :first-child:not(img):not(table) {
+  margin-top: 0;
+}
+.prose > :last-child:not(img):not(table) {
+  margin-bottom: 0;
+}
+.prose h2 + *, .prose h3 + *, .prose h4 + *, .prose hr:not(.email-spacer) + * {
+  margin-top: 0;
+}
+.prose li > ul:last-child, .prose li > ol:last-child {
+  margin-bottom: 0.75em;
 }
 
 /* max-w-none utility */

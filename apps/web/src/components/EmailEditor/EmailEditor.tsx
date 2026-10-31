@@ -841,6 +841,18 @@ export function EmailEditor({
           font-size: 13px;
         }
 
+        /* As sent: emails have no generated content, and code in a block takes the block's size */
+        .ProseMirror code::before,
+        .ProseMirror code::after,
+        .ProseMirror blockquote p::before,
+        .ProseMirror blockquote p::after {
+          content: none;
+        }
+        .ProseMirror pre code {
+          font-size: inherit;
+          line-height: inherit;
+        }
+
         .ProseMirror table {
           border-collapse: collapse;
           width: 100%;
