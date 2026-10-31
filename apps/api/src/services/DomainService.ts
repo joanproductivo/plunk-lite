@@ -2,6 +2,7 @@ import React from 'react';
 import signale from 'signale';
 import {getDomain} from 'tldts';
 import {DomainUnverifiedEmail, DomainVerifiedEmail, sendPlatformEmail} from '@plunk/email';
+import {UtilitySchemas} from '@plunk/shared';
 import {DASHBOARD_URI, LANDING_URI} from '../app/constants.js';
 import {prisma} from '../database/prisma.js';
 import {redis, wrapRedis} from '../database/redis.js';
@@ -348,13 +349,12 @@ export class DomainService {
    * @throws HttpException if domain not found, not owned by project, or not verified
    */
   public static async verifyEmailDomain(email: string, projectId: string) {
-    // Extract domain from email
-    const emailParts = email.split('@');
-    if (emailParts.length !== 2) {
+    if (!UtilitySchemas.email.shape.email.safeParse(email).success) {
       throw new HttpException(400, 'Invalid email format');
     }
 
-    const domainName = emailParts[1];
+    // Extract domain from email
+    const domainName = email.split('@')[1];
 
     // Find domain in database
     const domain = await prisma.domain.findFirst({
