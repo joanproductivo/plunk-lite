@@ -148,10 +148,12 @@ export function emailProseCss(brand: EmailBrand = BRAND_DEFAULTS, {preview = fal
 }
 .prose code {
   color: #111827;
-  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-weight: 400;
   font-size: 0.875em;
 }
 .prose pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace;
   color: #e5e7eb;
   background-color: #1f2937;
   overflow-x: auto;
