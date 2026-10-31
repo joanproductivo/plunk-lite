@@ -399,7 +399,7 @@ describe('renderBody', () => {
       expect(html).toContain('<table role="presentation" data-plunk-box="inset" width="100%"');
       expect(html).toContain('<td bgcolor="#111827"');
       expect(cellStyle(html)).toMatch(
-        /^background-color: #111827; color: #ffffff; padding: 16px; border-radius: 12px; font-family: ui-sans-serif.*; font-size: 0\.875rem; line-height: 1\.7142857;$/,
+        /^background-color: #111827; color: #ffffff; padding: 16px; border-radius: 12px; font-family: ui-sans-serif.*; font-size: 16px; line-height: 1\.6;$/,
       );
       expect(html).toMatch(/<p style="margin-top: 0; margin-bottom: 0;">Inside<\/p>/);
     });
@@ -665,8 +665,8 @@ describe('renderBody', () => {
         branded({font: 'book-serif', textColor: '#222222', headingColor: '#000000', linkColor: '#0a7c3e'}),
       );
 
-      expect(styleOf(html, 'div class="prose prose-sm max-w-none')).toContain('color: #222222;');
-      expect(styleOf(html, 'div class="prose prose-sm max-w-none')).toContain(
+      expect(styleOf(html, 'div class="prose prose-base max-w-none')).toContain('color: #222222;');
+      expect(styleOf(html, 'div class="prose prose-base max-w-none')).toContain(
         `font-family: ${EMAIL_FONTS['book-serif']}`,
       );
       expect(styleOf(html, 'h1')).toContain('color: #000000;');

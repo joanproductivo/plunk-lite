@@ -25,7 +25,7 @@ describe('EmailService.compile — aligned images from the visual editor', () =>
 
     const html = EmailService.compile({content: `<p>Hello</p>${image}`, contact, project, includeUnsubscribe: false});
 
-    expect(html).toMatch(/<div class="prose prose-sm max-w-none" style="[^"]*">/);
+    expect(html).toMatch(/<div class="prose prose-base max-w-none" style="[^"]*">/);
     expect(html).toMatch(new RegExp(`<p style="[^"]*text-align: ${align};"><img src="https://example.com/logo.png"`));
     expect(html).toMatch(new RegExp(`class="email-image" style="[^"]*display: block; ${margins}"`));
   });

@@ -35,7 +35,9 @@ export function brandOnChange(brand: EmailBrand | null, bodyBefore: string, proj
  */
 export function editorAttributes(look: EmailBrand): Record<string, string> {
   return {
-    class: 'prose prose-sm max-w-none focus:outline-none min-h-[400px] px-4 py-3',
+    // As emailProseCss sends it: Tailwind's prose-base with a tighter line height and a smaller h1
+    class:
+      'prose prose-base leading-[1.6] prose-h1:text-[1.875em] prose-h1:mb-[0.8em] prose-h1:leading-[1.2] max-w-none focus:outline-none min-h-[400px] px-4 py-3',
     style: [
       `--tw-prose-body: ${look.textColor}`,
       `--tw-prose-headings: ${look.headingColor}`,

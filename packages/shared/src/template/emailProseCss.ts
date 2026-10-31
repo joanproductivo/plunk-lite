@@ -229,50 +229,50 @@ export function emailProseCss(brand: EmailBrand = BRAND_DEFAULTS, {preview = fal
   margin-bottom: 1.25em;
 }
 
-/* prose-sm modifier */
-.prose-sm {
-  font-size: 0.875rem;
-  line-height: 1.7142857;
+/* Body text at 16px, the usual size for newsletters; the editor's classes match (useEmailBrand) */
+.prose-base {
+  font-size: 16px;
+  line-height: 1.6;
 }
-.prose-sm p {
-  margin-top: 1.1428571em;
-  margin-bottom: 1.1428571em;
+.prose-base p {
+  margin-top: 1.25em;
+  margin-bottom: 1.25em;
 }
-.prose-sm h1 {
-  font-size: 2.1428571em;
+.prose-base h1 {
+  font-size: 1.875em;
   margin-top: 0;
   margin-bottom: 0.8em;
   line-height: 1.2;
 }
-.prose-sm h2 {
-  font-size: 1.4285714em;
+.prose-base h2 {
+  font-size: 1.5em;
+  margin-top: 2em;
+  margin-bottom: 1em;
+  line-height: 1.3333333;
+}
+.prose-base h3 {
+  font-size: 1.25em;
   margin-top: 1.6em;
-  margin-bottom: 0.8em;
-  line-height: 1.4;
+  margin-bottom: 0.6em;
+  line-height: 1.6;
 }
-.prose-sm h3 {
-  font-size: 1.2857143em;
-  margin-top: 1.5555556em;
-  margin-bottom: 0.4444444em;
-  line-height: 1.5555556;
+.prose-base h4 {
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  line-height: 1.5;
 }
-.prose-sm h4 {
-  margin-top: 1.4285714em;
-  margin-bottom: 0.5714286em;
-  line-height: 1.4285714;
+.prose-base img {
+  margin-top: 2em;
+  margin-bottom: 2em;
 }
-.prose-sm img {
-  margin-top: 1.7142857em;
-  margin-bottom: 1.7142857em;
+.prose-base ol, .prose-base ul {
+  margin-top: 1.25em;
+  margin-bottom: 1.25em;
+  padding-left: 1.625em;
 }
-.prose-sm ol, .prose-sm ul {
-  margin-top: 1.1428571em;
-  margin-bottom: 1.1428571em;
-  padding-left: 1.5714286em;
-}
-.prose-sm li {
-  margin-top: 0.2857143em;
-  margin-bottom: 0.2857143em;
+.prose-base li {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
 }
 
 /* max-w-none utility */

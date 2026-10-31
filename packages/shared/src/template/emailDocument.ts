@@ -214,7 +214,7 @@ export function emailDocument(htmlBody: string, brand: EmailBrand = BRAND_DEFAUL
   if (!isFramedBrand(brand)) {
     return `${head}
 <body>
-  <div class="prose prose-sm max-w-none">
+  <div class="prose prose-base max-w-none">
     ${htmlBody}
   </div>
 </body>
@@ -233,7 +233,7 @@ export function emailDocument(htmlBody: string, brand: EmailBrand = BRAND_DEFAUL
           : ''
       }
         <div style="${width ? `max-width: ${width}px; ` : ''}margin: 0 auto; padding: ${EMAIL_COLUMN_PADDING}px; background-color: ${contentColor}; border-radius: ${EMAIL_COLUMN_RADIUS}px; text-align: left;">
-          <div class="prose prose-sm max-w-none">
+          <div class="prose prose-base max-w-none">
             ${htmlBody}
           </div>
           ${footerReadableOn(contentColor) ? EMAIL_FOOTER_SLOT : `<div style="background-color: #ffffff; padding: 8px 16px;">${EMAIL_FOOTER_SLOT}</div>`}
