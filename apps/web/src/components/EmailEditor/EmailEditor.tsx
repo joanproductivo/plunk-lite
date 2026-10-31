@@ -848,6 +848,11 @@ export function EmailEditor({
         .ProseMirror blockquote p::after {
           content: none;
         }
+        .ProseMirror code,
+        .ProseMirror pre {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace;
+          font-weight: 400;
+        }
         .ProseMirror pre code {
           font-size: inherit;
           line-height: inherit;

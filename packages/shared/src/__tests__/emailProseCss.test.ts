@@ -37,6 +37,14 @@ describe('emailProseCss', () => {
     expect(css).not.toContain('::before');
   });
 
+  it('sets the font of code itself, as Gmail does not show it monospaced otherwise', () => {
+    const css = emailProseCss();
+
+    expect(rule(css, '.prose code')).toContain('monospace;');
+    expect(rule(css, '.prose code')).toContain('font-weight: 400;');
+    expect(rule(css, '.prose pre')).toContain('monospace;');
+  });
+
   it('keeps the box-sizing reset and the quote marks in the preview', () => {
     const css = emailProseCss(BRAND_DEFAULTS, {preview: true});
 
