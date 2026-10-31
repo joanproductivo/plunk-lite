@@ -80,12 +80,20 @@ export class ContactService {
    *
    * The segment filter reads stored memberships, so it suits static segments; a dynamic
    * segment's stored members only exist when it tracks membership, and lag its rules.
+   *
+   * Plunk Lite: `suppressed` reads Plunk Lite's own table, which has no relation to query through,
+   * so it filters on the addresses listed. Under `AND`, as the search has the `email` key.
    */
-  public static buildFilterWhere(projectId: string, filter: ContactListFilter = {}): Prisma.ContactWhereInput {
+  public static async buildFilterWhere(
+    projectId: string,
+    filter: ContactListFilter = {},
+  ): Promise<Prisma.ContactWhereInput> {
     return {
       projectId,
       ...(filter.search ? {email: {contains: filter.search, mode: 'insensitive' as const}} : {}),
-      ...this.buildStatusWhere(filter.status, filter.subscribed),
+      ...(filter.status === 'suppressed'
+        ? {AND: [{email: {in: await SuppressionService.addressesOfContacts(projectId)}}]}
+        : this.buildStatusWhere(filter.status, filter.subscribed)),
       ...(filter.segmentId ? {segmentMemberships: {some: {segmentId: filter.segmentId, exitedAt: null}}} : {}),
     };
   }
@@ -94,19 +102,19 @@ export class ContactService {
    * Where-clause for a "select all matching" selector: the list filters, minus the rows the
    * user unticked.
    */
-  public static buildQueryWhere(
+  public static async buildQueryWhere(
     projectId: string,
     selector: Extract<BulkContactActionSelector, {mode: 'query'}>,
-  ): Prisma.ContactWhereInput {
+  ): Promise<Prisma.ContactWhereInput> {
     const excludeIds = selector.excludeIds ?? [];
     return {
-      ...this.buildFilterWhere(projectId, selector.filter),
+      ...(await this.buildFilterWhere(projectId, selector.filter)),
       ...(excludeIds.length > 0 ? {id: {notIn: excludeIds}} : {}),
     };
   }
 
   private static buildStatusWhere(
-    status?: ContactSubscriptionStatus,
+    status?: Exclude<ContactSubscriptionStatus, 'suppressed'>,
     subscribed?: boolean,
   ): Prisma.ContactWhereInput {
     switch (status) {
@@ -116,8 +124,11 @@ export class ContactService {
         return {subscribed: false, snoozedUntil: {not: null}};
       case 'unsubscribed':
         return {subscribed: false, snoozedUntil: null};
-      default:
+      case undefined:
         return subscribed !== undefined ? {subscribed} : {};
+      default:
+        // A job from another version, say: selecting everyone instead would reach a bulk delete
+        throw new HttpException(400, `Unknown contact status: ${String(status)}`, ErrorCode.BAD_REQUEST);
     }
   }
 
@@ -138,7 +149,7 @@ export class ContactService {
      */
     options?: Omit<ContactListFilter, 'search'> & {sort?: 'email' | 'createdAt'; dir?: 'asc' | 'desc'},
   ): Promise<CursorPaginatedResponse<Contact>> {
-    const where = this.buildFilterWhere(projectId, {
+    const where = await this.buildFilterWhere(projectId, {
       search,
       status: options?.status,
       subscribed: options?.subscribed,
@@ -789,7 +800,7 @@ export class ContactService {
           ErrorCode.ADDRESS_SUPPRESSED,
         );
       }
-      await SuppressionService.lift(current.projectId, current.email);
+      await SuppressionService.lift(current.projectId, current.email, {ses: 'own_bounce'});
     }
 
     // Plunk Lite: for the same reason, with the double opt-in on, the page subscribes directly only

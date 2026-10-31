@@ -97,6 +97,8 @@ const STATUS_OPTIONS: FacetedFilterOption[] = [
   {value: 'unsubscribed', label: 'Unsubscribed'},
   // Plunk Lite: signed up but has not clicked the confirmation link; also counted in Unsubscribed
   {value: 'pending', label: 'Pending confirmation'},
+  // Plunk Lite: bounced for good or reported spam, so nothing is sent; usually counted in Unsubscribed too
+  {value: 'suppressed', label: 'Suppressed'},
 ];
 
 // select + email + actions are locked-visible (see lockedColumnIds). `updatedAt`
@@ -169,7 +171,7 @@ export default function ContactsPage() {
     .filter(Boolean)
     .join('&');
 
-  const {data, mutate, isLoading} = useSWR<CursorPaginatedResponse<Contact>>(`/contacts?${listQuery}`, {
+  const {data, error, mutate, isLoading} = useSWR<CursorPaginatedResponse<Contact>>(`/contacts?${listQuery}`, {
     revalidateOnFocus: false,
   });
 
@@ -641,7 +643,19 @@ export default function ContactsPage() {
 
           {/* Contacts */}
           <div>
-            {isLoading && contacts.length === 0 ? (
+            {error && !data ? (
+              // No rows here would read as "none match"
+              <Card>
+                <CardContent className="flex flex-col items-center gap-4 py-12">
+                  <p className="text-center text-sm text-neutral-600">
+                    {error instanceof Error ? error.message : 'Couldn’t load the contacts.'}
+                  </p>
+                  <Button variant="outline" size="sm" onClick={() => void mutate()}>
+                    Try again
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : isLoading && contacts.length === 0 ? (
               <Card>
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-center py-12">

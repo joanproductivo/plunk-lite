@@ -1,8 +1,10 @@
 import type {ContactImportJobData} from '@plunk/types';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {createMockJob, factories, getPrismaClient} from '../../../../../test/helpers';
+import {ContactExportService} from '../../services/ContactExportService.js';
 import {CONTACT_FIELDS_MAX, ContactService} from '../../services/ContactService.js';
 import {SegmentService} from '../../services/SegmentService.js';
+import {SuppressionService} from '../../services/SuppressionService.js';
 import {coerceCustomValue, importCustomData, importFieldKey, parseImportCsv, splitImportRecord} from '../import-csv.js';
 import {dropFinishedCsv, processContactImport} from '../import-processor.js';
 import {importQueue, QueueService} from '../../services/QueueService.js';
@@ -451,6 +453,30 @@ describe('processContactImport', () => {
     expect((await contactNamed('cleaned@plunk.test')).subscribed).toBe(false);
     expect((await contactNamed('fine@plunk.test')).subscribed).toBe(true);
     expect(result.warnings).toContainEqual(expect.stringContaining('Bounced, cleaned or complained in 3 rows'));
+  });
+
+  it('takes back the suppressed addresses of an export, with their reason, into another project', async () => {
+    const {project: source} = await factories.createUserWithProject();
+    await factories.createContact({projectId: source.id, email: 'spam@plunk.test', subscribed: true});
+    await factories.createContact({projectId: source.id, email: 'gone@plunk.test', subscribed: false});
+    await SuppressionService.record(prisma, source.id, ['spam@plunk.test'], 'COMPLAINT', null);
+    await SuppressionService.record(prisma, source.id, ['gone@plunk.test'], 'BOUNCE', null);
+    const contactExport = await ContactExportService.prepare(source.id, {
+      mode: 'query',
+      filter: {status: 'suppressed'},
+    });
+    let csv = '';
+    for await (const chunk of contactExport.lines()) {
+      csv += chunk;
+    }
+
+    await runImport(csv);
+
+    const reasons = Object.fromEntries(
+      (await prisma.plunkLiteSuppression.findMany({where: {projectId}})).map(row => [row.email, row.reason]),
+    );
+    expect(reasons).toEqual({'spam@plunk.test': 'COMPLAINT', 'gone@plunk.test': 'BOUNCE'});
+    expect((await contactNamed('spam@plunk.test')).subscribed).toBe(false);
   });
 
   it('with the double opt-in on, subscribes new contacts and leaves unsubscribed ones so, saying why', async () => {

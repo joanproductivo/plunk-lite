@@ -37,16 +37,18 @@ export type SubscriptionChangeReason = 'bounce' | 'complaint' | 'snooze' | 'snoo
  *
  * Derived, not stored: `snoozed` is `subscribed = false` with a `snoozedUntil` set.
  * Storing it would mean a third state every send path had to learn about.
+ *
+ * Plunk Lite: `suppressed` is an address on the project's suppression list, read from Plunk Lite's
+ * own table. As a filter it overlaps the others: those contacts are usually `unsubscribed` too.
  */
-export const CONTACT_SUBSCRIPTION_STATUSES = ['subscribed', 'snoozed', 'unsubscribed'] as const;
+export const CONTACT_SUBSCRIPTION_STATUSES = ['subscribed', 'snoozed', 'unsubscribed', 'suppressed'] as const;
 
 export type ContactSubscriptionStatus = (typeof CONTACT_SUBSCRIPTION_STATUSES)[number];
 
 /**
  * The states a contact's subscription is shown in (Plunk Lite): `pending` is an unsubscribed
- * contact asked to confirm a sign-up who has not yet (see OptInService). It is derived from Plunk
- * Lite's own table, so it is not a filter of the shared contact queries; the contact list filters on
- * it with a query of its own.
+ * contact asked to confirm a sign-up who has not yet (see OptInService). It is not a filter of the
+ * shared contact queries: the contact list filters on it with a query of its own.
  */
 export type ContactDisplayStatus = ContactSubscriptionStatus | 'pending';
 
@@ -60,11 +62,18 @@ export type ContactDisplayStatus = ContactSubscriptionStatus | 'pending';
  * here rather than branching on the boolean.
  *
  * Plunk Lite: given `pendingConfirmation` (OptInService.pendingAmong), an unsubscribed contact still
- * to confirm a sign-up reads `pending`; a snooze reads first.
+ * to confirm a sign-up reads `pending`; a snooze reads first. Given `suppression`, a suppressed
+ * address reads `suppressed` before anything else, `subscribed` included: nothing is sent to it.
  */
 export function contactStatus(
-  contact: Pick<Contact, 'subscribed' | 'snoozedUntil'> & {pendingConfirmation?: boolean},
+  contact: Pick<Contact, 'subscribed' | 'snoozedUntil'> & {
+    pendingConfirmation?: boolean;
+    suppression?: {reason: SuppressionReason} | null;
+  },
 ): ContactDisplayStatus {
+  if (contact.suppression) {
+    return 'suppressed';
+  }
   if (contact.subscribed) {
     return 'subscribed';
   }
@@ -85,4 +94,14 @@ export type SuppressionReason = 'BOUNCE' | 'COMPLAINT';
 export interface ContactSuppression<TDate = Date> {
   reason: SuppressionReason;
   createdAt: TDate;
+}
+
+/**
+ * What removing a suppression did (Plunk Lite). `lifted` is false when the address was not on the
+ * project's list. `ses` says what became of it on the account's list at SES, when that was touched:
+ * `not_allowed` means the IAM policy lacks the permission, so SES may still block the address.
+ */
+export interface SuppressionLift {
+  lifted: boolean;
+  ses?: 'removed' | 'not_listed' | 'not_allowed';
 }

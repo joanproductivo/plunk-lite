@@ -1,14 +1,21 @@
 import type {Prisma} from '@plunk/db';
-import type {ContactSuppression, SuppressionReason} from '@plunk/types';
+import type {ContactSuppression, SuppressionLift, SuppressionReason} from '@plunk/types';
 import signale from 'signale';
 
 import {prisma} from '../database/prisma.js';
-import {ConflictError, ErrorCode} from '../exceptions/index.js';
+import {ConflictError, ErrorCode, HttpException} from '../exceptions/index.js';
 import {normalizeEmail} from '../utils/emailAddress.js';
+import {removeFromAccountSuppressionList} from './SESService.js';
 
 type Suppression = ContactSuppression;
 
 type Db = Prisma.TransactionClient | typeof prisma;
+
+/**
+ * Most addresses the contact list can filter on. They are bound one by one, next to up to 10,000
+ * `excludeIds` of a bulk action, and Postgres takes 32,767 parameters in a query.
+ */
+export const MAX_FILTERED_SUPPRESSIONS = 20_000;
 
 /**
  * A request to subscribe an address that is suppressed, made by someone who asked for exactly
@@ -95,6 +102,27 @@ export class SuppressionService {
     return {allowed, suppressed};
   }
 
+  /**
+   * The suppressed addresses that have a contact, which is all the contact list can show: the
+   * others would only use up parameters. Over MAX_FILTERED_SUPPRESSIONS, a 400.
+   */
+  public static async addressesOfContacts(projectId: string): Promise<string[]> {
+    const rows = await prisma.$queryRaw<{email: string}[]>`
+      SELECT s."email" FROM "plunk_lite_suppressions" s
+      JOIN "contacts" c ON c."projectId" = s."projectId" AND c."email" = s."email"
+      WHERE s."projectId" = ${projectId}
+      LIMIT ${MAX_FILTERED_SUPPRESSIONS + 1}`;
+
+    if (rows.length > MAX_FILTERED_SUPPRESSIONS) {
+      throw new HttpException(
+        400,
+        `This project has more than ${MAX_FILTERED_SUPPRESSIONS.toLocaleString('en')} suppressed contacts, too many to filter on.`,
+        ErrorCode.BAD_REQUEST,
+      );
+    }
+    return rows.map(row => row.email);
+  }
+
   public static async find(projectId: string, address: string): Promise<Suppression | null> {
     return (await this.suppressedAmong(projectId, [address])).get(normalizeEmail(address)) ?? null;
   }
@@ -119,12 +147,61 @@ export class SuppressionService {
     return false;
   }
 
-  /** Remove an address from the list, so it can be subscribed and emailed again */
-  public static async lift(projectId: string, address: string): Promise<boolean> {
-    const removed = await prisma.plunkLiteSuppression.deleteMany({where: {projectId, email: normalizeEmail(address)}});
-    if (removed.count > 0) {
-      signale.info(`[SUPPRESSION] Lifted the suppression of ${normalizeEmail(address)} in project ${projectId}`);
+  /**
+   * Remove an address from the list, so it can be subscribed and emailed again, and from the
+   * account's list at SES too: left there, the next email bounces without being attempted and that
+   * bounce puts the address back on this list. That list protects the whole account, so it is
+   * touched only for an address this project sent to, and:
+   * - `ses: 'any'`, for the contact page, where someone chose this knowing the reason;
+   * - `ses: 'own_bounce'`, for the public page, only after a bounce SES really attempted. SES does
+   *   not say why it blocks an address: its bounce for one already blocked is recorded here as a
+   *   bounce, and may well be a complaint, which one click from a forwarded email must not undo.
+   *
+   * SES goes first, as the contact page offers this only while the row exists: if SES does not
+   * answer the row stays, so it can be tried again. Without the IAM permission, the row goes anyway
+   * and the result says so; otherwise an installation without it could never lift one.
+   */
+  public static async lift(
+    projectId: string,
+    address: string,
+    {ses}: {ses: 'any' | 'own_bounce'},
+  ): Promise<SuppressionLift> {
+    const email = normalizeEmail(address);
+    const row = await prisma.plunkLiteSuppression.findUnique({
+      where: {projectId_email: {projectId, email}},
+      select: {reason: true, emailId: true},
+    });
+    if (!row) {
+      return {lifted: false};
     }
-    return removed.count > 0;
+
+    const touchesSes = ses === 'any' ? row.emailId !== null : await this.isAttemptedBounce(projectId, row);
+    const atSes = touchesSes ? await removeFromAccountSuppressionList(email) : undefined;
+    if (atSes === 'unavailable') {
+      throw new HttpException(503, 'SES did not answer. Try again.', ErrorCode.EXTERNAL_SERVICE_ERROR);
+    }
+
+    const removed = await prisma.plunkLiteSuppression.deleteMany({where: {projectId, email}});
+    if (removed.count > 0) {
+      signale.info(
+        `[SUPPRESSION] Lifted the suppression of ${email} in project ${projectId}${atSes ? ` (SES: ${atSes})` : ''}`,
+      );
+    }
+    return {lifted: removed.count > 0, ...(atSes && {ses: atSes})};
+  }
+
+  /** Whether a row comes from a bounce SES attempted: one already blocked records no `bouncedAt` */
+  private static async isAttemptedBounce(
+    projectId: string,
+    row: {reason: string; emailId: string | null},
+  ): Promise<boolean> {
+    if (row.reason !== 'BOUNCE' || !row.emailId) {
+      return false;
+    }
+    const email = await prisma.email.findFirst({
+      where: {id: row.emailId, projectId, bouncedAt: {not: null}},
+      select: {id: true},
+    });
+    return email !== null;
   }
 }

@@ -1,7 +1,7 @@
 import type {Contact} from '@plunk/db';
-import {type ContactDisplayStatus, contactStatus} from '@plunk/types';
+import {type ContactDisplayStatus, contactStatus, type ContactSuppression, type SuppressionReason} from '@plunk/types';
 import {Badge} from '@plunk/ui';
-import {Clock, MailCheck, MailQuestionMark, MailX} from 'lucide-react';
+import {Clock, MailCheck, MailQuestionMark, MailWarning, MailX} from 'lucide-react';
 import React from 'react';
 
 /**
@@ -31,16 +31,31 @@ const STATUS_LABEL: Record<ContactDisplayStatus, string> = {
   pending: 'Pending confirmation',
   snoozed: 'Snoozed',
   unsubscribed: 'Unsubscribed',
+  suppressed: 'Suppressed',
 };
 
-/** A contact as the list and its page read it: `pendingConfirmation` (Plunk Lite) from the API */
-type StatusContact = Pick<Contact, 'subscribed' | 'snoozedUntil'> & {pendingConfirmation?: boolean};
+/** A contact as the list and its page read it: `pendingConfirmation` and `suppression` (Plunk Lite) from the API */
+type StatusContact = Pick<Contact, 'subscribed' | 'snoozedUntil'> & {
+  pendingConfirmation?: boolean;
+  suppression?: ContactSuppression<string> | null;
+};
+
+/** Why an address is suppressed (Plunk Lite), in a few words */
+export function suppressionReasonLabel(reason: SuppressionReason): string {
+  return reason === 'COMPLAINT' ? 'spam complaint' : 'bounce';
+}
+
+/** A suppressed address's status, with why (Plunk Lite) */
+export function suppressedLabel(reason: SuppressionReason): string {
+  return `${STATUS_LABEL.suppressed} · ${suppressionReasonLabel(reason)}`;
+}
 
 /**
  * The status badge, shared by the table and card views of the contacts list so the two cannot
  * disagree. Snoozed takes a neutral fill rather than a red one: the contact is coming back, and
  * colouring it like a loss would misreport the list's health. A contact still to confirm a
- * sign-up (Plunk Lite) is amber: it asked to join and has not yet.
+ * sign-up (Plunk Lite) is amber: it asked to join and has not yet. A suppressed address (Plunk
+ * Lite) says why, which sets it apart from someone who just unsubscribed.
  */
 export function ContactStatusBadge({contact}: {contact: StatusContact}) {
   const status = contactStatus(contact);
@@ -61,10 +76,12 @@ export function ContactStatusBadge({contact}: {contact: StatusContact}) {
           ? `Resumes on ${formatSnoozedUntil(contact.snoozedUntil)}`
           : status === 'pending'
             ? 'Signed up, but has not yet clicked the link in the confirmation email'
-            : undefined
+            : contact.suppression
+              ? `Nothing is sent to this address since ${formatSnoozedUntil(contact.suppression.createdAt)}`
+              : undefined
       }
     >
-      {STATUS_LABEL[status]}
+      {contact.suppression ? suppressedLabel(contact.suppression.reason) : STATUS_LABEL[status]}
     </Badge>
   );
 }
@@ -72,6 +89,10 @@ export function ContactStatusBadge({contact}: {contact: StatusContact}) {
 /** The matching icon shown beside the email address. */
 export function ContactStatusIcon({contact}: {contact: StatusContact}) {
   const status = contactStatus(contact);
+
+  if (status === 'suppressed') {
+    return <MailWarning className="h-4 w-4 shrink-0 text-red-600" aria-hidden="true" />;
+  }
 
   if (status === 'subscribed') {
     return <MailCheck className="h-4 w-4 shrink-0 text-green-600" aria-hidden="true" />;

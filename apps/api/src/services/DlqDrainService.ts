@@ -18,7 +18,7 @@ import {
 } from './dlqConstants.js';
 import {FailureAlertService} from './FailureAlertService.js';
 import {parseSnsMessage, readSesNotification, sesTags} from './SesEventMatch.js';
-import {AWS_CLIENT_CONFIG, getAwsAccountId, SES_HTTP_OPTIONS} from './SESService.js';
+import {AWS_CLIENT_CONFIG, getAwsAccountId, isAwsAccessError, SES_HTTP_OPTIONS} from './SESService.js';
 import {SnsMessages} from './SnsMessages.js';
 
 /**
@@ -80,7 +80,6 @@ const COUNTED_EVENTS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const LOGGED_BODY_MAX = 2000;
 
 const MISSING_QUEUE_ERRORS = new Set(['QueueDoesNotExist', 'AWS.SimpleQueueService.NonExistentQueue']);
-const ACCESS_ERRORS = new Set(['AccessDenied', 'AccessDeniedException']);
 
 /** What a refusal is about: reading the queue's size, or reading and settling its messages */
 type Access = 'read' | 'drain';
@@ -142,16 +141,6 @@ function getQueueUrl(): Promise<string> {
 
 function errorName(error: unknown): string {
   return error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
-}
-
-/**
- * Whether AWS refused the call for lack of permission: by the error's name, or by a 403 that names
- * nothing more precise (an invalid or expired key, a skewed clock, are 403s with names of their own)
- */
-function isAccessError(error: unknown): boolean {
-  const name = errorName(error);
-  const status = (error as {$metadata?: {httpStatusCode?: unknown}} | undefined)?.$metadata?.httpStatusCode;
-  return ACCESS_ERRORS.has(name) || (status === 403 && (name === '' || name === 'Error'));
 }
 
 /** How long a message asked for again waits before it is read again, by how often it was read */
@@ -233,7 +222,7 @@ export class DlqDrainService {
     if (!('error' in counted)) {
       return true;
     }
-    return MISSING_QUEUE_ERRORS.has(errorName(counted.error)) || isAccessError(counted.error) ? false : undefined;
+    return MISSING_QUEUE_ERRORS.has(errorName(counted.error)) || isAwsAccessError(counted.error) ? false : undefined;
   }
 
   private static async query(): Promise<{visible: number; inFlight: number} | {error: unknown}> {
@@ -543,7 +532,7 @@ export class DlqDrainService {
       // Left as it is: it comes back when its visibility ends, and is handled again. Without the
       // permission to settle it, that is every time: shown like any other refusal.
       signale.warn(`[DLQ] Could not settle message ${message.MessageId} (${errorName(error) || 'error'}):`, error);
-      if (isAccessError(error)) {
+      if (isAwsAccessError(error)) {
         await this.reportAccess(error, 'drain');
         return 'refused';
       }
@@ -611,7 +600,7 @@ export class DlqDrainService {
       }
       return;
     }
-    if (!isAccessError(error)) {
+    if (!isAwsAccessError(error)) {
       signale.warn(`[DLQ] Could not reach ${DLQ_NAME}:`, error);
       return;
     }
