@@ -90,6 +90,7 @@ describe('slashItems', () => {
       'Bulleted list',
       'Numbered list',
       'Quote',
+      'Code block',
       'Button',
       'Image',
       'YouTube video',
@@ -184,6 +185,19 @@ describe('SlashCommand', () => {
     type('Hello ');
     await pick('quote');
     expect(editor.getHTML()).toBe('<blockquote><p>Hello </p></blockquote><p></p>');
+  });
+
+  it('turns the line into a code block, and is not offered inside one, a list or a quote', async () => {
+    createEditor('<p></p>');
+    type('Hello ');
+    await pick('code');
+    expect(editor.getHTML()).toBe('<pre><code>Hello </code></pre><p></p>');
+
+    createEditor('<ul><li><p>a</p></li></ul>');
+    expect(labels()).not.toContain('Code block');
+
+    createEditor('<blockquote><p>a</p></blockquote>');
+    expect(labels()).not.toContain('Code block');
   });
 
   it('brings the /query back on undo, however fast the row was picked', async () => {
