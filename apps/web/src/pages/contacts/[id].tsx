@@ -11,9 +11,15 @@ import {
   Switch,
 } from '@plunk/ui';
 import type {Contact} from '@plunk/db';
-import {contactStatus, type ContactSuppression, type OptInRequestInfo} from '@plunk/types';
+import {
+  contactStatus,
+  type ContactSuppression,
+  type OptInRequestInfo,
+  type SuppressionLift,
+  type SuppressionReason,
+} from '@plunk/types';
 import {AnimatePresence, motion} from 'framer-motion';
-import {ArrowLeft, Check, Copy, Database, ExternalLink, Save, Settings, Trash2} from 'lucide-react';
+import {ArrowLeft, Check, Copy, Database, ExternalLink, MailCheck, Save, Settings, Trash2} from 'lucide-react';
 import Link from 'next/link';
 import {NextSeo} from 'next-seo';
 import {useRouter} from 'next/router';
@@ -23,7 +29,7 @@ import {KeyValueEditor} from '../../components/KeyValueEditor';
 import {ActivityFeed} from '../../components/ActivityFeed';
 import {ContactSegmentsCard} from '../../components/contacts/ContactSegmentsCard';
 import {network} from '../../lib/network';
-import {formatSnoozedUntil} from '../../lib/contactStatus';
+import {formatSnoozedUntil, suppressedLabel, suppressionReasonLabel} from '../../lib/contactStatus';
 import {toast} from 'sonner';
 import useSWR, {useSWRConfig} from 'swr';
 import {ContactSchemas} from '@plunk/shared';
@@ -83,18 +89,25 @@ export default function ContactDetailPage() {
     }
   };
 
-  const [isLifting, setIsLifting] = useState(false);
+  const [showLiftDialog, setShowLiftDialog] = useState(false);
+  // Kept from when the dialog opened: its text must not change as it closes, once the row is gone
+  const [liftReason, setLiftReason] = useState<SuppressionReason>('BOUNCE');
 
   const handleLiftSuppression = async () => {
-    setIsLifting(true);
     try {
-      await network.fetch('DELETE', `/contacts/${id}/suppression`);
-      toast.success('Suppression removed. The contact can be subscribed again.');
+      const {lifted, ses} = await network.fetch<SuppressionLift>('DELETE', `/contacts/${id}/suppression`);
+      if (!lifted) {
+        toast.info('This suppression was already removed.');
+      } else if (ses === 'not_allowed') {
+        toast.warning(
+          'Removed here, but not at SES: its IAM policy lacks ses:DeleteSuppressedDestination. If SES still blocks this address, the next email suppresses it again.',
+        );
+      } else {
+        toast.success('Suppression removed. The contact can be subscribed again.');
+      }
       void mutate();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Couldn’t remove the suppression. Try again.');
-    } finally {
-      setIsLifting(false);
     }
   };
 
@@ -181,13 +194,15 @@ export default function ContactDetailPage() {
                             : 'bg-red-100 text-red-800'
                     }`}
                   >
-                    {status === 'snoozed'
-                      ? `Snoozed until ${formatSnoozedUntil(contact.snoozedUntil)}`
-                      : status === 'subscribed'
-                        ? 'Subscribed'
-                        : status === 'pending'
-                          ? 'Pending confirmation'
-                          : 'Unsubscribed'}
+                    {contact.suppression
+                      ? suppressedLabel(contact.suppression.reason)
+                      : status === 'snoozed'
+                        ? `Snoozed until ${formatSnoozedUntil(contact.snoozedUntil)}`
+                        : status === 'subscribed'
+                          ? 'Subscribed'
+                          : status === 'pending'
+                            ? 'Pending confirmation'
+                            : 'Unsubscribed'}
                   </span>
                 </p>
               </div>
@@ -225,16 +240,18 @@ export default function ContactDetailPage() {
                           Subscribed to emails
                         </Label>
                         <p className="text-xs text-neutral-500 mt-0.5">
-                          {subscribed
-                            ? 'Receives emails from campaigns and workflows'
-                            : status === 'snoozed'
-                              ? // Saying only "will not receive emails" would hide the fact that
-                                // this reverses itself, and that turning the switch on here is
-                                // what ends it early.
-                                `Snoozed — resumes automatically on ${formatSnoozedUntil(contact.snoozedUntil)}`
-                              : status === 'pending'
-                                ? 'Waiting for the contact to confirm its sign-up'
-                                : 'Will not receive emails'}
+                          {contact.suppression
+                            ? 'Nothing is sent to this address while it is suppressed'
+                            : subscribed
+                              ? 'Receives emails from campaigns and workflows'
+                              : status === 'snoozed'
+                                ? // Saying only "will not receive emails" would hide the fact that
+                                  // this reverses itself, and that turning the switch on here is
+                                  // what ends it early.
+                                  `Snoozed — resumes automatically on ${formatSnoozedUntil(contact.snoozedUntil)}`
+                                : status === 'pending'
+                                  ? 'Waiting for the contact to confirm its sign-up'
+                                  : 'Will not receive emails'}
                         </p>
                       </div>
                       <Switch id="subscribed" checked={subscribed} onCheckedChange={setSubscribed} />
@@ -244,22 +261,23 @@ export default function ContactDetailPage() {
                       // Without it, the switch above would just fail on save with no way out
                       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                         <p className="font-medium">
-                          Suppressed after a {contact.suppression.reason === 'COMPLAINT' ? 'spam complaint' : 'bounce'}{' '}
-                          on {dayjs(contact.suppression.createdAt).format('D MMM YYYY')}
+                          Suppressed after a {suppressionReasonLabel(contact.suppression.reason)} on{' '}
+                          {dayjs(contact.suppression.createdAt).format('D MMM YYYY')}
                         </p>
                         <p className="mt-1 text-xs text-amber-800">
                           Nothing is sent to this address, and it can’t be subscribed until the suppression is removed.
-                          SES may still block it on its own account suppression list.
+                          Removing it also takes the address off SES’s suppression list, shared by the whole account.
                         </p>
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
                           className="mt-3"
-                          disabled={isLifting}
-                          onClick={() => void handleLiftSuppression()}
+                          onClick={() => {
+                            setLiftReason(contact.suppression!.reason);
+                            setShowLiftDialog(true);
+                          }}
                         >
-                          {isLifting && <IconSpinner className="h-4 w-4" />}
                           Remove suppression
                         </Button>
                       </div>
@@ -560,6 +578,22 @@ export default function ContactDetailPage() {
             </div>
           </div>
         </div>
+
+        <ConfirmDialog
+          open={showLiftDialog}
+          onOpenChange={setShowLiftDialog}
+          onConfirm={handleLiftSuppression}
+          title={`Remove the suppression of ${contact.email}?`}
+          description={
+            liftReason === 'COMPLAINT'
+              ? 'This address reported your email as spam. Only remove this if they asked to hear from you again: more complaints harm the reputation of the whole account.'
+              : 'This address bounced for good. If it still doesn’t exist, the next email bounces again. SES blocks addresses for bounces and complaints alike: if you’re not sure why this one is blocked, leave it.'
+          }
+          confirmText="Remove suppression"
+          loadingText="Removing…"
+          variant={liftReason === 'COMPLAINT' ? 'destructive' : 'default'}
+          icon={MailCheck}
+        />
 
         <ConfirmDialog
           open={showDeleteDialog}
