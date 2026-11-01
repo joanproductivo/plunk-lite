@@ -146,7 +146,7 @@ jobs:
                 mc mb local/uploads --ignore-existing"
 
       - name: Run tests
-        # Three tests of Plunk's fail now and then (see the job's report for any retried)
+        # Some of Plunk's tests fail now and then (the job's report shows any that were retried)
         run: yarn test:run --retry=2
         env:
           NODE_ENV: test
@@ -214,7 +214,7 @@ jobs:
 
       - name: Run linter
         # What the image carries: the landing page and the wiki are not in Plunk Lite's
-        run: yarn lint --filter=api --filter=web --filter=mcp
+        run: yarn lint --filter=api --filter=web --filter=@plunk/mcp
 
       - name: Type check
-        run: yarn build --filter=api --filter=web --filter=mcp
+        run: yarn build --filter=api --filter=web --filter=@plunk/mcp
