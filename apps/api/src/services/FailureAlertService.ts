@@ -21,7 +21,8 @@ export interface FailureReport {
    * `security:check` (the reputation not being checked), `domain:<id>`, `sns:<what>` (the SES event
    * pipeline), `ses:<what>` (the SES account: its quota, a pause), `aws:alarm:<name>`,
    * `aws:alarm-subscription`, `aws:dlq`, `aws:dlq-unattributed` and `aws:dlq-access:<what>` (the drain of
-   * the dead-letter queue of SES events) and `redis:memory`. Each kind is in SOURCE_KINDS.
+   * the dead-letter queue of SES events), `delivery:campaign:<id>` (a campaign that delivered too
+   * little) and `redis:memory`. Each kind is in SOURCE_KINDS.
    */
   sourceKey: string;
   /** What the dashboard and the alert call the source, e.g. the workflow's name */
@@ -155,6 +156,11 @@ const SOURCE_KINDS: Record<string, SourceKind> = {
   'aws:dlq-access': {
     name: {en: label => label, es: () => 'No se puede leer la cola de AWS de eventos de SES'},
     path: () => SECURITY_PATH,
+  },
+  // A campaign that delivered too little after a day (CampaignDeliveryCheck); only on the banner
+  'delivery:campaign': {
+    name: {en: label => `Campaign "${label}" delivery`, es: label => `Entrega de la campaña «${label}»`},
+    path: id => `/campaigns/${encodeURIComponent(id)}`,
   },
   // The installation's Redis close to its maxmemory (RedisMemoryCheck)
   'redis': {name: {en: label => label, es: () => 'Redis se está quedando sin memoria'}, path: () => '/activity'},

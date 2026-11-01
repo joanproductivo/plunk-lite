@@ -24,6 +24,7 @@ import {buildEmailFieldsUpdate} from '../utils/modelUpdate.js';
 import {uuidv5} from '../utils/uuid.js';
 
 import {BillingLimitService} from './BillingLimitService.js';
+import {CampaignNotDelivered, NOT_DELIVERED_FILTER} from './CampaignNotDelivered.js';
 import {DomainService} from './DomainService.js';
 import {buildEmailHeaders, classifyEmail, withSourceEmail} from './EmailHeaderService.js';
 import {EmailService, POSSIBLY_SENT_NOTE} from './EmailService.js';
@@ -883,9 +884,9 @@ export class CampaignService {
    * over distinct rows scales up, and each write leaves a dead tuple on a table the
    * dashboard reads constantly. Redis INCR has neither problem.
    *
-   * `Campaign.sentCount` stays authoritative and is written once, by
-   * `reconcileStats` when the send finalizes; this key is only the live delta on
-   * top of it and is dropped at that point.
+   * `Campaign.sentCount` stays authoritative and is written by `reconcileStats` when
+   * the send finalizes (Plunk Lite: and again if its contacts are deleted later); this
+   * key is only the live delta on top of it and is dropped at that point.
    */
   private static readonly SENT_PROGRESS_TTL_SECONDS = 7 * 24 * 60 * 60;
 
@@ -930,7 +931,7 @@ export class CampaignService {
   /**
    * Note that a campaign's counters are behind its email rows.
    *
-   * Called from the SES event webhook, which runs once per recipient per event --
+   * Called from the SES event webhook (Plunk Lite: and when contacts are deleted), which runs once per recipient per event --
    * the same shape of load as the send path, and the reason `sentCount` is not a
    * column increment either. A campaign row updated on every delivery would
    * serialize thousands of writes on one row and leave a dead tuple behind each,
@@ -993,24 +994,31 @@ export class CampaignService {
    * Recompute a campaign's counters from the emails that carry them.
    *
    * This is the only path that writes them. It runs at finalization and then from
-   * the dirty-set sweep as events arrive -- never on read, which is what made the
+   * the dirty-set sweep as events arrive or contacts are deleted -- never on read, which is what made the
    * stats endpoint slow enough to notice.
    *
    * One grouped pass over the campaign's emails, so the cost is O(campaign size)
    * and paid once. `unsubscribedCount` is deliberately absent: it is written together
    * with `Email.unsubscribedAt`, in one statement, by
    * ContactService.recordCampaignUnsubscribe (the unsubscribe page, and in Plunk Lite the
-   * SES webhook), so it is already exact, and recounting it
+   * SES webhook; DeletedEmailCounts takes off those of deleted contacts), so it is already exact, and recounting it
    * here would also count rows the backfill stamped for opt-outs older than that write.
    *
    * `foldSentProgress` folds `sentCount` in as well and drops the Redis delta that
    * tracked it. Only the finalization caller may ask for that: while the send is
    * still running, the count of rows read here and the delta are moving
    * independently, so writing the total and deleting the key would drop every send
-   * that landed in between and walk the progress number backwards. Between sends
-   * the two agree, and the send path is the authority on `sentCount` regardless.
+   * that landed in between and walk the progress number backwards. Plunk Lite: once
+   * the send is over there is no delta, and a sent campaign follows its emails.
    */
   public static async reconcileStats(campaignId: string, {foldSentProgress = false} = {}): Promise<void> {
+    // Plunk Lite: read before the emails, so that only a send already over is followed. A send that
+    // finishes while this counts would have its right figure overwritten with an older count.
+    const wasSent =
+      !foldSentProgress &&
+      (await prisma.campaign.findUnique({where: {id: campaignId}, select: {status: true}}))?.status ===
+        CampaignStatus.SENT;
+
     const [totals] = await prisma.$queryRaw<
       {
         sent: bigint;
@@ -1052,6 +1060,14 @@ export class CampaignService {
     });
 
     if (!foldSentProgress) {
+      // Plunk Lite: deleting a contact deletes its emails, and a figure that kept them would have
+      // them as sent and never delivered. Only SENT: a cancelled campaign keeps its sent figure.
+      if (wasSent) {
+        await prisma.campaign.updateMany({
+          where: {id: campaignId, sentCount: {not: Number(totals.sent)}},
+          data: {sentCount: Number(totals.sent)},
+        });
+      }
       return;
     }
 
@@ -1396,7 +1412,8 @@ export class CampaignService {
    * Get campaign statistics.
    *
    * Reads the counters off the campaign row rather than recomputing them.
-   * `sentCount` is maintained by the send paths and `unsubscribedCount` by
+   * `sentCount` is maintained by the send paths (Plunk Lite: and follows the emails of a sent
+   * campaign, when contacts are deleted) and `unsubscribedCount` by
    * ContactService.recordCampaignUnsubscribe (the unsubscribe page, and in Plunk Lite
    * the SES webhook for the unsubscribe a bounce or complaint causes);
    * delivered/opened/clicked/bounced/complained are written by `reconcileStats`, which
@@ -1407,7 +1424,7 @@ export class CampaignService {
    * whole events table, since no index serves a predicate on Event.name alone. This
    * endpoint is polled every 15s while a campaign is sending, so it has to stay a
    * single indexed row lookup (Plunk Lite: plus the small `lostCount` count below,
-   * over the opt-outs alone).
+   * over the opt-outs alone, and the emails with no confirmed delivery once it has finished).
    *
    * Note what this means for a campaign that finalized before the counters were
    * written by anything: the row is authoritative, so a zero here is reported as a
@@ -1415,7 +1432,8 @@ export class CampaignService {
    * 20260824120000_backfill_campaign_engagement_counters migration repairs.
    *
    * `this.get` has already fetched the row, so the stats cost no further queries -- save one
-   * for `lostCount` (Plunk Lite), and only when it can differ from the plain sum.
+   * for `lostCount` (Plunk Lite), and only when it can differ from the plain sum, and one for
+   * the emails with no confirmed delivery, of a sent campaign only (CampaignNotDelivered).
    */
   public static async getStats(projectId: string, campaignId: string) {
     const campaign = await this.get(projectId, campaignId);
@@ -1456,6 +1474,11 @@ export class CampaignService {
         : 0;
     const lostCount = suppressedCount + unsubscribedCount - Math.min(both, suppressedCount, unsubscribedCount);
 
+    const {notDelivered, notSent} =
+      campaign.status === CampaignStatus.SENT
+        ? await CampaignNotDelivered.counts(campaignId)
+        : {notDelivered: 0, notSent: 0};
+
     return {
       totalRecipients,
       sentCount,
@@ -1466,6 +1489,8 @@ export class CampaignService {
       complainedCount,
       unsubscribedCount,
       lostCount,
+      notDeliveredCount: notDelivered,
+      notSentCount: notSent,
       openRate: sentCount > 0 ? (openedCount / sentCount) * 100 : 0,
       clickRate: sentCount > 0 ? (clickedCount / sentCount) * 100 : 0,
       bounceRate: sentCount > 0 ? (bouncedCount / sentCount) * 100 : 0,
@@ -1481,7 +1506,8 @@ export class CampaignService {
   }
 
   /**
-   * List the recipients a campaign lost to a bounce, a spam complaint or an opt-out.
+   * List the recipients a campaign lost to a bounce, a spam complaint or an opt-out, or
+   * (Plunk Lite) the emails with no confirmed delivery (CampaignNotDelivered).
    *
    * Bounces and complaints select on `status`, which is served by the existing (campaignId, status) index, so
    * finding a campaign's few thousand bounces never reads its million sent rows. That is
@@ -1503,7 +1529,8 @@ export class CampaignService {
    *
    * No COUNT(*): the total already lives on the campaign row, written by `reconcileStats`.
    * Recounting here would be the expensive half of the request and could only ever agree
-   * with the number already on the row.
+   * with the number already on the row. Plunk Lite: `not_delivered` has no counter, as Plunk's
+   * tables are not altered, so it counts the rows its index finds.
    */
   public static async listRecipients(
     projectId: string,
@@ -1514,16 +1541,18 @@ export class CampaignService {
     // Scopes the campaign to the caller's project and 404s otherwise, so the raw query
     // below can key on campaignId alone.
     const campaign = await this.get(projectId, campaignId);
+    const notDelivered = type === 'not_delivered' ? await CampaignNotDelivered.counts(campaignId) : null;
 
     const {column, filter, total} = {
       bounced: {
         column: Prisma.raw('"bouncedAt"'),
-        filter: Prisma.sql`e."status" = ${EmailStatus.BOUNCED}::"EmailStatus"`,
+        // Plunk Lite: an address on the SES suppression list leaves BOUNCED with no date, and no count
+        filter: Prisma.sql`e."status" = ${EmailStatus.BOUNCED}::"EmailStatus" AND e."bouncedAt" IS NOT NULL`,
         total: campaign.bouncedCount,
       },
       complained: {
         column: Prisma.raw('"complainedAt"'),
-        filter: Prisma.sql`e."status" = ${EmailStatus.COMPLAINED}::"EmailStatus"`,
+        filter: Prisma.sql`e."status" = ${EmailStatus.COMPLAINED}::"EmailStatus" AND e."complainedAt" IS NOT NULL`,
         total: campaign.complainedCount,
       },
       unsubscribed: {
@@ -1532,6 +1561,11 @@ export class CampaignService {
         // will not use it.
         filter: Prisma.sql`e."unsubscribedAt" IS NOT NULL`,
         total: campaign.unsubscribedCount,
+      },
+      not_delivered: {
+        column: Prisma.raw('"createdAt"'),
+        filter: NOT_DELIVERED_FILTER,
+        total: notDelivered ? notDelivered.notDelivered + notDelivered.notSent : 0,
       },
     }[type];
 
@@ -1557,6 +1591,7 @@ export class CampaignService {
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
     const last = page[page.length - 1];
+    const delivery = notDelivered ? await CampaignNotDelivered.details(page.map(row => row.id)) : null;
 
     return {
       data: page.map(row => ({
@@ -1564,6 +1599,7 @@ export class CampaignService {
         contactId: row.contactId,
         email: row.email,
         occurredAt: row.occurredAt.toISOString(),
+        ...(delivery?.has(row.id) && {delivery: delivery.get(row.id)}),
       })),
       cursor: hasMore && last ? this.encodeRecipientCursor(last.occurredAt, last.id) : undefined,
       hasMore,
