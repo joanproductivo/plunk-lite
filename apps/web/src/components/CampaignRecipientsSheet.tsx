@@ -30,8 +30,7 @@ const COPY: Record<CampaignRecipientType, {title: string; empty: string; describ
   not_delivered: {
     title: 'Not delivered',
     empty: 'Every email of this campaign was delivered, or is in another list.',
-    describe: total =>
-      `${total.toLocaleString()} ${total === 1 ? 'email has' : 'emails have'} no confirmed delivery.`,
+    describe: total => `${total.toLocaleString()} ${total === 1 ? 'email has' : 'emails have'} no confirmed delivery.`,
   },
 };
 
@@ -177,15 +176,15 @@ function RecipientList({campaignId, type}: {campaignId: string; type: CampaignRe
 
         {/*
           The figure counts recipients this campaign lost; the list reads the emails that
-          carry them. Those can disagree, because deleting a contact takes their email rows
-          away and the counter follows at the next sweep (or, for what was deleted before
-          that mark existed, at the campaign's next event). Saying so is the only honest option: an empty panel under a
+          carry them. Those can disagree: deleting a contact takes their email rows away and
+          the counter only follows at the next sweep, or never for an opt-out deleted before
+          that was kept in step. A few rows are also in no list. Saying so is the only honest option: an empty panel under a
           header promising 209 addresses reads as a broken screen.
         */}
         {!error && !isFirstLoad && isMissingRows && (
           <p className="p-6 text-sm text-neutral-500">
-            These contacts have since been deleted from the project, so there is nobody left
-            to list. The figure counts them until its next recount.
+            There is nobody left to list: these contacts may have been deleted from the project
+            since. The figure can still count them.
           </p>
         )}
 

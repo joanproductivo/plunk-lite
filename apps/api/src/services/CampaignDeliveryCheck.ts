@@ -4,6 +4,7 @@ import signale from 'signale';
 
 import {prisma} from '../database/prisma.js';
 import {redis} from '../database/redis.js';
+import {utcTimestamp} from '../utils/database.js';
 
 import {FailureAlertService} from './FailureAlertService.js';
 
@@ -26,7 +27,9 @@ const ARRIVED = Prisma.sql`(e."deliveredAt" IS NOT NULL OR e."openedAt" IS NOT N
  *
  * Counted from the emails, so as not to depend on the counters' sweep, and without the SES mailbox
  * simulator, as the rates leave it out too. A permanent bounce counts as not delivered here, though
- * it has its own list: what this watches is how much of the campaign arrived.
+ * it has its own list: what this watches is how much of the campaign arrived. Only emails sent over
+ * 24 hours ago count, as a send can take long enough for the rest to be on their way still: until
+ * those are in, a campaign that looks fine is judged again.
  */
 export const CampaignDeliveryCheck = {
   async run(): Promise<void> {
@@ -54,37 +57,43 @@ export const CampaignDeliveryCheck = {
       return;
     }
 
-    const [counts] = await prisma.$queryRaw<{sent: number; delivered: number}[]>`
-      SELECT count(*)::int AS "sent", (count(*) FILTER (WHERE ${ARRIVED}))::int AS "delivered"
+    const settledBefore = new Date(Date.now() - NOT_DELIVERED_AFTER_MS);
+    const settled = Prisma.sql`e."sentAt" <= ${utcTimestamp(settledBefore)}`;
+    const [counts] = await prisma.$queryRaw<{sent: number; delivered: number; recent: number}[]>`
+      SELECT (count(*) FILTER (WHERE ${settled}))::int AS "sent",
+             (count(*) FILTER (WHERE ${settled} AND ${ARRIVED}))::int AS "delivered",
+             (count(*) FILTER (WHERE NOT (${settled})))::int AS "recent"
       FROM "emails" e
       WHERE e."campaignId" = ${campaign.id}::text AND e."sentAt" IS NOT NULL AND e."simulated" = false`;
-    const {sent, delivered} = counts ?? {sent: 0, delivered: 0};
+    const {sent, delivered, recent} = counts ?? {sent: 0, delivered: 0, recent: 0};
     const missing = sent - delivered;
 
     if (delivered * 100 < MIN_DELIVERY_RATE * sent && missing >= MIN_NOT_DELIVERED) {
       const sourceKey = `delivery:campaign:${campaign.id}`;
       await FailureAlertService.record(
         campaign.projectId,
-        {sourceKey, label: campaign.name, error: await this.describe(campaign.id, delivered, sent)},
+        {sourceKey, label: campaign.name, error: await this.describe(campaign.id, delivered, sent, settledBefore)},
         {alert: false},
       );
       // `record` never throws: without its row, this is judged again rather than lost
       if ((await prisma.plunkLiteFailure.count({where: {projectId: campaign.projectId, sourceKey}})) === 0) {
         throw new Error('The delivery warning could not be recorded');
       }
+    } else if (recent > 0) {
+      return;
     }
 
     await redis.set(CHECKED_KEY(campaign.id), '1', 'EX', CHECKED_SECONDS);
   },
 
   /** What the banner says, its first 140 characters being what it shows */
-  async describe(campaignId: string, delivered: number, sent: number): Promise<string> {
+  async describe(campaignId: string, delivered: number, sent: number, settledBefore: Date): Promise<string> {
     const missing = sent - delivered;
     const domains = await prisma.$queryRaw<{domain: string; count: number}[]>`
       SELECT lower(split_part(c."email", '@', 2)) AS "domain", count(*)::int AS "count"
       FROM "emails" e
       JOIN "contacts" c ON c."id" = e."contactId"
-      WHERE e."campaignId" = ${campaignId}::text AND e."sentAt" IS NOT NULL AND e."simulated" = false
+      WHERE e."campaignId" = ${campaignId}::text AND e."sentAt" <= ${utcTimestamp(settledBefore)} AND e."simulated" = false
         AND NOT ${ARRIVED}
       GROUP BY 1
       ORDER BY 2 DESC, 1

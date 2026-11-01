@@ -88,7 +88,7 @@ On the campaign page, click any of the three figures to see the contacts behind 
 
 Bounces and complaints flip the contact to unsubscribed as well. When the contact was subscribed (or snoozed), that unsubscribe counts in `unsubscribedCount` too, so the same recipient can appear under a bounce or complaint and under the unsubscribes. Use `lostCount`, not the sum of the three, for how many recipients the campaign lost.
 
-Two more figures count the emails in none of those lists, once the send has finished:
+Two more figures count the emails that are not in the bounce or spam lists, once the send has finished. A recipient in them can also be among the unsubscribes:
 
 | Field | Means |
 | ----- | ----- |
@@ -97,7 +97,7 @@ Two more figures count the emails in none of those lists, once the send has fini
 
 The line under the figures opens the list of them, with the reason for each. If a campaign delivered less than 95% a day after it was sent, with at least 5 emails missing, the dashboard shows a banner with the providers most affected.
 
-Deleting a contact deletes their emails, so `sentCount` and the figures read from the emails go down at the next sweep, and `unsubscribedCount` goes down at once. The project's reputation rates keep counting those emails.
+Deleting a contact deletes their emails, so `sentCount` and the figures read from the emails go down at the next sweep, and `unsubscribedCount` goes down at once. On a cancelled campaign `sentCount` stays as it was, so its rates can fall. The project's reputation rates keep counting those emails.
 
 `unsubscribedCount` also excludes opt-outs it cannot attribute: a dashboard toggle, a CSV import, `PATCH /contacts/:id`, or a link from mail sent before the parameter existed belongs to no campaign, so it is counted against none. See [Unsubscribe pages](/guides/unsubscribe-pages#knowing-which-email-caused-it).
 

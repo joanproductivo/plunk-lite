@@ -1061,7 +1061,7 @@ export class CampaignService {
 
     if (!foldSentProgress) {
       // Plunk Lite: deleting a contact deletes its emails, and a figure that kept them would have
-      // them as sent and never delivered. Only SENT: a cancelled campaign keeps what it shows.
+      // them as sent and never delivered. Only SENT: a cancelled campaign keeps its sent figure.
       if (wasSent) {
         await prisma.campaign.updateMany({
           where: {id: campaignId, sentCount: {not: Number(totals.sent)}},

@@ -33,13 +33,14 @@ describe('CampaignDeliveryCheck', () => {
   });
 
   async function campaignOf(
-    recipients: {delivered?: number; missing?: Record<string, number>; simulated?: number},
+    recipients: {delivered?: number; missing?: Record<string, number>; simulated?: number; recent?: number},
     {hoursAgo = 25, status = 'SENT' as const}: {hoursAgo?: number; status?: 'SENT' | 'SENDING'} = {},
   ) {
     const campaign = await factories.createCampaign({projectId, name: 'Big send', status});
-    await prisma.campaign.update({where: {id: campaign.id}, data: {sentAt: new Date(Date.now() - hoursAgo * HOUR)}});
+    const sentAt = new Date(Date.now() - hoursAgo * HOUR);
+    await prisma.campaign.update({where: {id: campaign.id}, data: {sentAt}});
 
-    const emailTo = async (address: string, data: {deliveredAt?: Date; simulated?: boolean}) => {
+    const emailTo = async (address: string, data: {deliveredAt?: Date; simulated?: boolean; sentAt?: Date}) => {
       const contact = await factories.createContact({projectId, email: address});
       await prisma.email.create({
         data: {
@@ -51,7 +52,7 @@ describe('CampaignDeliveryCheck', () => {
           from: 'hello@example.com',
           sourceType: 'CAMPAIGN',
           status: data.deliveredAt ? 'DELIVERED' : 'SENT',
-          sentAt: new Date(),
+          sentAt,
           ...data,
         },
       });
@@ -64,6 +65,9 @@ describe('CampaignDeliveryCheck', () => {
       for (let i = 0; i < count; i++) {
         await emailTo(`${campaign.id}-m${i}@${domain}`, {});
       }
+    }
+    for (let i = 0; i < (recipients.recent ?? 0); i++) {
+      await emailTo(`${campaign.id}-r${i}@gmail.com`, {sentAt: new Date()});
     }
     for (let i = 0; i < (recipients.simulated ?? 0); i++) {
       await emailTo(`${campaign.id}-s${i}@simulator.amazonses.com`, {simulated: true});
@@ -103,7 +107,7 @@ describe('CampaignDeliveryCheck', () => {
 
   it('does not round a rate up to the threshold', async () => {
     const shown = (delivered: number, sent: number) =>
-      CampaignDeliveryCheck.describe('no-such-campaign', delivered, sent);
+      CampaignDeliveryCheck.describe('no-such-campaign', delivered, sent, new Date());
 
     expect(await shown(9496, 10000)).toContain('Only 94.9% delivered');
     // In floating point, 1884 / 2000 * 100 is just under 94.2
@@ -169,6 +173,47 @@ describe('CampaignDeliveryCheck', () => {
 
     const [warning] = await warnings();
     expect(warning?.lastError).toBe('Only 50.0% delivered after 24 h: 5 of 10 not. gmail.com 5.');
+  });
+
+  // A send held back by the quota can outlast its first day: those emails are still on their way
+  it('does not judge the emails of a long send that were sent in the last 24 hours', async () => {
+    const campaign = await campaignOf({delivered: 10, recent: 20});
+
+    await CampaignDeliveryCheck.run();
+
+    expect(await warnings()).toHaveLength(0);
+    expect(await redis.get(`plunk-lite:campaign-delivery-checked:${campaign.id}`)).toBeNull();
+  });
+
+  it('judges a long send again once its last emails have had their 24 hours', async () => {
+    const campaign = await campaignOf({delivered: 10, recent: 20});
+    await CampaignDeliveryCheck.run();
+
+    await prisma.email.updateMany({
+      where: {campaignId: campaign.id, deliveredAt: null},
+      data: {sentAt: new Date(Date.now() - 25 * HOUR)},
+    });
+    await CampaignDeliveryCheck.run();
+
+    const [warning] = await warnings();
+    expect(warning?.lastError).toBe('Only 33.3% delivered after 24 h: 20 of 30 not. gmail.com 20.');
+  });
+
+  it('leaves the delivery of a long send out of the providers until it counts', async () => {
+    await campaignOf({delivered: 5, missing: {'yahoo.es': 5}, recent: 3});
+
+    await CampaignDeliveryCheck.run();
+
+    const [warning] = await warnings();
+    expect(warning?.lastError).toBe('Only 50.0% delivered after 24 h: 5 of 10 not. yahoo.es 5.');
+  });
+
+  it('marks a long send with a settled warning as judged', async () => {
+    const campaign = await campaignOf({delivered: 5, missing: {'yahoo.es': 5}, recent: 3});
+
+    await CampaignDeliveryCheck.run();
+
+    expect(await redis.get(`plunk-lite:campaign-delivery-checked:${campaign.id}`)).toBe('1');
   });
 
   it('leaves out the SES mailbox simulator', async () => {
