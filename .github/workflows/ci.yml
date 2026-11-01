@@ -151,7 +151,8 @@ jobs:
         shell: bash
         run: |
           yarn test:run --retry=2 --reporter=verbose | tee test-output.log
-          if grep -F '(retry x' test-output.log > retried.log; then
+          # Vitest colours its output here too
+          if sed 's/\x1b\[[0-9;]*m//g' test-output.log | grep -F '(retry x' > retried.log; then
             echo "::warning::$(wc -l < retried.log) tests only passed on a retry: see the job summary"
             {
               echo '### Tests that only passed on a retry'
