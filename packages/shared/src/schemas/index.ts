@@ -786,13 +786,14 @@ export const ALERT_RECIPIENTS_MAX = 10;
 /** How many failing sources the dashboard reads at once, and so can mark reviewed (Plunk Lite) */
 export const FAILURE_ALERTS_OPEN_MAX = 20;
 
-const NOTICE_KINDS = ['project', 'brake', 'security', 'domain', 'sns', 'ses', 'aws', 'redis'];
+const NOTICE_KINDS = ['project', 'brake', 'security', 'domain', 'sns', 'ses', 'aws', 'redis', 'delivery'];
 
 /**
  * Alert sources that report a condition rather than a failure, by the kind their key starts with:
  * the project disabled, a campaign or workflow stopped for its bounces, sending reputation, domains,
  * the SES event pipeline, the SES account itself (a sending quota, a pause), the AWS account's
- * alarms and the installation's Redis running out of memory (Plunk Lite)
+ * alarms, the installation's Redis running out of memory and a campaign that delivered too little
+ * (Plunk Lite)
  */
 export const isFailureNotice = (sourceKey: string) => NOTICE_KINDS.includes(sourceKey.split(':')[0]!);
 

@@ -1,14 +1,15 @@
 /**
  * Plunk Lite's checks worker: the reputation check after bounces and complaints, every 15 minutes
  * the check that SES events reach the webhook (and of the dead-letter queue SNS leaves the ones it
- * could not deliver in) and the one of Redis's memory, and every 5 minutes the sweep of workflow
- * runs nothing would move on any more
+ * could not deliver in), of the campaigns that delivered too little and of Redis's memory, and every
+ * 5 minutes the sweep of workflow runs nothing would move on any more
  */
 
 import type {PlunkLiteChecksJobData, SecurityCheckJobData} from '@plunk/types';
 import {type Job, Worker} from 'bullmq';
 import signale from 'signale';
 
+import {CampaignDeliveryCheck} from '../services/CampaignDeliveryCheck.js';
 import {DlqDrainService} from '../services/DlqDrainService.js';
 import {plunkLiteChecksQueue, QueueService} from '../services/QueueService.js';
 import {checkRedisMemory} from '../services/RedisMemoryCheck.js';
@@ -29,6 +30,13 @@ export async function processPlunkLiteCheck(job: Job<PlunkLiteChecksJobData>): P
         }
       } catch (error) {
         signale.error('[PLUNK-LITE-CHECKS] Could not queue the drain of the dead-letter queue:', error);
+      }
+      // Here and not in a job of its own: a repeatable job outlives a rollback, and the worker of the
+      // image before would fail it every time. Before the next check, which can throw.
+      try {
+        await CampaignDeliveryCheck.run();
+      } catch (error) {
+        signale.error('[PLUNK-LITE-CHECKS] Could not check the delivery of the campaigns:', error);
       }
       return checkEventPipeline();
     case 'redis-memory':
