@@ -27,7 +27,7 @@ export default function Subscribe() {
 
   if (state.status === 'loading') {
     return (
-      <RecipientShell page="subscribe" loading>
+      <RecipientShell loading>
         <LoadingCard />
       </RecipientShell>
     );
@@ -35,7 +35,7 @@ export default function Subscribe() {
 
   if (state.status === 'error') {
     return (
-      <RecipientShell page="subscribe" translator={state.translator}>
+      <RecipientShell>
         <ErrorCard translator={state.translator} message={state.message} />
       </RecipientShell>
     );
@@ -71,7 +71,7 @@ export default function Subscribe() {
   // Plunk Lite: with the double opt-in on, the address confirms from the email just sent to it
   if (contact.pendingConfirmation) {
     return (
-      <RecipientShell page="subscribe" translator={translator}>
+      <RecipientShell>
         <ResultState icon={MailCheck} title={translator.t('pages.subscribe.pendingTitle')}>
           <RichText
             template={translator.t('pages.subscribe.pendingDescription')}
@@ -84,7 +84,7 @@ export default function Subscribe() {
 
   if (contact.subscribed) {
     return (
-      <RecipientShell page="subscribe" translator={translator}>
+      <RecipientShell>
         <ResultState icon={Check} title={translator.t('pages.subscribe.successTitle')}>
           <RichText template={translator.t('pages.subscribe.successDescription')} values={{projectName: contact.projectName, email: contact.email}} />
         </ResultState>
@@ -93,7 +93,7 @@ export default function Subscribe() {
   }
 
   return (
-    <RecipientShell page="subscribe" translator={translator}>
+    <RecipientShell>
       <div className="flex flex-col gap-6 p-6 sm:p-8">
         <CardIntro title={translator.t('pages.subscribe.title')}>
           <RichText template={translator.t('pages.subscribe.description')} values={{projectName: contact.projectName, email: contact.email}} />

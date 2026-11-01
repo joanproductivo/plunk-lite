@@ -52,6 +52,8 @@ describe('the confirmation page', () => {
     expect(network.fetch).toHaveBeenCalledWith('POST', '/optin/describe', {token: 'the-token'});
     expect(container.textContent).toContain('Confirma tu suscripción');
     expect(container.textContent).toContain('ana@example.com');
+    // Recipients only see the sender, never who provides the mail
+    expect(container.textContent).not.toContain('Plunk');
 
     await act(async () => button()!.click());
 
