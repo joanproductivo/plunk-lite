@@ -1,68 +1,63 @@
-![card.png](https://www.useplunk.com/api/og?title=Open-Source%0AEmail%20Platform&description=%240.001+per+email.+No+contact+limits.+Free+to+self-host.)
-
-<h1 align="center">Plunk</h1>
+<h1 align="center">Plunk Lite</h1>
 
 <p align="center">
-    The Open-Source Email Platform
+    A lighter, self-hosted email platform, built on <a href="https://github.com/useplunk/plunk">Plunk</a>
 </p>
 
-<p align="center">
-    <a href="https://github.com/useplunk/plunk/graphs/contributors"><img src="https://img.shields.io/github/contributors/useplunk/plunk" alt="Contributors"/></a>
-    <a href="https://github.com/useplunk/plunk/actions"><img src="https://img.shields.io/github/actions/workflow/status/useplunk/plunk/docker-publish.yml" alt="Build Status"/></a>
-    <a href="https://github.com/useplunk/plunk/blob/next/LICENSE"><img src="https://img.shields.io/github/license/useplunk/plunk" alt="License"/></a>
-    <a href="https://github.com/useplunk/plunk/stargazers"><img src="https://img.shields.io/github/stars/useplunk/plunk" alt="Stars"/></a>
-    <a href="https://github.com/useplunk/plunk/issues"><img src="https://img.shields.io/github/issues/useplunk/plunk" alt="Issues"/></a>
-    <a href="https://github.com/useplunk/plunk/network/members"><img src="https://img.shields.io/github/forks/useplunk/plunk" alt="Forks"/></a>
-    <a href="https://github.com/useplunk/plunk/pkgs/container/plunk"><img src="https://img.shields.io/badge/docker-available-blue?logo=docker" alt="Docker"/></a>
-    <a href="https://github.com/sponsors/driaug"><img src="https://img.shields.io/badge/sponsor-❤-ff69b4" alt="Sponsor"/></a>
-    <a href="https://docs.useplunk.com"><img src="https://img.shields.io/badge/docs-docs.useplunk.com-black" alt="Documentation"/></a>
-    <a href="https://useplunk.com/discord"><img src="https://img.shields.io/badge/discord-join-5865F2?logo=discord&logoColor=white" alt="Discord"/></a>
-</p>
+## About this project
 
-## Introduction
+Plunk Lite is an **unofficial, independently versioned fork** of [Plunk](https://github.com/useplunk/plunk) for people who run their own installation on Amazon SES. One person maintains it. It is not made or supported by the Plunk team, so please don't send them questions about it.
 
-Transactional emails, marketing campaigns, and workflow automation — in one platform. Self-hostable, $0.001 per email, no contact limits.
+It started from Plunk 0.17.0 and has been modified since 2026-10-24. New Plunk releases are not merged whole: each one is reviewed, and only the changes that suit this fork are brought in. Fixes that also apply to Plunk are offered back to it as pull requests.
 
-An open-source, self-hosted alternative to tools [SendGrid](https://sendgrid.com/), [Resend](https://resend.com) or [Mailgun](https://www.mailgun.com/).
+Thanks to the Plunk team for the platform this is built on. If you find Plunk useful, consider [sponsoring it](https://github.com/sponsors/driaug).
 
-## Features
+## What's different from Plunk
 
-- **Transactional Emails**: Send emails straight from your API with template support and variable substitution
-- **SMTP**: Use Plunk as an SMTP relay to send emails from any existing tool or framework
-- **Campaigns**: Send newsletters and product updates to large audiences
-- **Workflows**: Create advanced automations with triggers, delays, and conditional logic
-- **Segments**: Organize contacts with dynamic filtering and target the right audience
-- **Contact Management**: Manage contacts with custom fields and full activity history
-- **Analytics**: Track opens, clicks, bounces, and engagement metrics in real-time
-- **Custom Domains**: Verify and send from your own domains with DKIM/SPF support
-- **Inbound Emails**: Receive and process incoming emails with custom routing rules
+**Lighter**
 
-## Sponsors
+- No landing site, wiki, SMTP relay or Plunk analytics
+- The dashboard is a static export served by nginx, with no Next.js server
 
-Plunk is made possible by the support of our sponsors. If you self-host Plunk, consider supporting
-via [GitHub Sponsors](https://github.com/sponsors/driaug).
+**Added**
 
-## Self-hosting Plunk
+- **Email editor:** styles inlined at send time, preheader, buttons, dividers, spacers, a `/` menu, an image gallery, brand styles, a per-language unsubscribe footer, YouTube videos and boxes with a background
+- **Static segments:** with entry and exit events, usable in bulk from Contacts, on the contact page and in workflows
+- **Contacts:** CSV export, and import with segments and signup dates
+- **Double opt-in:** per project, off by default
+- **Suppression you can see:** a "Suppressed" status with its reason, and removal that also clears the address from SES
+- **Sending safeguards:** a cut-off for repeated soft bounces, automatic clicks left out of the statistics, and a DMARC check for each domain
+- **Failure alerts:** a dashboard banner and emails, covering sending reputation and domains SES stops verifying
+- **Webhook steps:** HMAC signatures, retries with backoff and a Retry button on failed executions
+- **SES event recovery:** the dead-letter queue is drained automatically
 
-The easiest way to self-host Plunk is by using the `plunk` Docker image.
-You can pull the latest image from [Github](https://github.com/useplunk/plunk/pkgs/container/plunk).
+**Missing**
 
-A complete guide on how to deploy Plunk can be found in
-the [documentation](https://docs.useplunk.com/self-hosting/introduction).
+Some features of newer Plunk releases are left out on purpose, such as scheduled delivery and throttling (Plunk 0.18.0), and so is the SMTP relay. If you need them, use [Plunk](https://github.com/useplunk/plunk).
 
-## Community
+## Self-hosting
 
-- **Documentation**: [docs.useplunk.com](https://docs.useplunk.com)
-- **Discord**: [useplunk.com/discord](https://useplunk.com/discord)
+Images are published to `ghcr.io/joanproductivo/plunk-lite`, for amd64 and arm64:
 
-## Contributing
+- `sha-<commit>`: one for each build. Pin one of these in production.
+- `latest`: the newest build. Use it to find out which `sha-` is current, not in a compose file.
 
-You are welcome to contribute to Plunk. You can find a guide on how to contribute in [CONTRIBUTING.md](CONTRIBUTING.md).
+Named versions such as `lite-1.0.0` are Git tags and [releases](https://github.com/joanproductivo/plunk-lite/releases) that mark milestones. There is no image with that name: each release says which `sha-` it matches.
 
-<a href="https://github.com/useplunk/plunk/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=useplunk/plunk" alt="Contributors" />
-</a>
+To install it on [Dokploy](https://dokploy.com) with Amazon SES, use the [plunk-dokploy-ses](https://github.com/joanproductivo/plunk-dokploy-ses) skill.
+
+Plunk's [documentation](https://docs.useplunk.com) still applies to the features the two share, but it describes the official version.
+
+**Switching from Plunk:** this fork adds its own tables, prefixed `plunk_lite_`, and doesn't alter Plunk's. Even so, back up your database first, and don't assume that an installation can move in either direction without losing anything: emails built with this fork's editor, workflows and queued jobs can behave differently on the official image.
+
+## Versions
+
+Plunk Lite has its own numbering, unrelated to Plunk's. The second number goes up for new features and the third for fixes. See [CHANGELOG.md](CHANGELOG.md).
+
+Issues are turned off on this repository, so support is not provided. Anyone is welcome to use and adapt the code under its license.
 
 ## License
 
-AGPL-3.0 License - see [LICENSE](LICENSE) for details.
+AGPL-3.0, the same license as Plunk. See [LICENSE](LICENSE).
+
+Plunk is the work of its authors. This fork's changes can be seen in the commit history of this repository.

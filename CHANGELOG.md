@@ -1,5 +1,17 @@
 # Changelog
 
+## Plunk Lite 1.0.0 (2026-11-01)
+
+The first named version of Plunk Lite, and the start of its own numbering. It has the same features as image `sha-5892b47`: this release only adds the project's name, version and documentation.
+
+It is based on Plunk 0.17.0, with changes chosen from later Plunk versions. The main differences from Plunk are listed in the [README](README.md#whats-different-from-plunk).
+
+Taken from Plunk 0.18.0 so far: Node 24.22.1 (CVE-2026-111497), dependency updates, CSRF protection for the dashboard cookie, SNS accepted only from topics in the project's own AWS account, and workflow and campaign fixes. Scheduled delivery and throttling were left out.
+
+## Plunk
+
+Everything below is Plunk's own changelog, up to the version this fork is based on.
+
 ## [0.17.0](https://github.com/useplunk/plunk/compare/v0.16.0...v0.17.0) (2026-10-21)
 
 
