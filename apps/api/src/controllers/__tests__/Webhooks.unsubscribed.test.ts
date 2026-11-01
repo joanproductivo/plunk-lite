@@ -468,4 +468,63 @@ describe('Webhooks - the unsubscribe a bounce or complaint causes', () => {
       expect(track).toHaveBeenCalledTimes(2);
     });
   });
+  describe('repeated temporary bounces', () => {
+    const DAY = 24 * 60 * 60 * 1000;
+
+    async function pastBounces(address: string | undefined) {
+      for (const daysAgo of [8, 6, 4, 2]) {
+        const email = await factories.createEmail({projectId, contactId});
+        await prisma.event.create({
+          data: {
+            projectId,
+            contactId,
+            emailId: email.id,
+            name: 'email.softbounce',
+            createdAt: new Date(Date.now() - daysAgo * DAY),
+            data: {bounceSubType: 'MailboxFull', ...(address && {softBounceAddress: address})},
+          },
+        });
+      }
+    }
+
+    it('the fifth, from the notification on, suppresses the contact and tracks the unsubscribe', async () => {
+      const contact = await prisma.contact.findUniqueOrThrow({where: {id: contactId}});
+      await pastBounces(contact.email);
+      const messageId = randomUUID();
+      const email = await factories.createEmail({projectId, contactId, messageId});
+
+      await post(
+        notification('Bounce', messageId, {
+          mail: {messageId, timestamp: new Date().toISOString(), destination: [contact.email]},
+          bounce: {bounceType: 'Transient', bounceSubType: 'MailboxFull'},
+        }),
+      );
+
+      const event = await prisma.event.findFirst({where: {emailId: email.id, name: 'email.softbounce'}});
+      expect(event?.data).toMatchObject({bounceSubType: 'MailboxFull', softBounceAddress: contact.email});
+      expect((await prisma.contact.findUnique({where: {id: contactId}}))?.subscribed).toBe(false);
+      const unsubscribed = await prisma.event.findFirst({where: {contactId, name: 'contact.unsubscribed'}});
+      expect(unsubscribed?.data).toEqual({reason: 'soft_bounce'});
+      const suppression = await prisma.plunkLiteSuppression.findFirst({where: {projectId, email: contact.email}});
+      expect(suppression?.reason).toBe('SOFT_BOUNCE');
+    });
+
+    it('a bounce of a custom recipient carries no address to count, and suppresses nobody', async () => {
+      const contact = await prisma.contact.findUniqueOrThrow({where: {id: contactId}});
+      await pastBounces(contact.email);
+      const messageId = randomUUID();
+      const email = await factories.createEmail({projectId, contactId, messageId});
+
+      await post(
+        notification('Bounce', messageId, {
+          mail: {messageId, timestamp: new Date().toISOString(), destination: ['someone-else@example.com']},
+          bounce: {bounceType: 'Transient', bounceSubType: 'MailboxFull'},
+        }),
+      );
+
+      const event = await prisma.event.findFirst({where: {emailId: email.id, name: 'email.softbounce'}});
+      expect(event?.data).not.toHaveProperty('softBounceAddress');
+      expect((await prisma.contact.findUnique({where: {id: contactId}}))?.subscribed).toBe(true);
+    });
+  });
 });

@@ -230,6 +230,17 @@ describe('AnalyticsService - unsubscribes a bounce or complaint caused', () => {
     expect(totals).toMatchObject({unsubscribed: 3, suppressed: 2, lost: 3});
   });
 
+  it('counts an unsubscribe after repeated temporary bounces the same way', async () => {
+    const contact = await factories.createContact({projectId});
+    await prisma.event.create({
+      data: {projectId, contactId: contact.id, name: 'contact.unsubscribed', data: {reason: 'soft_bounce'}},
+    });
+
+    const {totals} = await AnalyticsService.getAudience(query());
+
+    expect(totals).toMatchObject({unsubscribed: 3, suppressed: 2, lost: 3});
+  });
+
   it('counts a snoozed contact who then bounced once among the unsubscribed', async () => {
     const contact = await factories.createContact({projectId});
     await sentWith(

@@ -28,9 +28,10 @@ export type SnoozeDuration = (typeof SNOOZE_DURATIONS)[number];
  * already, and a sender who wants to treat a snooze differently branches on this field.
  *
  * `bounce` and `complaint` are written by the SES webhook (Plunk Lite: on the `contact.unsubscribed`
- * tracked after the bounce or complaint, when it took the contact off the list).
+ * tracked after the bounce or complaint, when it took the contact off the list). Plunk Lite's
+ * `soft_bounce` is written when repeated temporary bounces do the same (SoftBounceService).
  */
-export type SubscriptionChangeReason = 'bounce' | 'complaint' | 'snooze' | 'snooze_expired';
+export type SubscriptionChangeReason = 'bounce' | 'soft_bounce' | 'complaint' | 'snooze' | 'snooze_expired';
 
 /**
  * The subscription states the dashboard shows and filters on.
@@ -85,7 +86,7 @@ export function contactStatus(
 }
 
 /** Why an address is on the project's suppression list (Plunk Lite) */
-export type SuppressionReason = 'BOUNCE' | 'COMPLAINT';
+export type SuppressionReason = 'BOUNCE' | 'SOFT_BOUNCE' | 'COMPLAINT';
 
 /**
  * A contact address on the project's suppression list (Plunk Lite): it is never sent to, and

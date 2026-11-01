@@ -44,7 +44,7 @@ import {MeterService} from '../services/MeterService.js';
 import {ProjectFooterService} from '../services/ProjectFooterService.js';
 import {emailQueue} from '../services/QueueService.js';
 import {SecurityService} from '../services/SecurityService.js';
-import {SuppressionService} from '../services/SuppressionService.js';
+import {suppressionCause, SuppressionService} from '../services/SuppressionService.js';
 import {
   classifySesRefusal,
   configurationSetFor,
@@ -452,7 +452,7 @@ export async function processEmailJob(job: EmailJob): Promise<void> {
   }
 
   // An address on the project's suppression list is never sent to, transactional email
-  // included: it bounced for good or reported mail as spam, and SES would only bounce it again.
+  // included: it bounced, for good or again and again, or reported mail as spam.
   // This is the last gate whatever subscribed the contact meanwhile.
   const suppression = await SuppressionService.find(email.projectId, recipientEmail);
   if (suppression) {
@@ -461,7 +461,7 @@ export async function processEmailJob(job: EmailJob): Promise<void> {
       where: {id: emailId, status: EmailStatus.PENDING},
       data: {
         status: EmailStatus.FAILED,
-        error: `Address is suppressed after a ${suppression.reason === 'COMPLAINT' ? 'complaint' : 'bounce'}`,
+        error: `Address is suppressed after ${suppressionCause(suppression.reason)}`,
       },
     });
 

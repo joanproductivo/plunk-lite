@@ -42,7 +42,7 @@ type StatusContact = Pick<Contact, 'subscribed' | 'snoozedUntil'> & {
 
 /** Why an address is suppressed (Plunk Lite), in a few words */
 export function suppressionReasonLabel(reason: SuppressionReason): string {
-  return reason === 'COMPLAINT' ? 'spam complaint' : 'bounce';
+  return reason === 'COMPLAINT' ? 'spam complaint' : reason === 'SOFT_BOUNCE' ? 'temporary bounces' : 'bounce';
 }
 
 /** A suppressed address's status, with why (Plunk Lite) */

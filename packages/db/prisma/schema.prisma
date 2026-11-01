@@ -950,7 +950,7 @@ model PlunkLiteSuppression {
   projectId String
   /// Normalized like a contact's email: trimmed and lowercased
   email     String
-  /// 'BOUNCE' or 'COMPLAINT'
+  /// 'BOUNCE', 'SOFT_BOUNCE' or 'COMPLAINT'
   reason    String
   /// The email whose bounce or complaint recorded it
   emailId   String?

@@ -474,7 +474,7 @@ function buildToastSummary(result: BulkContactActionResult): string {
     parts.push(`${result.unchangedCount.toLocaleString()} ${copy.alreadyState}`);
   }
   if (result.suppressedCount) {
-    parts.push(`${result.suppressedCount.toLocaleString()} suppressed after a bounce or complaint`);
+    parts.push(`${result.suppressedCount.toLocaleString()} suppressed after bounces or a complaint`);
   }
   if (result.failureCount > 0) parts.push(`${result.failureCount.toLocaleString()} failed`);
   if (parts.length === 0) return 'No contacts to update';

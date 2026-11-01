@@ -167,7 +167,8 @@ export class EventService {
   public static async getUniqueEventNames(projectId: string): Promise<string[]> {
     const events = await prisma.event.groupBy({
       by: ['name'],
-      where: {projectId},
+      // Plunk Lite: a mark for SoftBounceService that starts nothing, so it is nothing to pick
+      where: {projectId, name: {not: 'contact.suppression_lifted'}},
       orderBy: {
         _count: {
           name: 'desc',
@@ -352,7 +353,7 @@ export class EventService {
    * Check if an event name is reserved for system use
    * Reserved patterns:
    * - email.* (email.sent, email.delivery, email.open, email.click, email.bounce, email.softbounce, email.complaint)
-   * - contact.subscribed, contact.unsubscribed
+   * - contact.subscribed, contact.unsubscribed, contact.suppression_lifted
    * - segment.*.entry, segment.*.exit
    *
    * @param eventName - The event name to check
@@ -365,7 +366,11 @@ export class EventService {
     }
 
     // Contact events: contact.subscribed, contact.unsubscribed
-    if (eventName === 'contact.subscribed' || eventName === 'contact.unsubscribed') {
+    if (
+      eventName === 'contact.subscribed' ||
+      eventName === 'contact.unsubscribed' ||
+      eventName === 'contact.suppression_lifted'
+    ) {
       return true;
     }
 

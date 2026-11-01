@@ -55,6 +55,8 @@ function getSubscriptionReason(metadata: Metadata): string | undefined {
   switch (eventData?.reason) {
     case 'bounce':
       return 'Removed after a hard bounce';
+    case 'soft_bounce':
+      return 'Removed after repeated temporary bounces';
     case 'complaint':
       return 'Removed after a spam complaint';
     case 'snooze': {
