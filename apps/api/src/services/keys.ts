@@ -109,7 +109,7 @@ export const Keys = {
      * Held in Redis rather than incremented on the campaign row: the send path runs
      * once per recipient at a concurrency derived from the SES quota, and every one
      * of those writes would contend for the same row and leave a dead tuple behind.
-     * `Campaign.sentCount` is written once, when the send finalizes.
+     * `Campaign.sentCount` is written when the send finalizes, not per email.
      */
     sentProgress(campaignId: string): string {
       return `campaign:sent_progress:${campaignId}`;

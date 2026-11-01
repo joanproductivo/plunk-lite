@@ -414,10 +414,27 @@ export class ContactService {
     // First verify contact exists and belongs to project
     await this.get(projectId, contactId);
 
-    await prisma.$transaction(async tx => {
-      await DeletedEmailCounts.deleteEmails(tx, projectId, [contactId]);
+    const campaignIds = await prisma.$transaction(async tx => {
+      const campaigns = await DeletedEmailCounts.deleteEmails(tx, projectId, [contactId]);
       await tx.contact.delete({where: {id: contactId}});
+      return campaigns;
     }, LONG_TRANSACTION);
+
+    await this.markCampaignsDirty(campaignIds);
+  }
+
+  /**
+   * Plunk Lite: the campaigns that lost emails, for the next sweep to recount their figures. The
+   * import is dynamic because CampaignService reaches this file through SegmentService.
+   */
+  private static async markCampaignsDirty(campaignIds: string[]): Promise<void> {
+    if (campaignIds.length === 0) {
+      return;
+    }
+    const {CampaignService} = await import('./CampaignService.js');
+    for (const campaignId of campaignIds) {
+      await CampaignService.markStatsDirty(campaignId);
+    }
   }
 
   /**
@@ -1470,12 +1487,15 @@ export class ContactService {
    * Bulk delete contacts. Their emails go first, still counted in the project's rates (DeletedEmailCounts).
    */
   public static async bulkDelete(projectId: string, contactIds: string[]): Promise<{deleted: number}> {
-    const result = await prisma.$transaction(async tx => {
-      await DeletedEmailCounts.deleteEmails(tx, projectId, contactIds);
-      return tx.contact.deleteMany({where: {id: {in: contactIds}, projectId}});
+    const {campaignIds, deleted} = await prisma.$transaction(async tx => {
+      const campaigns = await DeletedEmailCounts.deleteEmails(tx, projectId, contactIds);
+      const result = await tx.contact.deleteMany({where: {id: {in: contactIds}, projectId}});
+      return {campaignIds: campaigns, deleted: result.count};
     }, LONG_TRANSACTION);
 
-    return {deleted: result.count};
+    await this.markCampaignsDirty(campaignIds);
+
+    return {deleted};
   }
 
   /**

@@ -46,24 +46,44 @@ export const DeletedEmailCounts = {
    * rates count, in one statement: an email sent, bounced or complained about while the delete
    * waits for its row is counted as it ends up. Called in the transaction that deletes the
    * contacts, before deleting them, so that their cascade finds no email left.
+   *
+   * Their campaigns lose the opt-outs among them, or a campaign's unsubscribe rate would divide the
+   * old opt-outs by the sends left: `reconcileStats` never recounts that column. Returns those
+   * campaigns, for the caller to mark once the transaction is over.
    */
-  async deleteEmails(tx: Prisma.TransactionClient, projectId: string, contactIds?: string[]): Promise<void> {
-    await tx.$executeRaw`
+  async deleteEmails(tx: Prisma.TransactionClient, projectId: string, contactIds?: string[]): Promise<string[]> {
+    const campaigns = await tx.$queryRaw<{campaignId: string}[]>`
       WITH e AS (
         DELETE FROM "emails"
         WHERE "projectId" = ${projectId}
           ${contactIds ? Prisma.sql`AND "contactId" = ANY(${contactIds}::text[])` : Prisma.empty}
-        RETURNING "projectId", "createdAt", "sentAt", "messageId", "simulated", "bouncedAt", "complainedAt"
+        RETURNING "projectId", "createdAt", "sentAt", "messageId", "simulated", "bouncedAt", "complainedAt",
+          "campaignId", "unsubscribedAt"
+      ),
+      counted AS (
+        INSERT INTO "plunk_lite_deleted_email_counts" AS d ("projectId", "hour", "sent", "bounced", "complained")
+        SELECT e."projectId", date_trunc('minute', e."createdAt"), ${RATE_COUNTS}
+        FROM e
+        WHERE ${RATED_EMAIL}
+        GROUP BY 1, 2
+        ON CONFLICT ("projectId", "hour") DO UPDATE SET
+          "sent" = d."sent" + EXCLUDED."sent",
+          "bounced" = d."bounced" + EXCLUDED."bounced",
+          "complained" = d."complained" + EXCLUDED."complained"
+      ),
+      gone AS (
+        SELECT e."campaignId", (count(*) FILTER (WHERE e."unsubscribedAt" IS NOT NULL))::int AS "optedOut"
+        FROM e
+        WHERE e."campaignId" IS NOT NULL
+        GROUP BY 1
+      ),
+      lowered AS (
+        UPDATE "campaigns" c SET "unsubscribedCount" = greatest(c."unsubscribedCount" - g."optedOut", 0)
+        FROM gone g
+        WHERE c."id" = g."campaignId" AND g."optedOut" > 0
       )
-      INSERT INTO "plunk_lite_deleted_email_counts" AS d ("projectId", "hour", "sent", "bounced", "complained")
-      SELECT e."projectId", date_trunc('minute', e."createdAt"), ${RATE_COUNTS}
-      FROM e
-      WHERE ${RATED_EMAIL}
-      GROUP BY 1, 2
-      ON CONFLICT ("projectId", "hour") DO UPDATE SET
-        "sent" = d."sent" + EXCLUDED."sent",
-        "bounced" = d."bounced" + EXCLUDED."bounced",
-        "complained" = d."complained" + EXCLUDED."complained"`;
+      SELECT "campaignId" FROM gone`;
+    return campaigns.map(campaign => campaign.campaignId);
   },
 
   /**

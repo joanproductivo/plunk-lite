@@ -884,9 +884,9 @@ export class CampaignService {
    * over distinct rows scales up, and each write leaves a dead tuple on a table the
    * dashboard reads constantly. Redis INCR has neither problem.
    *
-   * `Campaign.sentCount` stays authoritative and is written once, by
-   * `reconcileStats` when the send finalizes; this key is only the live delta on
-   * top of it and is dropped at that point.
+   * `Campaign.sentCount` stays authoritative and is written by `reconcileStats` when
+   * the send finalizes (Plunk Lite: and again if its contacts are deleted later); this
+   * key is only the live delta on top of it and is dropped at that point.
    */
   private static readonly SENT_PROGRESS_TTL_SECONDS = 7 * 24 * 60 * 60;
 
@@ -1008,8 +1008,8 @@ export class CampaignService {
    * tracked it. Only the finalization caller may ask for that: while the send is
    * still running, the count of rows read here and the delta are moving
    * independently, so writing the total and deleting the key would drop every send
-   * that landed in between and walk the progress number backwards. Between sends
-   * the two agree, and the send path is the authority on `sentCount` regardless.
+   * that landed in between and walk the progress number backwards. Plunk Lite: once
+   * the send is over there is no delta, and a sent campaign follows its emails.
    */
   public static async reconcileStats(campaignId: string, {foldSentProgress = false} = {}): Promise<void> {
     const [totals] = await prisma.$queryRaw<
@@ -1053,6 +1053,12 @@ export class CampaignService {
     });
 
     if (!foldSentProgress) {
+      // Plunk Lite: deleting a contact deletes its emails, and a figure that kept them would have
+      // them as sent and never delivered. Only SENT: a cancelled campaign keeps what it shows.
+      await prisma.campaign.updateMany({
+        where: {id: campaignId, status: CampaignStatus.SENT, sentCount: {not: Number(totals.sent)}},
+        data: {sentCount: Number(totals.sent)},
+      });
       return;
     }
 
