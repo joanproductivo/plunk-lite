@@ -50,9 +50,10 @@ export class SuppressionService {
   /**
    * Record addresses as suppressed, from the email whose bounce or complaint it was -- or none,
    * for an import that says the address bounced or complained elsewhere. A complaint on an
-   * address suppressed for a bounce replaces the reason, and a bounce or complaint one suppressed
-   * for temporary bounces: `isAttemptedBounce` and the export read the stronger one. Anything else
-   * recorded stays as it is.
+   * address suppressed for a bounce replaces the reason, and a bounce or complaint of an email one
+   * suppressed for temporary bounces: `isAttemptedBounce` and the export read the stronger one. An
+   * import leaves that last one as it is, since the row's email says nothing of a bounce at SES and
+   * it still counts in the brake of SoftBounceService. Anything else recorded stays as it is.
    */
   public static async record(
     db: Db,
@@ -69,8 +70,10 @@ export class SuppressionService {
           SET "reason" = EXCLUDED."reason",
             "emailId" = COALESCE(EXCLUDED."emailId", "plunk_lite_suppressions"."emailId"),
             "createdAt" = now()
-        WHERE ("plunk_lite_suppressions"."reason", EXCLUDED."reason") IN
-          (('BOUNCE', 'COMPLAINT'), ('SOFT_BOUNCE', 'BOUNCE'), ('SOFT_BOUNCE', 'COMPLAINT'))`;
+        WHERE ("plunk_lite_suppressions"."reason", EXCLUDED."reason") = ('BOUNCE', 'COMPLAINT')
+          OR ("plunk_lite_suppressions"."reason" = 'SOFT_BOUNCE'
+            AND EXCLUDED."reason" IN ('BOUNCE', 'COMPLAINT')
+            AND EXCLUDED."emailId" IS NOT NULL)`;
     }
   }
 
@@ -203,23 +206,26 @@ export class SuppressionService {
       signale.info(
         `[SUPPRESSION] Lifted the suppression of ${email} in project ${projectId}${atSes ? ` (SES: ${atSes})` : ''}`,
       );
-      await this.markLifted(projectId, email);
+      await this.markLifted(projectId, email, row.reason);
     }
     return {lifted: removed.count > 0, ...(atSes && {ses: atSes})};
   }
 
   /**
    * Where SoftBounceService starts counting again, or the next temporary bounce would suppress the
-   * address right back. The lift stands if it cannot be written.
+   * address right back. Its brake reads the reason, as the row is gone. The lift stands if it cannot
+   * be written.
    */
-  private static async markLifted(projectId: string, email: string): Promise<void> {
+  private static async markLifted(projectId: string, email: string, reason: string): Promise<void> {
     try {
       const contact = await prisma.contact.findUnique({
         where: {projectId_email: {projectId, email}},
         select: {id: true},
       });
       if (contact) {
-        await prisma.event.create({data: {projectId, contactId: contact.id, name: 'contact.suppression_lifted'}});
+        await prisma.event.create({
+          data: {projectId, contactId: contact.id, name: 'contact.suppression_lifted', data: {reason}},
+        });
       }
     } catch (error) {
       signale.warn(`[SUPPRESSION] Could not mark the lift of ${email} in project ${projectId}:`, error);

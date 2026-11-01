@@ -442,7 +442,7 @@ export class FailureAlertService {
     await this.record(projectId, {
       sourceKey: 'brake:soft_bounce',
       label: 'Temporary bounces',
-      error: `Suppressed after repeated temporary bounces. If several contacts of the same provider appear here, it may be refusing your emails rather than their mailboxes being gone: remove those suppressions on each contact's page.`,
+      error: `Suppressed after repeated temporary bounces. This shows the latest one: filter Contacts by Suppressed to see them all. If several are of the same provider, it may be refusing your emails rather than their mailboxes being gone: remove those suppressions on each contact's page.`,
       contactEmail: address,
     });
   }
@@ -466,7 +466,7 @@ export class FailureAlertService {
     const alerting = await this.record(projectId, {
       sourceKey: 'brake:soft_bounce_hold',
       label: 'Temporary bounces',
-      error: `${suppressed} contacts were suppressed for repeated temporary bounces in 7 days, so no more are until the count drops. A provider may be refusing your emails: check your sending reputation, and any suppressions that look wrong in Contacts.`,
+      error: `${suppressed} contacts were suppressed for repeated temporary bounces in 7 days, so no more are until the count drops (removing a suppression does not lower it). A provider may be refusing your emails: check your sending reputation, and any suppressions that look wrong in Contacts.`,
     });
     // Only once an alert goes out, as with reputation: until then, the next one records it again
     if (alerting) {

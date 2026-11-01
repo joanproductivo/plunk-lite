@@ -283,12 +283,48 @@ describe('SoftBounceService', () => {
     expect((await run())?.reason).toBe('SOFT_BOUNCE');
   });
 
+  it('keeps holding back when the suppressions of the week are lifted', async () => {
+    const gone = Array.from({length: 20}, (_, i) => `gone${i}@example.com`);
+    await prisma.contact.createMany({data: gone.map(email => ({projectId, email}))});
+    await SuppressionService.record(prisma, projectId, gone, 'SOFT_BOUNCE', null);
+    for (const email of gone) {
+      await SuppressionService.lift(projectId, email, {ses: 'any'});
+    }
+    await fiveOverAWeek();
+    const record = vi.spyOn(FailureAlertService, 'record').mockResolvedValue(true);
+
+    expect(await run()).toBeNull();
+
+    record.mockRestore();
+  });
+
+  it('does not count lifts of other reasons, or of over 7 days ago, in the brake', async () => {
+    const gone = Array.from({length: 20}, (_, i) => `gone${i}@example.com`);
+    await prisma.contact.createMany({data: gone.map(email => ({projectId, email}))});
+    await SuppressionService.record(prisma, projectId, gone, 'BOUNCE', null);
+    for (const email of gone) {
+      await SuppressionService.lift(projectId, email, {ses: 'any'});
+    }
+    await SuppressionService.record(prisma, projectId, gone, 'SOFT_BOUNCE', null);
+    for (const email of gone) {
+      await SuppressionService.lift(projectId, email, {ses: 'any'});
+    }
+    await prisma.event.updateMany({
+      where: {projectId, name: 'contact.suppression_lifted', data: {path: ['reason'], equals: 'SOFT_BOUNCE'}},
+      data: {createdAt: new Date(Date.now() - 8 * DAY)},
+    });
+    await fiveOverAWeek();
+
+    expect((await run())?.reason).toBe('SOFT_BOUNCE');
+  });
+
   describe('SuppressionService with the new reason', () => {
     const reasonAfter = async (first: string, second: string) => {
-      const email = `${first}-${second}@example.com`.toLowerCase();
-      await SuppressionService.record(prisma, projectId, [email], first as never, null);
-      await SuppressionService.record(prisma, projectId, [email], second as never, null);
-      return (await SuppressionService.find(projectId, email))?.reason;
+      const address = `${first}-${second}@example.com`.toLowerCase();
+      const {id} = await factories.createEmail({projectId, contactId: contact.id});
+      await SuppressionService.record(prisma, projectId, [address], first as never, id);
+      await SuppressionService.record(prisma, projectId, [address], second as never, id);
+      return (await SuppressionService.find(projectId, address))?.reason;
     };
 
     it('lets the stronger reason replace the weaker, never the other way', async () => {
@@ -302,11 +338,25 @@ describe('SoftBounceService', () => {
 
     it('keeps the email of the row when a stronger reason comes without one', async () => {
       const email = await factories.createEmail({projectId, contactId: contact.id});
-      await SuppressionService.record(prisma, projectId, [contact.email], 'SOFT_BOUNCE', email.id);
-      await SuppressionService.record(prisma, projectId, [contact.email], 'BOUNCE', null);
+      await SuppressionService.record(prisma, projectId, [contact.email], 'BOUNCE', email.id);
+      await SuppressionService.record(prisma, projectId, [contact.email], 'COMPLAINT', null);
 
       const row = await prisma.plunkLiteSuppression.findFirst({where: {projectId, email: contact.email}});
-      expect(row).toMatchObject({reason: 'BOUNCE', emailId: email.id});
+      expect(row).toMatchObject({reason: 'COMPLAINT', emailId: email.id});
+    });
+
+    it('leaves a soft bounce suppression as it is on an import, which then lifts without SES', async () => {
+      const remove = vi.spyOn(SESService, 'removeFromAccountSuppressionList');
+      remove.mockClear();
+      const email = await factories.createEmail({projectId, contactId: contact.id});
+      await SuppressionService.record(prisma, projectId, [contact.email], 'SOFT_BOUNCE', email.id);
+      await SuppressionService.record(prisma, projectId, [contact.email], 'BOUNCE', null);
+      await SuppressionService.record(prisma, projectId, [contact.email], 'COMPLAINT', null);
+
+      expect((await SuppressionService.find(projectId, contact.email))?.reason).toBe('SOFT_BOUNCE');
+      await SuppressionService.lift(projectId, contact.email, {ses: 'any'});
+      expect(remove).not.toHaveBeenCalled();
+      remove.mockRestore();
     });
 
     it('lifts a soft bounce suppression without touching SES, and marks it', async () => {

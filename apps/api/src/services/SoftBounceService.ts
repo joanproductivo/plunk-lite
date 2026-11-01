@@ -47,10 +47,7 @@ export class SoftBounceService {
       return;
     }
 
-    const suppressedLately = await prisma.plunkLiteSuppression.count({
-      where: {projectId, reason: 'SOFT_BOUNCE', createdAt: {gt: new Date(Date.now() - BRAKE_WINDOW_MS)}},
-    });
-    if (suppressedLately >= BRAKE_SUPPRESSIONS) {
+    if ((await this.suppressedLately(projectId)) >= BRAKE_SUPPRESSIONS) {
       signale.warn(`[SOFT-BOUNCE] Project ${projectId} reached ${BRAKE_SUPPRESSIONS} suppressions this week: holding`);
       await FailureAlertService.recordSoftBounceBrake(projectId, BRAKE_SUPPRESSIONS);
       return;
@@ -80,6 +77,27 @@ export class SoftBounceService {
         await ContactService.recordCampaignUnsubscribe(emailId, email.campaignId);
       }
     }
+  }
+
+  /**
+   * Lifted ones count too, or lifting a provider's block would make room for as many more of them.
+   * One suppressed before the window and lifted within it counts as well: the brake holds a little
+   * longer, which only delays a dead mailbox.
+   */
+  private static async suppressedLately(projectId: string): Promise<number> {
+    const since = new Date(Date.now() - BRAKE_WINDOW_MS);
+    const [suppressed, lifted] = await Promise.all([
+      prisma.plunkLiteSuppression.count({where: {projectId, reason: 'SOFT_BOUNCE', createdAt: {gt: since}}}),
+      prisma.event.count({
+        where: {
+          projectId,
+          name: 'contact.suppression_lifted',
+          createdAt: {gt: since},
+          data: {path: ['reason'], equals: 'SOFT_BOUNCE'},
+        },
+      }),
+    ]);
+    return suppressed + lifted;
   }
 
   private static async reachedTheCut(contactId: string, address: string): Promise<boolean> {
