@@ -141,7 +141,7 @@ export function clickSignals(click: unknown, mail: unknown): Record<string, unkn
   const userAgent =
     typeof fields.userAgent === 'string'
       ? // eslint-disable-next-line no-control-regex
-        fields.userAgent.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, CLICK_USER_AGENT_MAX)
+        fields.userAgent.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, CLICK_USER_AGENT_MAX).replace(/[\ud800-\udbff]$/, '')
       : undefined;
 
   return {

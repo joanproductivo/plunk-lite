@@ -41,6 +41,10 @@ describe('clickSignals', () => {
 
     expect(userAgent.startsWith('abc')).toBe(true);
     expect(userAgent).toHaveLength(120);
+
+    // An emoji cut in half is text the database refuses, and the event with it
+    const cut = clickSignals({userAgent: `${'a'.repeat(119)}😀`}, mail) as {userAgent: string};
+    expect(cut.userAgent).toBe('a'.repeat(119));
   });
 });
 
