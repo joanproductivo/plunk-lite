@@ -1,5 +1,7 @@
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {factories, getPrismaClient} from '../../../../../test/helpers';
+import {Domains} from '../../controllers/Domains.js';
+import {DmarcService} from '../../services/DmarcService.js';
 import {DomainService} from '../../services/DomainService.js';
 import * as SESService from '../../services/SESService.js';
 
@@ -17,6 +19,56 @@ describe('Domain Verification and Ownership Tests', () => {
     vi.spyOn(SESService, 'getDomainVerificationAttributes').mockResolvedValue({
       status: 'Success',
       tokens: ['token1', 'token2', 'token3'],
+    });
+  });
+
+  // ========================================
+  // DMARC (Plunk Lite)
+  // ========================================
+  describe('GET /domains/:id/dmarc', () => {
+    // CatchAsync returns nothing to wait on: the request ends at res.json or next
+    async function request(id: string, projectId: string) {
+      const next = vi.fn();
+      const res = {locals: {auth: {projectId}}, status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis()};
+      await new Promise<void>(resolve => {
+        res.json.mockImplementation(() => {
+          resolve();
+          return res;
+        });
+        next.mockImplementation(() => resolve());
+        void new Domains().checkDmarc({params: {id}} as never, res as never, next);
+      });
+      return {res, next};
+    }
+
+    it("answers with the lookup of the project's own domain, without touching SES", async () => {
+      const {project} = await factories.createUserWithProject();
+      const domain = await factories.createDomain({projectId: project.id, domain: 'dmarc-own.com'});
+      const answer = {status: 'found', policy: 'reject', foundAt: 'dmarc-own.com', rootDomain: 'dmarc-own.com'} as const;
+      const lookup = vi.spyOn(DmarcService, 'lookup').mockResolvedValue(answer);
+      const verification = vi.mocked(SESService.getDomainVerificationAttributes);
+      verification.mockClear();
+
+      const {res} = await request(domain.id, project.id);
+
+      expect(lookup).toHaveBeenCalledWith('dmarc-own.com');
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(answer);
+      expect(verification).not.toHaveBeenCalled();
+    });
+
+    it("does not read another project's domain", async () => {
+      const {project} = await factories.createUserWithProject();
+      const {project: other} = await factories.createUserWithProject();
+      const domain = await factories.createDomain({projectId: other.id, domain: 'dmarc-other.com'});
+      const lookup = vi.spyOn(DmarcService, 'lookup');
+      lookup.mockClear();
+
+      const {res, next} = await request(domain.id, project.id);
+
+      expect(lookup).not.toHaveBeenCalled();
+      expect(res.json).not.toHaveBeenCalled();
+      expect(next.mock.calls[0]?.[0]).toMatchObject({code: 404});
     });
   });
 

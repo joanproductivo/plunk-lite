@@ -5,6 +5,7 @@ import type {NextFunction, Request, Response} from 'express';
 import {redis} from '../database/redis.js';
 import {NotAllowed, NotFound} from '../exceptions/index.js';
 import {requireAuth, requireEmailVerified} from '../middleware/auth.js';
+import {DmarcService} from '../services/DmarcService.js';
 import {DomainService} from '../services/DomainService.js';
 import {Keys} from '../services/keys.js';
 import {MembershipService} from '../services/MembershipService.js';
@@ -119,6 +120,26 @@ export class Domains {
     await redis.del(Keys.Domain.project(domain.projectId));
 
     return res.status(200).json(verificationStatus);
+  }
+
+  /**
+   * Plunk Lite: what DNS says about the domain's DMARC. Only for the dashboard to show: it blocks
+   * neither verifying the domain nor sending from it.
+   */
+  @Get(':id/dmarc')
+  @Middleware([requireAuth, requireEmailVerified])
+  @CatchAsync
+  public async checkDmarc(req: Request, res: Response, _next: NextFunction) {
+    const auth = res.locals.auth;
+    const {id} = UtilitySchemas.id.parse(req.params);
+
+    const domain = await DomainService.id(id);
+
+    if (!domain || domain.projectId !== auth.projectId) {
+      throw new NotFound('domain');
+    }
+
+    return res.status(200).json(await DmarcService.lookup(domain.domain));
   }
 
   /**
