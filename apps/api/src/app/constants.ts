@@ -110,6 +110,7 @@ export const TRACKING_TOGGLE_ENABLED = process.env.SES_CONFIGURATION_SET_NO_TRAC
 // Leave out opens SES marks as likely made by software, such as Gmail fetching the tracking
 // pixel on delivery (default: true). Any other value counts every open SES reports
 export const IGNORE_AUTOMATIC_OPENS = validateEnv('IGNORE_AUTOMATIC_OPENS', 'true') === 'true';
+export const IGNORE_AUTOMATIC_CLICKS = validateEnv('IGNORE_AUTOMATIC_CLICKS', 'true') === 'true';
 
 // SMTP Server Configuration (optional)
 // SMTP server can run with or without a domain (runs without TLS in dev mode)

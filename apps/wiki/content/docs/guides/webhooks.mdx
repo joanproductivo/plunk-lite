@@ -30,7 +30,8 @@ Plunk automatically tracks a set of internal events that you can use as workflow
 | `email.sent`      | An email was successfully sent                                                                           |
 | `email.delivery`  | An email was delivered to the recipient                                                                  |
 | `email.open`      | A contact opened an email. By default, opens SES marks as automated are left out                         |
-| `email.click`     | A contact clicked a link in an email                                                                     |
+| `email.click`     | A contact clicked a link in an email. By default, clicks SES marks as automated are left out             |
+| `email.click_ignored` | SES marked a click as automated, so it was left out. Same fields as `email.click`, without the counters. Not a real click |
 | `email.bounce`    | An email bounced permanently, or SES could not classify the bounce                                       |
 | `email.softbounce` | An email bounced temporarily (mailbox full, out-of-office); the contact stays subscribed                |
 | `email.complaint` | A contact marked an email as spam                                                                        |
@@ -297,7 +298,10 @@ In addition to these base fields, each event includes the following event-specif
   "link": "https://example.com/pricing",
   "clickedAt": "2025-01-15T11:05:00.000Z",
   "clicks": 1,
-  "isFirstClick": true
+  "isFirstClick": true,
+  "isBotEvent": "Unlikely",
+  "secondsSinceSent": 154.6,
+  "userAgent": "Mozilla/5.0"
 }
 ```
 
@@ -307,6 +311,9 @@ In addition to these base fields, each event includes the following event-specif
     clickedAt: { type: 'string', description: 'ISO 8601 timestamp of the first click.' },
     clicks: { type: 'number', description: 'Total number of clicks on links in this email.' },
     isFirstClick: { type: 'boolean', description: '`true` if this is the first click from this contact on this email.' },
+    isBotEvent: { type: 'string', description: 'What SES judged the click to be: `Unlikely` to be automated, or absent if it did not say. Clicks it marks `Likely` do not count and fire `email.click_ignored` instead, unless `IGNORE_AUTOMATIC_CLICKS` is off.' },
+    secondsSinceSent: { type: 'number', description: 'Seconds between sending the email and the click, when SES gave both times.' },
+    userAgent: { type: 'string', description: 'The browser that made the click, up to 120 characters.' },
   }}
 />
 

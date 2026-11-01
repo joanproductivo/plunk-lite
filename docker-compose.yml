@@ -154,6 +154,7 @@ services:
       SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET}
       SES_CONFIGURATION_SET_NO_TRACKING: ${SES_CONFIGURATION_SET_NO_TRACKING:-}
       IGNORE_AUTOMATIC_OPENS: ${IGNORE_AUTOMATIC_OPENS:-true}
+      IGNORE_AUTOMATIC_CLICKS: ${IGNORE_AUTOMATIC_CLICKS:-true}
 
       # Custom MAIL FROM subdomain (defaults to 'plunk'; override when
       # plunk.<your-domain> is already used for something else, e.g. a CDN)

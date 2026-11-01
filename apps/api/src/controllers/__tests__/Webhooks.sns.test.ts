@@ -135,6 +135,61 @@ describe('Webhooks - SES event notifications', () => {
       expect((event?.data as {link?: string} | null)?.link).toBe('https://example.com/pricing');
     });
 
+    it('leaves out a click SES marks as automated, keeping only what measures it', async () => {
+      const email = await sentEmail('ses-click-bot');
+
+      await post(
+        notification('Click', 'ses-click-bot', {
+          mail: {messageId: 'ses-click-bot', timestamp: '2026-11-01T10:00:00.000Z'},
+          click: {
+            link: 'https://example.com/pricing',
+            isBotEvent: 'Likely',
+            timestamp: '2026-11-01T10:00:02.500Z',
+            userAgent: 'Scanner/1.0',
+            ipAddress: '192.0.2.1',
+          },
+        }),
+      );
+
+      const updated = await prisma.email.findUnique({where: {id: email.id}});
+      expect(updated?.status).not.toBe(EmailStatus.CLICKED);
+      expect(updated?.clickedAt).toBeNull();
+      expect(updated?.clicks).toBe(0);
+
+      const events = await prisma.event.findMany({where: {emailId: email.id}});
+      expect(events.map(event => event.name)).toEqual(['email.click_ignored']);
+      expect(events[0]?.data).toMatchObject({
+        link: 'https://example.com/pricing',
+        isBotEvent: 'Likely',
+        secondsSinceSent: 2.5,
+        userAgent: 'Scanner/1.0',
+      });
+      expect(JSON.stringify(events[0]?.data)).not.toContain('192.0.2.1');
+    });
+
+    it('counts a click SES marks as made by a person, however fast, with its signals', async () => {
+      const email = await sentEmail('ses-click-human');
+
+      await post(
+        notification('Click', 'ses-click-human', {
+          mail: {messageId: 'ses-click-human', timestamp: '2026-11-01T10:00:00.000Z'},
+          click: {
+            link: 'https://example.com/pricing',
+            isBotEvent: 'Unlikely',
+            timestamp: '2026-11-01T10:00:01.000Z',
+            userAgent: 'Mozilla/5.0',
+          },
+        }),
+      );
+
+      const updated = await prisma.email.findUnique({where: {id: email.id}});
+      expect(updated?.clickedAt).not.toBeNull();
+      expect(updated?.clicks).toBe(1);
+
+      const event = await prisma.event.findFirst({where: {emailId: email.id, name: 'email.click'}});
+      expect(event?.data).toMatchObject({isBotEvent: 'Unlikely', secondsSinceSent: 1, userAgent: 'Mozilla/5.0'});
+    });
+
     it('bounces and unsubscribes the contact on a permanent bounce', async () => {
       const email = await sentEmail('ses-bounce-1');
 

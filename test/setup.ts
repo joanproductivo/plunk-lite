@@ -63,6 +63,7 @@ process.env.RATE_LIMIT_ENABLED = 'true';
 // Forced too, to its default this time, so a local .env that counts automatic opens cannot
 // turn the suite's expectations about them upside down.
 process.env.IGNORE_AUTOMATIC_OPENS = 'true';
+process.env.IGNORE_AUTOMATIC_CLICKS = 'true';
 
 // Plunk Lite: new contacts from the API have their domain looked up in DNS, which the suite must not
 // depend on (example.com takes no email). The tests of that check switch it on with a fake resolver.
