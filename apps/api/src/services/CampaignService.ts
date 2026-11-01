@@ -1518,12 +1518,13 @@ export class CampaignService {
     const {column, filter, total} = {
       bounced: {
         column: Prisma.raw('"bouncedAt"'),
-        filter: Prisma.sql`e."status" = ${EmailStatus.BOUNCED}::"EmailStatus"`,
+        // Plunk Lite: an address on the SES suppression list leaves BOUNCED with no date, and no count
+        filter: Prisma.sql`e."status" = ${EmailStatus.BOUNCED}::"EmailStatus" AND e."bouncedAt" IS NOT NULL`,
         total: campaign.bouncedCount,
       },
       complained: {
         column: Prisma.raw('"complainedAt"'),
-        filter: Prisma.sql`e."status" = ${EmailStatus.COMPLAINED}::"EmailStatus"`,
+        filter: Prisma.sql`e."status" = ${EmailStatus.COMPLAINED}::"EmailStatus" AND e."complainedAt" IS NOT NULL`,
         total: campaign.complainedCount,
       },
       unsubscribed: {

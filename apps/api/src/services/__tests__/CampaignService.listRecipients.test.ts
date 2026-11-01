@@ -151,6 +151,21 @@ describe('CampaignService - listRecipients', () => {
     expect(result.total).toBe(1);
   });
 
+  // SES answers for an address on its suppression list with a bounce or complaint that records no
+  // date (see the webhook). Sorted descending, a row with no date came first and failed the page.
+  it('leaves out a bounce or complaint with no date, which no counter holds', async () => {
+    await sendTo('bounced@plunk.test', {status: 'BOUNCED', bouncedAt: new Date()});
+    await sendTo('complained@plunk.test', {status: 'COMPLAINED', complainedAt: new Date()});
+    await sendTo('undated-bounce@plunk.test', {status: 'BOUNCED'});
+    await sendTo('undated-complaint@plunk.test', {status: 'COMPLAINED'});
+
+    const bounced = await CampaignService.listRecipients(projectId, campaignId, 'bounced');
+    const complained = await CampaignService.listRecipients(projectId, campaignId, 'complained');
+
+    expect(bounced.data.map(r => r.email)).toEqual(['bounced@plunk.test']);
+    expect(complained.data.map(r => r.email)).toEqual(['complained@plunk.test']);
+  });
+
   it('falls back to the first page when handed a cursor it did not issue', async () => {
     await sendTo('only@plunk.test', {status: 'BOUNCED', bouncedAt: new Date()});
 
