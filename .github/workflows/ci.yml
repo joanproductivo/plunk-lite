@@ -146,8 +146,20 @@ jobs:
                 mc mb local/uploads --ignore-existing"
 
       - name: Run tests
-        # Some of Plunk's tests fail now and then (the job's report shows any that were retried)
-        run: yarn test:run --retry=2
+        # Some of Plunk's tests fail now and then. Only the verbose reporter names those it retried,
+        # and `shell: bash` adds pipefail, so that tee does not hide a failure.
+        shell: bash
+        run: |
+          yarn test:run --retry=2 --reporter=verbose | tee test-output.log
+          if grep -F '(retry x' test-output.log > retried.log; then
+            echo "::warning::$(wc -l < retried.log) tests only passed on a retry: see the job summary"
+            {
+              echo '### Tests that only passed on a retry'
+              echo '```'
+              cat retried.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
         env:
           NODE_ENV: test
 
