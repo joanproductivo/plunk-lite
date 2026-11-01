@@ -4,6 +4,7 @@ import {Domains} from '../../controllers/Domains.js';
 import {DmarcService} from '../../services/DmarcService.js';
 import {DomainService} from '../../services/DomainService.js';
 import * as SESService from '../../services/SESService.js';
+import {invokeHandler} from '../../utils/invokeHandler.js';
 
 /**
  * Integration tests for Domain verification and ownership checks
@@ -26,19 +27,12 @@ describe('Domain Verification and Ownership Tests', () => {
   // DMARC (Plunk Lite)
   // ========================================
   describe('GET /domains/:id/dmarc', () => {
-    // CatchAsync returns nothing to wait on: the request ends at res.json or next
-    async function request(id: string, projectId: string) {
-      const next = vi.fn();
-      const res = {locals: {auth: {projectId}}, status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis()};
-      await new Promise<void>(resolve => {
-        res.json.mockImplementation(() => {
-          resolve();
-          return res;
-        });
-        next.mockImplementation(() => resolve());
-        void new Domains().checkDmarc({params: {id}} as never, res as never, next);
+    function request(id: string, projectId: string) {
+      const domains = new Domains();
+      return invokeHandler(domains.checkDmarc.bind(domains), undefined, {
+        req: {params: {id}} as never,
+        res: {locals: {auth: {projectId}}, statusCode: 200} as never,
       });
-      return {res, next};
     }
 
     it("answers with the lookup of the project's own domain, without touching SES", async () => {
@@ -49,11 +43,10 @@ describe('Domain Verification and Ownership Tests', () => {
       const verification = vi.mocked(SESService.getDomainVerificationAttributes);
       verification.mockClear();
 
-      const {res} = await request(domain.id, project.id);
+      const answered = await request(domain.id, project.id);
 
       expect(lookup).toHaveBeenCalledWith('dmarc-own.com');
-      expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.json).toHaveBeenCalledWith(answer);
+      expect(answered).toEqual({status: 200, body: answer});
       expect(verification).not.toHaveBeenCalled();
     });
 
@@ -64,11 +57,9 @@ describe('Domain Verification and Ownership Tests', () => {
       const lookup = vi.spyOn(DmarcService, 'lookup');
       lookup.mockClear();
 
-      const {res, next} = await request(domain.id, project.id);
+      await expect(request(domain.id, project.id)).rejects.toMatchObject({code: 404});
 
       expect(lookup).not.toHaveBeenCalled();
-      expect(res.json).not.toHaveBeenCalled();
-      expect(next.mock.calls[0]?.[0]).toMatchObject({code: 404});
     });
   });
 

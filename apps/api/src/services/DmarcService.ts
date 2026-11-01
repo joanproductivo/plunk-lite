@@ -3,6 +3,8 @@ import {promises as dns} from 'dns';
 import type {DmarcPolicy, DomainDmarc} from '@plunk/types';
 import {getDomain} from 'tldts';
 
+import {withTimeout} from '../utils/withTimeout.js';
+
 const DNS_TRY_TIMEOUT_MS = 1500;
 const DNS_DEADLINE_MS = 4000;
 
@@ -41,20 +43,14 @@ function dmarcTag(record: string, tag: string): string | undefined {
 export class DmarcService {
   public static async lookup(domain: string): Promise<DomainDmarc> {
     const rootDomain = getDomain(domain) ?? domain;
-    const unknown: DomainDmarc = {status: 'unknown', policy: null, foundAt: null, rootDomain};
 
     // A resolver per lookup: cancelling it at the deadline must not cancel other requests' lookups
     const resolver = new dns.Resolver({timeout: DNS_TRY_TIMEOUT_MS, tries: 2});
-    let timer: NodeJS.Timeout | undefined;
-    const deadline = new Promise<DomainDmarc>(resolve => {
-      timer = setTimeout(() => resolve(unknown), DNS_DEADLINE_MS);
-    });
     try {
-      return await Promise.race([this.discover(resolver, domain, rootDomain), deadline]);
+      return await withTimeout(this.discover(resolver, domain, rootDomain), DNS_DEADLINE_MS);
     } catch {
-      return unknown;
+      return {status: 'unknown', policy: null, foundAt: null, rootDomain};
     } finally {
-      clearTimeout(timer);
       resolver.cancel();
     }
   }
