@@ -62,7 +62,7 @@ export default function Confirm() {
 
   if (state.status === 'loading') {
     return (
-      <RecipientShell page="confirm" loading>
+      <RecipientShell loading>
         <LoadingCard />
       </RecipientShell>
     );
@@ -72,7 +72,7 @@ export default function Confirm() {
 
   if (state.status === 'error') {
     return (
-      <RecipientShell page="confirm" translator={translator}>
+      <RecipientShell>
         <ErrorCard translator={translator} message={translator.t('pages.common.loadFailed')} />
       </RecipientShell>
     );
@@ -82,7 +82,7 @@ export default function Confirm() {
 
   if (link.status === 'invalid') {
     return (
-      <RecipientShell page="confirm" translator={translator}>
+      <RecipientShell>
         <div className="flex flex-col gap-4 p-6 sm:p-8">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-600/20 ring-inset">
             <AlertCircle className="h-5 w-5" aria-hidden="true" />
@@ -99,7 +99,7 @@ export default function Confirm() {
 
   if (link.status === 'confirmed') {
     return (
-      <RecipientShell page="confirm" translator={translator}>
+      <RecipientShell>
         <ResultState icon={Check} title={translator.t('pages.confirm.successTitle')}>
           <RichText template={translator.t('pages.confirm.successDescription')} values={values} />
         </ResultState>
@@ -126,7 +126,7 @@ export default function Confirm() {
   };
 
   return (
-    <RecipientShell page="confirm" translator={translator}>
+    <RecipientShell>
       <div className="flex flex-col gap-6 p-6 sm:p-8">
         <CardIntro title={translator.t('pages.confirm.title')}>
           <RichText template={translator.t('pages.confirm.description')} values={values} />

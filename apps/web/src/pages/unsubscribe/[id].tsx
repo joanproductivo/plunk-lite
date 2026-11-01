@@ -32,7 +32,7 @@ export default function Unsubscribe() {
 
   if (state.status === 'loading') {
     return (
-      <RecipientShell page="unsubscribe" loading>
+      <RecipientShell loading>
         <LoadingCard />
       </RecipientShell>
     );
@@ -40,7 +40,7 @@ export default function Unsubscribe() {
 
   if (state.status === 'error') {
     return (
-      <RecipientShell page="unsubscribe" translator={state.translator}>
+      <RecipientShell>
         <ErrorCard translator={state.translator} message={state.message} />
       </RecipientShell>
     );
@@ -86,7 +86,7 @@ export default function Unsubscribe() {
   // telling someone who asked for a break that they are gone would be wrong.
   if (isSnoozed(contact)) {
     return (
-      <RecipientShell page="unsubscribe" translator={translator}>
+      <RecipientShell>
         <ResultState icon={Clock} title={translator.t('pages.snooze.successTitle')}>
           <RichText
             template={translator.t('pages.snooze.successDescription')}
@@ -102,7 +102,7 @@ export default function Unsubscribe() {
 
   if (!contact.subscribed) {
     return (
-      <RecipientShell page="unsubscribe" translator={translator}>
+      <RecipientShell>
         <ResultState icon={Check} title={translator.t('pages.unsubscribe.successTitle')}>
           <RichText template={translator.t('pages.unsubscribe.successDescription')} values={{projectName: contact.projectName, email: contact.email}} />
         </ResultState>
@@ -117,7 +117,7 @@ export default function Unsubscribe() {
   }
 
   return (
-    <RecipientShell page="unsubscribe" translator={translator}>
+    <RecipientShell>
       <div className="flex flex-col gap-6 p-6 sm:p-8">
         <CardIntro title={translator.t('pages.unsubscribe.title')}>
           <RichText template={translator.t('pages.unsubscribe.description')} values={{projectName: contact.projectName, email: contact.email}} />

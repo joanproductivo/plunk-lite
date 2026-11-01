@@ -37,7 +37,7 @@ export default function Manage() {
 
   if (state.status === 'loading') {
     return (
-      <RecipientShell page="manage" loading>
+      <RecipientShell loading>
         <LoadingCard />
       </RecipientShell>
     );
@@ -45,7 +45,7 @@ export default function Manage() {
 
   if (state.status === 'error') {
     return (
-      <RecipientShell page="manage" translator={state.translator}>
+      <RecipientShell>
         <ErrorCard translator={state.translator} message={state.message} />
       </RecipientShell>
     );
@@ -105,7 +105,7 @@ export default function Manage() {
       : translator.t('pages.manage.unsubscribedStatus');
 
   return (
-    <RecipientShell page="manage" translator={translator}>
+    <RecipientShell>
       <div className="flex flex-col gap-6 p-6 pb-5 sm:p-8 sm:pb-6">
         <CardIntro title={translator.t('pages.manage.title')}>
           <RichText template={translator.t('pages.manage.description')} values={{projectName: contact.projectName, email: contact.email}} />
