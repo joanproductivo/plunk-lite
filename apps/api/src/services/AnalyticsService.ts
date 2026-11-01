@@ -518,7 +518,7 @@ export class AnalyticsService {
     const suppressedEvent = Prisma.sql`(
       ev."name" = 'email.complaint'
       OR (ev."name" = 'email.bounce' AND ev."data"->>'transientBounce' IS NULL)
-      OR (ev."name" = 'contact.unsubscribed' AND ev."data"->>'reason' IN ('bounce', 'complaint'))
+      OR (ev."name" = 'contact.unsubscribed' AND ev."data"->>'reason' IN ('bounce', 'soft_bounce', 'complaint'))
     )`;
     const rows = await prisma.$queryRaw<
       {bucket: string; new_contacts: bigint; unsubscribed: bigint; suppressed: bigint; lost: bigint}[]

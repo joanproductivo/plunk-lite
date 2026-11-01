@@ -13,12 +13,17 @@ import signale from 'signale';
 import {prisma} from '../database/prisma.js';
 import {EventService} from '../services/EventService.js';
 import {eventTrackingQueue} from '../services/QueueService.js';
+import {SoftBounceService} from '../services/SoftBounceService.js';
 
 export async function processEventTracking(job: Job<EventTrackingJobData>): Promise<void> {
   const {projectId, eventName, contactId, emailId, data, followUp} = job.data;
   const failures: unknown[] = [];
   try {
     await EventService.trackEvent(projectId, eventName, contactId, emailId, data);
+    // Plunk Lite: a failure leaves this job failed, and in sight, as it is not run again
+    if (eventName === 'email.softbounce' && contactId && emailId && data?.softBounceAddress) {
+      await SoftBounceService.afterSoftBounce(projectId, contactId, emailId);
+    }
   } catch (error) {
     failures.push(error);
   }

@@ -99,7 +99,11 @@ export function suppressionNote(contact: unknown): string {
     return '';
   }
 
-  const why = suppressed.reason === 'COMPLAINT' ? 'reported an email as spam' : 'bounced permanently';
+  const why = suppressed.reason === 'COMPLAINT'
+      ? 'reported an email as spam'
+      : suppressed.reason === 'SOFT_BOUNCE'
+        ? 'kept bouncing temporarily'
+        : 'bounced permanently';
   const when = typeof suppressed.createdAt === 'string' ? ` on ${suppressed.createdAt.slice(0, 10)}` : '';
   return (
     ` The contact stays unsubscribed: its address ${why}${when} and is on the project's suppression list.` +

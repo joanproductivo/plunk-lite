@@ -10,6 +10,8 @@ Plunk automatically monitors the bounce and complaint rates of your emails to he
 
 A bounce occurs when an email cannot be delivered to the recipient's inbox. Plunk records permanent and undetermined bounces as an `email.bounce` event on the contact, and soft ones as `email.softbounce`, and automatically unsubscribes the contact on **permanent (hard) and undetermined bounces**. Transient (soft) bounces don't change subscription state — they're typically retried by the upstream mail server.
 
+Temporary bounces do not unsubscribe on their own, but they can't go on for ever. After 5 emails in a row bounce with a full mailbox or a general temporary failure, at least 7 days from the first to the last, the contact is unsubscribed and suppressed, also for transactional emails, until the suppression is removed on their contact page. A delivery, open or click starts the count again, as do subscribing again and removing a suppression. If this suppresses 20 contacts of a project in 24 hours, it stops and alerts you, as a provider may be refusing your emails.
+
 A bounce only unsubscribes the contact, and is only tracked as theirs, when the address that bounced is the contact's own: a workflow email sent to a custom recipient that bounces leaves the contact subscribed.
 
 ### Types of Bounces

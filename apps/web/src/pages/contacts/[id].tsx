@@ -261,7 +261,11 @@ export default function ContactDetailPage() {
                       // Without it, the switch above would just fail on save with no way out
                       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                         <p className="font-medium">
-                          Suppressed after a {suppressionReasonLabel(contact.suppression.reason)} on{' '}
+                          Suppressed after{' '}
+                          {contact.suppression.reason === 'SOFT_BOUNCE'
+                            ? 'repeated temporary bounces'
+                            : `a ${suppressionReasonLabel(contact.suppression.reason)}`}{' '}
+                          on{' '}
                           {dayjs(contact.suppression.createdAt).format('D MMM YYYY')}
                         </p>
                         <p className="mt-1 text-xs text-amber-800">
@@ -587,7 +591,9 @@ export default function ContactDetailPage() {
           description={
             liftReason === 'COMPLAINT'
               ? 'This address reported your email as spam. Only remove this if they asked to hear from you again: more complaints harm the reputation of the whole account.'
-              : 'This address bounced for good. If it still doesn’t exist, the next email bounces again. SES blocks addresses for bounces and complaints alike: if you’re not sure why this one is blocked, leave it.'
+              : liftReason === 'SOFT_BOUNCE'
+                ? 'This address kept bouncing temporarily for days, perhaps a full or abandoned mailbox. Remove this if it should work again: if not, it gets suppressed again after more bounces.'
+                : 'This address bounced for good. If it still doesn’t exist, the next email bounces again. SES blocks addresses for bounces and complaints alike: if you’re not sure why this one is blocked, leave it.'
           }
           confirmText="Remove suppression"
           loadingText="Removing…"

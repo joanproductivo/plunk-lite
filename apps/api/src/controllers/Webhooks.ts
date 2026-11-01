@@ -591,7 +591,11 @@ export class Webhooks {
             eventData = {
               ...baseEventData,
               bounceType,
+              bounceSubType,
               transientBounce: true,
+              // Plunk Lite: what SoftBounceService counts. Only the contact's own address: not a
+              // workflow's custom recipient, or the simulator, whose bounces say nothing about them
+              ...(sentTo === contactAddress && !isSimulated && {softBounceAddress: sentTo}),
             };
             break;
           }

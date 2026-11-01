@@ -17,6 +17,16 @@ type Db = Prisma.TransactionClient | typeof prisma;
  */
 export const MAX_FILTERED_SUPPRESSIONS = 20_000;
 
+const SUPPRESSED_BECAUSE: Record<SuppressionReason, string> = {
+  BOUNCE: 'bounced',
+  SOFT_BOUNCE: 'kept bouncing temporarily',
+  COMPLAINT: 'reported an email as spam',
+};
+
+/** What an address suppressed for this reason did, in a few words, for logs and errors */
+export const suppressionCause = (reason: string): string =>
+  reason === 'COMPLAINT' ? 'complaint' : reason === 'SOFT_BOUNCE' ? 'repeated temporary bounces' : 'bounce';
+
 /**
  * A request to subscribe an address that is suppressed, made by someone who asked for exactly
  * that: the contact page, an update of that contact, or the dashboard's add-contact form
@@ -24,7 +34,7 @@ export const MAX_FILTERED_SUPPRESSIONS = 20_000;
 export class SuppressedAddressError extends ConflictError {
   public constructor(email: string, suppression: Suppression) {
     super(
-      `${email} cannot be subscribed: it ${suppression.reason === 'COMPLAINT' ? 'reported an email as spam' : 'bounced'} on ${suppression.createdAt.toISOString().slice(0, 10)}. Remove the suppression on its contact page (adding the contact unsubscribed first, if there is none) to subscribe it again.`,
+      `${email} cannot be subscribed: it ${SUPPRESSED_BECAUSE[suppression.reason]} on ${suppression.createdAt.toISOString().slice(0, 10)}. Remove the suppression on its contact page (adding the contact unsubscribed first, if there is none) to subscribe it again.`,
       {suppression},
       ErrorCode.ADDRESS_SUPPRESSED,
     );
@@ -40,7 +50,9 @@ export class SuppressionService {
   /**
    * Record addresses as suppressed, from the email whose bounce or complaint it was -- or none,
    * for an import that says the address bounced or complained elsewhere. A complaint on an
-   * address suppressed for a bounce replaces the reason; anything else recorded stays as it is.
+   * address suppressed for a bounce replaces the reason, and a bounce or complaint one suppressed
+   * for temporary bounces: `isAttemptedBounce` and the export read the stronger one. Anything else
+   * recorded stays as it is.
    */
   public static async record(
     db: Db,
@@ -55,7 +67,8 @@ export class SuppressionService {
         VALUES (${projectId}, ${email}, ${reason}, ${emailId})
         ON CONFLICT ("projectId", "email") DO UPDATE
           SET "reason" = EXCLUDED."reason", "emailId" = EXCLUDED."emailId", "createdAt" = now()
-        WHERE "plunk_lite_suppressions"."reason" = 'BOUNCE' AND EXCLUDED."reason" = 'COMPLAINT'`;
+        WHERE ("plunk_lite_suppressions"."reason", EXCLUDED."reason") IN
+          (('BOUNCE', 'COMPLAINT'), ('SOFT_BOUNCE', 'BOUNCE'), ('SOFT_BOUNCE', 'COMPLAINT'))`;
     }
   }
 
@@ -142,7 +155,7 @@ export class SuppressionService {
     }
 
     signale.info(
-      `[SUPPRESSION] ${normalizeEmail(address)} stays unsubscribed: suppressed after a ${suppression.reason.toLowerCase()}`,
+      `[SUPPRESSION] ${normalizeEmail(address)} stays unsubscribed: suppressed after ${suppressionCause(suppression.reason)}`,
     );
     return false;
   }
@@ -159,7 +172,8 @@ export class SuppressionService {
    *
    * SES goes first, as the contact page offers this only while the row exists: if SES does not
    * answer the row stays, so it can be tried again. Without the IAM permission, the row goes anyway
-   * and the result says so; otherwise an installation without it could never lift one.
+   * and the result says so; otherwise an installation without it could never lift one. Temporary
+   * bounces never put the address on SES's list: if it is there it is for something else, and left.
    */
   public static async lift(
     projectId: string,
@@ -175,7 +189,8 @@ export class SuppressionService {
       return {lifted: false};
     }
 
-    const touchesSes = ses === 'any' ? row.emailId !== null : await this.isAttemptedBounce(projectId, row);
+    const touchesSes =
+      ses === 'any' ? row.emailId !== null && row.reason !== 'SOFT_BOUNCE' : await this.isAttemptedBounce(projectId, row);
     const atSes = touchesSes ? await removeFromAccountSuppressionList(email) : undefined;
     if (atSes === 'unavailable') {
       throw new HttpException(503, 'SES did not answer. Try again.', ErrorCode.EXTERNAL_SERVICE_ERROR);
@@ -186,8 +201,27 @@ export class SuppressionService {
       signale.info(
         `[SUPPRESSION] Lifted the suppression of ${email} in project ${projectId}${atSes ? ` (SES: ${atSes})` : ''}`,
       );
+      await this.markLifted(projectId, email);
     }
     return {lifted: removed.count > 0, ...(atSes && {ses: atSes})};
+  }
+
+  /**
+   * Where SoftBounceService starts counting again, or the next temporary bounce would suppress the
+   * address right back. The lift stands if it cannot be written.
+   */
+  private static async markLifted(projectId: string, email: string): Promise<void> {
+    try {
+      const contact = await prisma.contact.findUnique({
+        where: {projectId_email: {projectId, email}},
+        select: {id: true},
+      });
+      if (contact) {
+        await prisma.event.create({data: {projectId, contactId: contact.id, name: 'contact.suppression_lifted'}});
+      }
+    } catch (error) {
+      signale.warn(`[SUPPRESSION] Could not mark the lift of ${email} in project ${projectId}:`, error);
+    }
   }
 
   /** Whether a row comes from a bounce SES attempted: one already blocked records no `bouncedAt` */

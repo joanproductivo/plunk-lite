@@ -44,7 +44,7 @@ import {MeterService} from '../services/MeterService.js';
 import {ProjectFooterService} from '../services/ProjectFooterService.js';
 import {emailQueue} from '../services/QueueService.js';
 import {SecurityService} from '../services/SecurityService.js';
-import {SuppressionService} from '../services/SuppressionService.js';
+import {suppressionCause, SuppressionService} from '../services/SuppressionService.js';
 import {
   classifySesRefusal,
   configurationSetFor,
@@ -461,7 +461,7 @@ export async function processEmailJob(job: EmailJob): Promise<void> {
       where: {id: emailId, status: EmailStatus.PENDING},
       data: {
         status: EmailStatus.FAILED,
-        error: `Address is suppressed after a ${suppression.reason === 'COMPLAINT' ? 'complaint' : 'bounce'}`,
+        error: `Address is suppressed after ${suppressionCause(suppression.reason)}`,
       },
     });
 

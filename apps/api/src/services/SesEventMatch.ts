@@ -193,6 +193,12 @@ export function sesEventTime(eventType: SesEventType, body: unknown): Date | und
   return undefined;
 }
 
+/** Plunk Lite: whether a `contact.subscribed` event was someone's choice, unlike the end of a snooze */
+export function isChosenSubscription(event: {data: unknown}): boolean {
+  const data = event.data && typeof event.data === 'object' && !Array.isArray(event.data) ? event.data : {};
+  return (data as {reason?: unknown}).reason !== ('snooze_expired' satisfies SubscriptionChangeReason);
+}
+
 /**
  * Plunk Lite: whether a contact chose to subscribe again after `since`, by the `contact.subscribed`
  * events tracked for them. The end of a snooze is not a choice made after it, and does not count.
@@ -209,10 +215,7 @@ export async function subscribedAgainSince(contactId: string, since: Date | unde
     orderBy: {createdAt: 'desc'},
     take: 20,
   });
-  return events.some(event => {
-    const data = event.data && typeof event.data === 'object' && !Array.isArray(event.data) ? event.data : {};
-    return (data as {reason?: unknown}).reason !== ('snooze_expired' satisfies SubscriptionChangeReason);
-  });
+  return events.some(isChosenSubscription);
 }
 
 /** An address as SES writes it, bare or as `Name <address>`: lowercased, without the name */
