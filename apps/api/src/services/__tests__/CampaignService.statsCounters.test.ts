@@ -271,7 +271,7 @@ describe('CampaignService - stats counters', () => {
       expect(stats.bouncedCount).toBe(1);
     });
 
-    it('leaves sentCount alone unless asked to fold it', async () => {
+    it('leaves sentCount alone unless asked to fold it, on a campaign that is not SENT', async () => {
       await sendTo('y1@example.com');
       await prisma.campaign.update({where: {id: campaignId}, data: {sentCount: 999}});
 

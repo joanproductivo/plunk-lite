@@ -1,3 +1,4 @@
+import {NOT_DELIVERED_AFTER_MS} from '@plunk/shared';
 import type {CampaignRecipient, CampaignRecipientType, CursorPaginatedResponse} from '@plunk/types';
 import {Button, Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, Skeleton} from '@plunk/ui';
 import {AlertCircle, ChevronRight} from 'lucide-react';
@@ -30,7 +31,7 @@ const COPY: Record<CampaignRecipientType, {title: string; empty: string; describ
     title: 'Not delivered',
     empty: 'Every email of this campaign was delivered, or is in another list.',
     describe: total =>
-      `${total.toLocaleString()} ${total === 1 ? 'email has' : 'emails have'} no confirmed delivery. These contacts stay subscribed.`,
+      `${total.toLocaleString()} ${total === 1 ? 'email has' : 'emails have'} no confirmed delivery.`,
   },
 };
 
@@ -61,9 +62,6 @@ export function deliveryReason({state, detail}: NonNullable<CampaignRecipient['d
   }
 }
 
-// How long SES can still be trying: right after a send, nearly everything is unconfirmed
-const STILL_ARRIVING_MS = 24 * 60 * 60 * 1000;
-
 const countOf = (count: number) => `${count.toLocaleString()} ${count === 1 ? 'email' : 'emails'}`;
 
 /** The line that opens the list, on the campaign's results */
@@ -71,7 +69,8 @@ export function describeNotDelivered(
   {notDeliveredCount, notSentCount}: {notDeliveredCount: number; notSentCount: number},
   sentAt: string | Date | null,
 ): string {
-  const stillArriving = sentAt !== null && Date.now() - new Date(sentAt).getTime() < STILL_ARRIVING_MS;
+  // Right after a send, nearly everything is unconfirmed
+  const stillArriving = sentAt !== null && Date.now() - new Date(sentAt).getTime() < NOT_DELIVERED_AFTER_MS;
   const parts: string[] = [];
   if (notDeliveredCount > 0) {
     parts.push(
@@ -178,15 +177,15 @@ function RecipientList({campaignId, type}: {campaignId: string; type: CampaignRe
 
         {/*
           The figure counts recipients this campaign lost; the list reads the emails that
-          carry them. Those can disagree, because deleting a contact cascades their email
-          rows away while the campaign counter stands until something next marks the
-          campaign dirty. Saying so is the only honest option: an empty panel under a
+          carry them. Those can disagree, because deleting a contact takes their email rows
+          away and the counter follows at the next sweep (or, for what was deleted before
+          that mark existed, at the campaign's next event). Saying so is the only honest option: an empty panel under a
           header promising 209 addresses reads as a broken screen.
         */}
         {!error && !isFirstLoad && isMissingRows && (
           <p className="p-6 text-sm text-neutral-500">
             These contacts have since been deleted from the project, so there is nobody left
-            to list. The figure still counts them.
+            to list. The figure counts them until its next recount.
           </p>
         )}
 

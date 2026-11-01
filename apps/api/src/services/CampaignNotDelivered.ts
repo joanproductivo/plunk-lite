@@ -1,22 +1,21 @@
 import {EmailStatus, Prisma} from '@plunk/db';
+import {NOT_DELIVERED_AFTER_MS} from '@plunk/shared';
 import type {CampaignDeliveryState} from '@plunk/types';
 
 import {prisma} from '../database/prisma.js';
 
 import {POSSIBLY_SENT_NOTE} from './EmailService.js';
 
-/** How long SES can still be trying. Measured once: it gave up on a mailbox after 14 hours. */
-export const NOT_DELIVERED_AFTER_MS = 24 * 60 * 60 * 1000;
-
 const ERROR_SHOWN = 300;
 
+// The same rule as `left` in `describe` below: the figures and the reasons of the list must agree
 const NEVER_LEFT = Prisma.sql`e."status" = 'FAILED' AND e."sentAt" IS NULL AND e."messageId" IS NULL
   AND COALESCE(e."error", '') NOT LIKE ${`%${POSSIBLY_SENT_NOTE}%`}`;
 
 /**
  * Plunk Lite: the emails of a campaign with no confirmed delivery, of `emails` as `e`. Left out, what
  * has an answer: a delivery, an open or click (it arrived, and the delivery event is what is missing),
- * and a bounce or complaint with its date, which have their own lists. The statuses keep this on the
+ * and a bounce or complaint with its date, which have their own figures. The statuses keep this on the
  * (campaignId, status) index, so its cost follows these emails and not the size of the campaign.
  *
  * A row failed as possibly sent keeps its status whatever comes back for it, hence the dates on FAILED.
@@ -29,7 +28,7 @@ export const NOT_DELIVERED_FILTER = Prisma.sql`e."deliveredAt" IS NULL AND e."st
 export const CampaignNotDelivered = {
   /**
    * How many left with no confirmed delivery, and how many never left: those are not in `sentCount`,
-   * and a suppressed address is not a problem of delivery.
+   * and an address Plunk itself holds back is not a problem of delivery.
    */
   async counts(campaignId: string): Promise<{notDelivered: number; notSent: number}> {
     const [row] = await prisma.$queryRaw<{notDelivered: number; notSent: number}[]>`
@@ -50,6 +49,8 @@ export const CampaignNotDelivered = {
         error: true,
         sentAt: true,
         messageId: true,
+        bouncedAt: true,
+        complainedAt: true,
         // Tracked as `email.bounce`, marked transient, before `email.softbounce` existed
         events: {
           where: {name: {in: ['email.softbounce', 'email.bounce']}},
@@ -59,7 +60,14 @@ export const CampaignNotDelivered = {
       },
     });
 
-    return new Map(emails.map(email => [email.id, describe(email)]));
+    const details = new Map<string, {state: CampaignDeliveryState; detail: string | null}>();
+    for (const email of emails) {
+      const detail = describe(email);
+      if (detail) {
+        details.set(email.id, detail);
+      }
+    }
+    return details;
   },
 };
 
@@ -68,14 +76,23 @@ function describe(email: {
   error: string | null;
   sentAt: Date | null;
   messageId: string | null;
+  bouncedAt: Date | null;
+  complainedAt: Date | null;
   events: {name: string; data: Prisma.JsonValue}[];
-}): {state: CampaignDeliveryState; detail: string | null} {
+}): {state: CampaignDeliveryState; detail: string | null} | null {
   if (email.status === EmailStatus.FAILED) {
     const left = email.sentAt || email.messageId || email.error?.includes(POSSIBLY_SENT_NOTE);
     return {state: left ? 'failed' : 'not_sent', detail: email.error?.slice(0, ERROR_SHOWN) ?? null};
   }
-  if (email.status !== EmailStatus.SENT) {
+  if (
+    (email.status === EmailStatus.BOUNCED && !email.bouncedAt) ||
+    (email.status === EmailStatus.COMPLAINED && !email.complainedAt)
+  ) {
     return {state: 'suppressed', detail: null};
+  }
+  // An event that came in since the list read this row: it has an answer now, and no reason to give
+  if (email.status !== EmailStatus.SENT) {
+    return null;
   }
 
   for (const event of email.events) {

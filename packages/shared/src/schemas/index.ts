@@ -786,6 +786,12 @@ export const ALERT_RECIPIENTS_MAX = 10;
 /** How many failing sources the dashboard reads at once, and so can mark reviewed (Plunk Lite) */
 export const FAILURE_ALERTS_OPEN_MAX = 20;
 
+/**
+ * How long SES can still be trying to deliver a campaign's email (Plunk Lite). Measured once: it
+ * gave up on a mailbox after 14 hours.
+ */
+export const NOT_DELIVERED_AFTER_MS = 24 * 60 * 60 * 1000;
+
 const NOTICE_KINDS = ['project', 'brake', 'security', 'domain', 'sns', 'ses', 'aws', 'redis', 'delivery'];
 
 /**

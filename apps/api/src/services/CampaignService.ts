@@ -931,7 +931,7 @@ export class CampaignService {
   /**
    * Note that a campaign's counters are behind its email rows.
    *
-   * Called from the SES event webhook, which runs once per recipient per event --
+   * Called from the SES event webhook (Plunk Lite: and when contacts are deleted), which runs once per recipient per event --
    * the same shape of load as the send path, and the reason `sentCount` is not a
    * column increment either. A campaign row updated on every delivery would
    * serialize thousands of writes on one row and leave a dead tuple behind each,
@@ -994,14 +994,14 @@ export class CampaignService {
    * Recompute a campaign's counters from the emails that carry them.
    *
    * This is the only path that writes them. It runs at finalization and then from
-   * the dirty-set sweep as events arrive -- never on read, which is what made the
+   * the dirty-set sweep as events arrive or contacts are deleted -- never on read, which is what made the
    * stats endpoint slow enough to notice.
    *
    * One grouped pass over the campaign's emails, so the cost is O(campaign size)
    * and paid once. `unsubscribedCount` is deliberately absent: it is written together
    * with `Email.unsubscribedAt`, in one statement, by
    * ContactService.recordCampaignUnsubscribe (the unsubscribe page, and in Plunk Lite the
-   * SES webhook), so it is already exact, and recounting it
+   * SES webhook; DeletedEmailCounts takes off those of deleted contacts), so it is already exact, and recounting it
    * here would also count rows the backfill stamped for opt-outs older than that write.
    *
    * `foldSentProgress` folds `sentCount` in as well and drops the Redis delta that
@@ -1012,6 +1012,13 @@ export class CampaignService {
    * the send is over there is no delta, and a sent campaign follows its emails.
    */
   public static async reconcileStats(campaignId: string, {foldSentProgress = false} = {}): Promise<void> {
+    // Plunk Lite: read before the emails, so that only a send already over is followed. A send that
+    // finishes while this counts would have its right figure overwritten with an older count.
+    const wasSent =
+      !foldSentProgress &&
+      (await prisma.campaign.findUnique({where: {id: campaignId}, select: {status: true}}))?.status ===
+        CampaignStatus.SENT;
+
     const [totals] = await prisma.$queryRaw<
       {
         sent: bigint;
@@ -1055,10 +1062,12 @@ export class CampaignService {
     if (!foldSentProgress) {
       // Plunk Lite: deleting a contact deletes its emails, and a figure that kept them would have
       // them as sent and never delivered. Only SENT: a cancelled campaign keeps what it shows.
-      await prisma.campaign.updateMany({
-        where: {id: campaignId, status: CampaignStatus.SENT, sentCount: {not: Number(totals.sent)}},
-        data: {sentCount: Number(totals.sent)},
-      });
+      if (wasSent) {
+        await prisma.campaign.updateMany({
+          where: {id: campaignId, sentCount: {not: Number(totals.sent)}},
+          data: {sentCount: Number(totals.sent)},
+        });
+      }
       return;
     }
 
@@ -1403,7 +1412,8 @@ export class CampaignService {
    * Get campaign statistics.
    *
    * Reads the counters off the campaign row rather than recomputing them.
-   * `sentCount` is maintained by the send paths and `unsubscribedCount` by
+   * `sentCount` is maintained by the send paths (Plunk Lite: and follows the emails of a sent
+   * campaign, when contacts are deleted) and `unsubscribedCount` by
    * ContactService.recordCampaignUnsubscribe (the unsubscribe page, and in Plunk Lite
    * the SES webhook for the unsubscribe a bounce or complaint causes);
    * delivered/opened/clicked/bounced/complained are written by `reconcileStats`, which
@@ -1520,7 +1530,7 @@ export class CampaignService {
    * No COUNT(*): the total already lives on the campaign row, written by `reconcileStats`.
    * Recounting here would be the expensive half of the request and could only ever agree
    * with the number already on the row. Plunk Lite: `not_delivered` has no counter, as Plunk's
-   * tables are not altered, so it counts the few rows its index finds.
+   * tables are not altered, so it counts the rows its index finds.
    */
   public static async listRecipients(
     projectId: string,

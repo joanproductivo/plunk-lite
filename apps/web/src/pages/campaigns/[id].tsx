@@ -1440,7 +1440,7 @@ function CampaignDetails() {
                 <button
                   type="button"
                   onClick={() => setRecipientList('not_delivered')}
-                  className="block w-full border-t border-neutral-100 pt-4 text-left text-xs text-neutral-500 underline decoration-neutral-300 underline-offset-4 transition-colors hover:decoration-neutral-900"
+                  className="block w-full border-t border-neutral-100 pt-4 text-left text-xs text-neutral-500 underline decoration-neutral-300 underline-offset-4 transition-colors hover:decoration-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2"
                 >
                   {describeNotDelivered(s, c.sentAt)}
                 </button>

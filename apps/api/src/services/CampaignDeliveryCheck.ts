@@ -1,10 +1,10 @@
-import {CampaignStatus} from '@plunk/db';
+import {CampaignStatus, Prisma} from '@plunk/db';
+import {NOT_DELIVERED_AFTER_MS} from '@plunk/shared';
 import signale from 'signale';
 
 import {prisma} from '../database/prisma.js';
 import {redis} from '../database/redis.js';
 
-import {NOT_DELIVERED_AFTER_MS} from './CampaignNotDelivered.js';
 import {FailureAlertService} from './FailureAlertService.js';
 
 // A first estimate, to review with the first real campaign of thousands
@@ -16,6 +16,8 @@ const DOMAINS_SHOWN = 3;
 // Outlasts the window, and only keeps a campaign from being judged twice
 const CHECKED_SECONDS = 3 * 86400;
 const CHECKED_KEY = (campaignId: string) => `plunk-lite:campaign-delivery-checked:${campaignId}`;
+// An open, a click or a complaint means it got there, with the delivery event what is missing
+const ARRIVED = Prisma.sql`(e."deliveredAt" IS NOT NULL OR e."openedAt" IS NOT NULL OR e."clickedAt" IS NOT NULL OR e."complainedAt" IS NOT NULL)`;
 
 /**
  * Plunk Lite: a campaign that delivered too little a day after it was sent, on the dashboard banner
@@ -23,7 +25,8 @@ const CHECKED_KEY = (campaignId: string) => `plunk-lite:campaign-delivery-checke
  * bounces are not in it. Run with the check of the SES events, and judged once per campaign.
  *
  * Counted from the emails, so as not to depend on the counters' sweep, and without the SES mailbox
- * simulator, as the rates leave it out too.
+ * simulator, as the rates leave it out too. A permanent bounce counts as not delivered here, though
+ * it has its own list: what this watches is how much of the campaign arrived.
  */
 export const CampaignDeliveryCheck = {
   async run(): Promise<void> {
@@ -52,18 +55,17 @@ export const CampaignDeliveryCheck = {
     }
 
     const [counts] = await prisma.$queryRaw<{sent: number; delivered: number}[]>`
-      SELECT count(*)::int AS "sent", count(e."deliveredAt")::int AS "delivered"
+      SELECT count(*)::int AS "sent", (count(*) FILTER (WHERE ${ARRIVED}))::int AS "delivered"
       FROM "emails" e
       WHERE e."campaignId" = ${campaign.id}::text AND e."sentAt" IS NOT NULL AND e."simulated" = false`;
     const {sent, delivered} = counts ?? {sent: 0, delivered: 0};
     const missing = sent - delivered;
-    const rate = sent > 0 ? (delivered / sent) * 100 : 100;
 
-    if (rate < MIN_DELIVERY_RATE && missing >= MIN_NOT_DELIVERED) {
+    if (delivered * 100 < MIN_DELIVERY_RATE * sent && missing >= MIN_NOT_DELIVERED) {
       const sourceKey = `delivery:campaign:${campaign.id}`;
       await FailureAlertService.record(
         campaign.projectId,
-        {sourceKey, label: campaign.name, error: await this.describe(campaign.id, rate, missing, sent)},
+        {sourceKey, label: campaign.name, error: await this.describe(campaign.id, delivered, sent)},
         {alert: false},
       );
       // `record` never throws: without its row, this is judged again rather than lost
@@ -76,13 +78,14 @@ export const CampaignDeliveryCheck = {
   },
 
   /** What the banner says, its first 140 characters being what it shows */
-  async describe(campaignId: string, rate: number, missing: number, sent: number): Promise<string> {
+  async describe(campaignId: string, delivered: number, sent: number): Promise<string> {
+    const missing = sent - delivered;
     const domains = await prisma.$queryRaw<{domain: string; count: number}[]>`
       SELECT lower(split_part(c."email", '@', 2)) AS "domain", count(*)::int AS "count"
       FROM "emails" e
       JOIN "contacts" c ON c."id" = e."contactId"
       WHERE e."campaignId" = ${campaignId}::text AND e."sentAt" IS NOT NULL AND e."simulated" = false
-        AND e."deliveredAt" IS NULL
+        AND NOT ${ARRIVED}
       GROUP BY 1
       ORDER BY 2 DESC, 1
       LIMIT ${DOMAINS_SHOWN}`;
@@ -92,7 +95,7 @@ export const CampaignDeliveryCheck = {
       ...(other > 0 ? [`other ${other.toLocaleString('en-US')}`] : []),
     ].join(', ');
     // Down, so that 94.96% does not read as the 95% it did not reach
-    const shownRate = (Math.floor(rate * 10) / 10).toFixed(1);
+    const shownRate = (Math.floor((delivered * 1000) / sent) / 10).toFixed(1);
 
     return `Only ${shownRate}% delivered after 24 h: ${missing.toLocaleString('en-US')} of ${sent.toLocaleString('en-US')} not. ${breakdown}.`;
   },

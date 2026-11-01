@@ -87,8 +87,7 @@ describe('CampaignDeliveryCheck', () => {
       label: 'Big send',
       count: 1,
       reviewPath: `/campaigns/${campaign.id}`,
-      lastError:
-        'Only 55.5% delivered after 24 h: 8 of 18 not. gmail.com 3, hotmail.com 2, aaa.test 1, other 2.',
+      lastError: 'Only 55.5% delivered after 24 h: 8 of 18 not. gmail.com 3, hotmail.com 2, aaa.test 1, other 2.',
     });
   });
 
@@ -103,9 +102,12 @@ describe('CampaignDeliveryCheck', () => {
   });
 
   it('does not round a rate up to the threshold', async () => {
-    const description = await CampaignDeliveryCheck.describe('no-such-campaign', 94.96, 101, 2000);
+    const shown = (delivered: number, sent: number) =>
+      CampaignDeliveryCheck.describe('no-such-campaign', delivered, sent);
 
-    expect(description).toContain('Only 94.9% delivered');
+    expect(await shown(9496, 10000)).toContain('Only 94.9% delivered');
+    // In floating point, 1884 / 2000 * 100 is just under 94.2
+    expect(await shown(1884, 2000)).toContain('Only 94.2% delivered');
   });
 
   it('accepts exactly the threshold', async () => {
@@ -141,6 +143,32 @@ describe('CampaignDeliveryCheck', () => {
     await CampaignDeliveryCheck.run();
 
     expect(await warnings()).toHaveLength(0);
+  });
+
+  it('counts as arrived what was opened, clicked or complained about, its delivery event lost', async () => {
+    const campaign = await campaignOf({delivered: 5, missing: {'gmail.com': 6}});
+    const emails = await prisma.email.findMany({where: {campaignId: campaign.id, deliveredAt: null}});
+    await prisma.email.update({where: {id: emails[0]!.id}, data: {status: 'OPENED', openedAt: new Date()}});
+    await prisma.email.update({where: {id: emails[1]!.id}, data: {status: 'CLICKED', clickedAt: new Date()}});
+    await prisma.email.update({where: {id: emails[2]!.id}, data: {status: 'COMPLAINED', complainedAt: new Date()}});
+
+    await CampaignDeliveryCheck.run();
+
+    // 3 left missing, under the minimum
+    expect(await warnings()).toHaveLength(0);
+  });
+
+  it('counts a permanent bounce as not delivered, and in the providers', async () => {
+    const campaign = await campaignOf({delivered: 5, missing: {'gmail.com': 5}});
+    await prisma.email.updateMany({
+      where: {campaignId: campaign.id, deliveredAt: null},
+      data: {status: 'BOUNCED', bouncedAt: new Date()},
+    });
+
+    await CampaignDeliveryCheck.run();
+
+    const [warning] = await warnings();
+    expect(warning?.lastError).toBe('Only 50.0% delivered after 24 h: 5 of 10 not. gmail.com 5.');
   });
 
   it('leaves out the SES mailbox simulator', async () => {

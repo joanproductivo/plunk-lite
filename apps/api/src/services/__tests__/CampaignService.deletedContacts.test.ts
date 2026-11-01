@@ -23,7 +23,11 @@ describe('CampaignService - deleted contacts', () => {
   });
 
   /** A campaign of `count` delivered emails, its counters as the send left them */
-  async function sentCampaign(count: number, status: CampaignStatus = 'SENT', stamps?: Prisma.EmailUpdateManyMutationInput) {
+  async function sentCampaign(
+    count: number,
+    status: CampaignStatus = 'SENT',
+    stamps?: Prisma.EmailUpdateManyMutationInput,
+  ) {
     const campaign = await factories.createCampaign({projectId, name: 'Deleted', status});
     const contacts = [];
     for (let i = 0; i < count; i++) {

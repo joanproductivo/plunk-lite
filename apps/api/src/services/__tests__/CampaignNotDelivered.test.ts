@@ -1,8 +1,9 @@
 import type {Prisma} from '@plunk/db';
+import {NOT_DELIVERED_AFTER_MS} from '@plunk/shared';
 import {beforeEach, describe, expect, it} from 'vitest';
 
 import {factories, getPrismaClient} from '../../../../../test/helpers';
-import {CampaignNotDelivered, NOT_DELIVERED_AFTER_MS} from '../CampaignNotDelivered';
+import {CampaignNotDelivered} from '../CampaignNotDelivered';
 import {CampaignService} from '../CampaignService';
 import {POSSIBLY_SENT_NOTE} from '../EmailService';
 
@@ -62,9 +63,17 @@ describe('CampaignNotDelivered', () => {
     await emailTo('bounce-list@plunk.test', {status: 'BOUNCED'});
     await emailTo('complaint-list@plunk.test', {status: 'COMPLAINED'});
     await emailTo('rejected@plunk.test', {status: 'FAILED', error: 'Rejected by SES: Bad content'});
-    await emailTo('maybe@plunk.test', {status: 'FAILED', sentAt: null, error: `The email ${POSSIBLY_SENT_NOTE}: timeout`});
+    await emailTo('maybe@plunk.test', {
+      status: 'FAILED',
+      sentAt: null,
+      error: `The email ${POSSIBLY_SENT_NOTE}: timeout`,
+    });
     await emailTo('taken@plunk.test', {status: 'FAILED', sentAt: null, messageId: 'ses-1', error: 'Lost'});
-    await emailTo('suppressed@plunk.test', {status: 'FAILED', sentAt: null, error: 'Address is suppressed after a bounce'});
+    await emailTo('suppressed@plunk.test', {
+      status: 'FAILED',
+      sentAt: null,
+      error: 'Address is suppressed after a bounce',
+    });
     await emailTo('unsubscribed@plunk.test', {status: 'FAILED', sentAt: null, error: 'Contact is unsubscribed'});
 
     expect(await listed()).toEqual({

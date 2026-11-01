@@ -8,7 +8,7 @@
  * campaign that finalized before the counters started being written at all reported zeros over
  * thousands of recipients whose email rows held every event.
  *
- * The webhook adds the campaign to a Redis set as each event lands (see
+ * The webhook adds the campaign to a Redis set as each event lands (Plunk Lite: as does deleting its contacts; see
  * `CampaignService.markStatsDirty`) and this sweep drains it, recounting each campaign once per
  * run. Recounting rather than incrementing is the point: SES delivers notifications at least
  * once, so an increment has to be guarded against replays and still loses anything dropped, while

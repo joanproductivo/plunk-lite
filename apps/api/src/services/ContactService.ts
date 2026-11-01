@@ -432,9 +432,7 @@ export class ContactService {
       return;
     }
     const {CampaignService} = await import('./CampaignService.js');
-    for (const campaignId of campaignIds) {
-      await CampaignService.markStatsDirty(campaignId);
-    }
+    await Promise.all(campaignIds.map(campaignId => CampaignService.markStatsDirty(campaignId)));
   }
 
   /**
