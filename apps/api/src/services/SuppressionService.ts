@@ -23,9 +23,9 @@ const SUPPRESSED_BECAUSE: Record<SuppressionReason, string> = {
   COMPLAINT: 'reported an email as spam',
 };
 
-/** What an address suppressed for this reason did, in a few words, for logs and errors */
+/** Why an address is suppressed, to follow "after", for logs and errors */
 export const suppressionCause = (reason: string): string =>
-  reason === 'COMPLAINT' ? 'complaint' : reason === 'SOFT_BOUNCE' ? 'repeated temporary bounces' : 'bounce';
+  reason === 'COMPLAINT' ? 'a complaint' : reason === 'SOFT_BOUNCE' ? 'repeated temporary bounces' : 'a bounce';
 
 /**
  * A request to subscribe an address that is suppressed, made by someone who asked for exactly
@@ -66,7 +66,9 @@ export class SuppressionService {
         INSERT INTO "plunk_lite_suppressions" ("projectId", "email", "reason", "emailId")
         VALUES (${projectId}, ${email}, ${reason}, ${emailId})
         ON CONFLICT ("projectId", "email") DO UPDATE
-          SET "reason" = EXCLUDED."reason", "emailId" = EXCLUDED."emailId", "createdAt" = now()
+          SET "reason" = EXCLUDED."reason",
+            "emailId" = COALESCE(EXCLUDED."emailId", "plunk_lite_suppressions"."emailId"),
+            "createdAt" = now()
         WHERE ("plunk_lite_suppressions"."reason", EXCLUDED."reason") IN
           (('BOUNCE', 'COMPLAINT'), ('SOFT_BOUNCE', 'BOUNCE'), ('SOFT_BOUNCE', 'COMPLAINT'))`;
     }

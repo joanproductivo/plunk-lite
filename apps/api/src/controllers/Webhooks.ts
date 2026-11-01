@@ -584,8 +584,8 @@ export class Webhooks {
             signale.info(
               `[WEBHOOK] Transient bounce received for ${email.contact.email} from ${email.project.name} (not counted toward bounce rate)`,
             );
-            // Don't update email status or unsubscribe contact
-            // Just track the event for visibility, under its own name: a workflow or webhook
+            // Don't update email status or unsubscribe contact: only repeated ones do that, in
+            // SoftBounceService. Track the event under its own name: a workflow or webhook
             // listening for `email.bounce` acts on an address that is gone, which this one is not
             eventName = 'email.softbounce';
             eventData = {

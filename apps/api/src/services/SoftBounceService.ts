@@ -17,11 +17,12 @@ const BOUNCES_TO_SUPPRESS = 5;
 const MIN_SPAN_MS = 7 * 24 * 60 * 60 * 1000;
 // The others are about the email, not the mailbox: too large, its content or attachment refused
 const SUBTYPES_THAT_COUNT = ['General', 'MailboxFull'];
-// Far more than a project's dead mailboxes reach the cut in a day. A provider blocking the sender
-// may well read as `General` too, and must not take a whole list off with it.
+// A provider blocking the sender may well read as `General` too, and must not take a whole list off
+// with it. Over a week, not a day: a block lasts, and a day's window would let as many go every day.
 const BRAKE_SUPPRESSIONS = 20;
-const BRAKE_WINDOW_MS = 24 * 60 * 60 * 1000;
-// More than can count after the last delivery, or the query would have no bound
+const BRAKE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+// The latest ones are what can count, and the query needs a bound. An address with more of them
+// than this, of subtypes that do not count, only gets suppressed later.
 const EVENTS_READ = 200;
 
 interface SoftBounceData {
@@ -31,8 +32,8 @@ interface SoftBounceData {
 }
 
 /**
- * Plunk Lite: stops mailing an address that only bounces temporarily, which SES keeps trying and
- * Plunk kept sending to for ever. Anything that shows the address works starts the count again.
+ * Plunk Lite: stops mailing an address that only bounces temporarily. Anything that shows the
+ * address works starts the count again.
  */
 export class SoftBounceService {
   /** Called once the event of a soft bounce of the contact's own address is tracked */
@@ -46,11 +47,11 @@ export class SoftBounceService {
       return;
     }
 
-    const suppressedToday = await prisma.plunkLiteSuppression.count({
+    const suppressedLately = await prisma.plunkLiteSuppression.count({
       where: {projectId, reason: 'SOFT_BOUNCE', createdAt: {gt: new Date(Date.now() - BRAKE_WINDOW_MS)}},
     });
-    if (suppressedToday >= BRAKE_SUPPRESSIONS) {
-      signale.warn(`[SOFT-BOUNCE] Project ${projectId} reached ${BRAKE_SUPPRESSIONS} suppressions today: not one more`);
+    if (suppressedLately >= BRAKE_SUPPRESSIONS) {
+      signale.warn(`[SOFT-BOUNCE] Project ${projectId} reached ${BRAKE_SUPPRESSIONS} suppressions this week: holding`);
       await FailureAlertService.recordSoftBounceBrake(projectId, BRAKE_SUPPRESSIONS);
       return;
     }
@@ -64,6 +65,7 @@ export class SoftBounceService {
       return flipped.count === 1;
     });
     signale.warn(`[SOFT-BOUNCE] ${contact.email} suppressed after repeated temporary bounces`);
+    await FailureAlertService.recordSoftBounceSuppression(projectId, contact.email);
 
     if (!unsubscribed) {
       return;
@@ -84,7 +86,12 @@ export class SoftBounceService {
     const since = await this.countsSince(contactId);
     const events = await prisma.event.findMany({
       where: {contactId, name: 'email.softbounce'},
-      select: {emailId: true, data: true, createdAt: true, email: {select: {deliveredAt: true}}},
+      select: {
+        emailId: true,
+        data: true,
+        createdAt: true,
+        email: {select: {deliveredAt: true, openedAt: true, clickedAt: true}},
+      },
       orderBy: {createdAt: 'desc'},
       take: EVENTS_READ,
     });
@@ -98,8 +105,10 @@ export class SoftBounceService {
       const time = typeof data.occurredAt === 'string' ? Date.parse(data.occurredAt) : event.createdAt.getTime();
       if (
         !event.emailId ||
-        // Delivered and then "bounced": an autoresponder, as SES reports some of them
+        // It reached the mailbox and then "bounced": an autoresponder, as SES reports some of them
         event.email?.deliveredAt ||
+        event.email?.openedAt ||
+        event.email?.clickedAt ||
         !Number.isFinite(time) ||
         time <= since ||
         typeof data.bounceSubType !== 'string' ||

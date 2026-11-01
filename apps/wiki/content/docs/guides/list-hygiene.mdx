@@ -8,9 +8,9 @@ Plunk automatically monitors the bounce and complaint rates of your emails to he
 
 ## Bounce Management
 
-A bounce occurs when an email cannot be delivered to the recipient's inbox. Plunk records permanent and undetermined bounces as an `email.bounce` event on the contact, and soft ones as `email.softbounce`, and automatically unsubscribes the contact on **permanent (hard) and undetermined bounces**. Transient (soft) bounces don't change subscription state — they're typically retried by the upstream mail server.
+A bounce occurs when an email cannot be delivered to the recipient's inbox. Plunk records permanent and undetermined bounces as an `email.bounce` event on the contact, and soft ones as `email.softbounce`, and automatically unsubscribes the contact on **permanent (hard) and undetermined bounces**. A transient (soft) bounce doesn't change subscription state, but repeated ones do, as described below.
 
-Temporary bounces do not unsubscribe on their own, but they can't go on for ever. After 5 emails in a row bounce with a full mailbox or a general temporary failure, at least 7 days from the first to the last, the contact is unsubscribed and suppressed, also for transactional emails, until the suppression is removed on their contact page. A delivery, open or click starts the count again, as do subscribing again and removing a suppression. If this suppresses 20 contacts of a project in 24 hours, it stops and alerts you, as a provider may be refusing your emails.
+Temporary bounces do not unsubscribe on their own, but they can't go on for ever. After 5 emails in a row bounce with a full mailbox or a general temporary failure, at least 7 days from the first to the last, the contact is unsubscribed and suppressed, also for transactional emails, until the suppression is removed on their contact page. A delivery, open or click starts the count again, as do subscribing again and removing a suppression. Each one alerts you, and after about 20 contacts of a project in 7 days it holds any more, as a provider may be refusing your emails. Removing one of these suppressions doesn't touch SES, whose list never had the address for this. In the CSV export these read `bounced`, so importing the file suppresses them as a bounce.
 
 A bounce only unsubscribes the contact, and is only tracked as theirs, when the address that bounced is the contact's own: a workflow email sent to a custom recipient that bounces leaves the contact subscribed.
 
@@ -19,12 +19,12 @@ A bounce only unsubscribes the contact, and is only tracked as theirs, when the 
 | Type | Description | Auto-unsubscribes? |
 |------|-------------|---------------------|
 | **Permanent (hard)** | Permanent delivery failure — invalid address, blocked domain, recipient rejected. | Yes |
-| **Transient (soft)** | Temporary delivery failure — mailbox full, server unavailable, greylisted. | No |
+| **Transient (soft)** | Temporary delivery failure — mailbox full, server unavailable, greylisted. | Only if repeated |
 | **Undetermined** | The upstream provider couldn't classify the bounce. Treated as permanent to be safe. | Yes |
 
 A bounce with the subtype `OnAccountSuppressionList` is for an address AWS SES already blocks because it bounced or complained before: SES never attempts it. The contact is unsubscribed, but the bounce does not count toward your bounce rate, as SES does not count it either.
 
-In Plunk Lite, addresses on the project's suppression list (a permanent bounce or a complaint) read **Suppressed** in the contact list, with the reason, and have a filter of their own that select-all, bulk actions and the export follow. In the CSV their `status` is `bounced` or `complained`, so importing the file suppresses them again. **Remove suppression** on the contact's page also takes the address off the account's list at SES, which needs `ses:DeleteSuppressedDestination` in the IAM policy; without it, the page says so and, if SES still lists the address, the next email suppresses it again. The public subscribe page takes an address off the list at SES only after a bounce SES really attempted, never a complaint; an address from an import is not touched there either.
+In Plunk Lite, addresses on the project's suppression list (a permanent bounce, repeated temporary bounces or a complaint) read **Suppressed** in the contact list, with the reason, and have a filter of their own that select-all, bulk actions and the export follow. In the CSV their `status` is `bounced` or `complained`, so importing the file suppresses them again. **Remove suppression** on the contact's page also takes the address off the account's list at SES, which needs `ses:DeleteSuppressedDestination` in the IAM policy; without it, the page says so and, if SES still lists the address, the next email suppresses it again. The public subscribe page takes an address off the list at SES only after a bounce SES really attempted, never a complaint; an address from an import is not touched there either.
 
 Permanent and undetermined bounces fire an `email.bounce` event, and soft ones an `email.softbounce` event, that you can branch on inside workflows or webhooks (the payload's `bounceType` field says which kind it was).
 

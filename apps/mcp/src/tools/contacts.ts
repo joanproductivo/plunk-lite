@@ -83,11 +83,11 @@ export async function resolveContact(
  * only the dashboard can lift it -- so the model has to explain it, not retry or work around it.
  */
 const SUPPRESSION_HELP = [
-  '**Suppressed addresses:** an address that bounced permanently or reported an email as spam is on',
+  '**Suppressed addresses:** an address that bounced permanently, kept bouncing temporarily or reported an email as spam is on',
   "the project's suppression list. It is never subscribed or emailed again, by any tool, until someone",
   "removes the suppression on the contact's page in the Plunk dashboard; no tool can lift it, and",
   'deleting and re-creating the contact does not either, because the list is kept by address.',
-  'Do not retry or look for another way to subscribe it: tell the user why (bounce or complaint, and',
+  'Do not retry or look for another way to subscribe it: tell the user why (bounces or complaint, and',
   'the date) and that only the dashboard can lift it.',
 ].join('\n');
 
@@ -99,7 +99,8 @@ export function suppressionNote(contact: unknown): string {
     return '';
   }
 
-  const why = suppressed.reason === 'COMPLAINT'
+  const why =
+    suppressed.reason === 'COMPLAINT'
       ? 'reported an email as spam'
       : suppressed.reason === 'SOFT_BOUNCE'
         ? 'kept bouncing temporarily'

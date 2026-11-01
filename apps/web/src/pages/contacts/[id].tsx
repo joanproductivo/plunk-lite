@@ -270,7 +270,8 @@ export default function ContactDetailPage() {
                         </p>
                         <p className="mt-1 text-xs text-amber-800">
                           Nothing is sent to this address, and it can’t be subscribed until the suppression is removed.
-                          Removing it also takes the address off SES’s suppression list, shared by the whole account.
+                          {contact.suppression.reason !== 'SOFT_BOUNCE' &&
+                            ' Removing it also takes the address off SES’s suppression list, shared by the whole account.'}
                         </p>
                         <Button
                           type="button"

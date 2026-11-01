@@ -17,7 +17,7 @@ export interface FailureReport {
   /**
    * `workflow:<id>`, `campaign:<id>` or `transactional` for failures. For conditions the project
    * should hear about: `project` (disabled), `project:reactivated`, `brake:campaign:<id>` and
-   * `brake:workflow:<id>` (stopped for their bounces), `brake:soft_bounce`, `security:warning`, `security:critical`,
+   * `brake:workflow:<id>` (stopped for their bounces), `brake:soft_bounce`, `brake:soft_bounce_hold`, `security:warning`, `security:critical`,
    * `security:check` (the reputation not being checked), `domain:<id>`, `sns:<what>` (the SES event
    * pipeline), `ses:<what>` (the SES account: its quota, a pause), `aws:alarm:<name>`,
    * `aws:alarm-subscription`, `aws:dlq`, `aws:dlq-unattributed` and `aws:dlq-access:<what>` (the drain of
@@ -87,7 +87,11 @@ const SOURCE_KINDS: Record<string, SourceKind> = {
     name: {en: label => `Workflow "${label}" disabled`, es: label => `Workflow «${label}» desactivado`},
     path: id => `/workflows/${encodeURIComponent(id)}`,
   },
-  // Temporary bounces are suppressing too many contacts at once (SoftBounceService)
+  // A contact suppressed for temporary bounces, or too many of them to go on (SoftBounceService)
+  'brake:soft_bounce_hold': {
+    name: {en: () => 'Temporary bounces: on hold', es: () => 'Rebotes temporales: en pausa'},
+    path: () => '/contacts',
+  },
   'brake:soft_bounce': {
     name: {en: () => 'Temporary bounces', es: () => 'Rebotes temporales'},
     path: () => '/contacts',
@@ -433,14 +437,25 @@ export class FailureAlertService {
     }
   }
 
+  /** A contact suppressed for temporary bounces: a provider's block would look just like this */
+  public static async recordSoftBounceSuppression(projectId: string, address: string): Promise<void> {
+    await this.record(projectId, {
+      sourceKey: 'brake:soft_bounce',
+      label: 'Temporary bounces',
+      error: `Suppressed after repeated temporary bounces. If several contacts of the same provider appear here, it may be refusing your emails rather than their mailboxes being gone: remove those suppressions on each contact's page.`,
+      contactEmail: address,
+    });
+  }
+
   /**
-   * So many addresses suppressed for temporary bounces in a day that more are held back, as it
-   * looks like a provider refusing the sender, not that many dead mailboxes. Once a day: every
-   * further bounce that reaches the cut comes here.
+   * So many addresses suppressed for temporary bounces in a week that the next wait, as it looks
+   * like a provider refusing the sender, not that many dead mailboxes. Once a day: every further
+   * bounce that reaches the cut comes here.
    */
   public static async recordSoftBounceBrake(projectId: string, suppressed: number): Promise<void> {
+    const key = SOFT_BOUNCE_BRAKE_KEY(projectId);
     try {
-      if (!(await redis.set(SOFT_BOUNCE_BRAKE_KEY(projectId), '1', 'EX', REPUTATION_REPEAT_SECONDS, 'NX'))) {
+      if (await redis.get(key)) {
         return;
       }
     } catch (redisError) {
@@ -448,11 +463,17 @@ export class FailureAlertService {
       signale.warn(`[ALERTS] Could not check the last soft bounce alert of project ${projectId}:`, redisError);
     }
 
-    await this.record(projectId, {
-      sourceKey: 'brake:soft_bounce',
+    const alerting = await this.record(projectId, {
+      sourceKey: 'brake:soft_bounce_hold',
       label: 'Temporary bounces',
-      error: `${suppressed} contacts were suppressed for repeated temporary bounces in 24 hours, so no more are for now. A provider may be refusing your emails: check your sending reputation, and any suppressions that look wrong in Contacts.`,
+      error: `${suppressed} contacts were suppressed for repeated temporary bounces in 7 days, so no more are until the count drops. A provider may be refusing your emails: check your sending reputation, and any suppressions that look wrong in Contacts.`,
     });
+    // Only once an alert goes out, as with reputation: until then, the next one records it again
+    if (alerting) {
+      await redis.set(key, '1', 'EX', REPUTATION_REPEAT_SECONDS).catch((redisError: unknown) => {
+        signale.warn(`[ALERTS] Could not keep the last soft bounce alert of project ${projectId}:`, redisError);
+      });
+    }
   }
 
   /** A domain SES stopped verifying, so the project's emails from it fail */

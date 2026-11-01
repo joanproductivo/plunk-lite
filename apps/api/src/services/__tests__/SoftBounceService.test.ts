@@ -79,6 +79,25 @@ describe('SoftBounceService', () => {
     expect(events.map(event => event.data)).toEqual([{reason: 'soft_bounce'}]);
   });
 
+  it('tells the project about each one', async () => {
+    await fiveOverAWeek();
+    const record = vi.spyOn(FailureAlertService, 'record').mockResolvedValue(true);
+
+    await run();
+
+    expect(record.mock.calls[0]?.[1]).toMatchObject({sourceKey: 'brake:soft_bounce', contactEmail: contact.email});
+    record.mockRestore();
+  });
+
+  it('counts no email that was opened or clicked, whatever came of its delivery event', async () => {
+    const opened = await softBounce(8);
+    await prisma.email.update({where: {id: opened}, data: {openedAt: new Date(Date.now() - 9 * DAY)}});
+    for (const daysAgo of [6, 4, 2, 1]) {
+      await softBounce(daysAgo);
+    }
+    expect(await run()).toBeNull();
+  });
+
   it('counts the opt-out against the campaign of the email that reached the cut', async () => {
     await fiveOverAWeek();
     const record = vi.spyOn(ContactService, 'recordCampaignUnsubscribe').mockResolvedValue();
@@ -235,7 +254,7 @@ describe('SoftBounceService', () => {
     expect(await run()).toBeNull();
   });
 
-  it('holds back at 20 suppressions in 24 hours, and alerts once', async () => {
+  it('holds back at 20 suppressions in 7 days, and alerts once', async () => {
     await prisma.plunkLiteSuppression.createMany({
       data: Array.from({length: 20}, (_, i) => ({projectId, email: `gone${i}@example.com`, reason: 'SOFT_BOUNCE'})),
     });
@@ -246,16 +265,16 @@ describe('SoftBounceService', () => {
     expect(await run()).toBeNull();
 
     expect(record).toHaveBeenCalledTimes(1);
-    expect(record.mock.calls[0]?.[1]).toMatchObject({sourceKey: 'brake:soft_bounce'});
+    expect(record.mock.calls[0]?.[1]).toMatchObject({sourceKey: 'brake:soft_bounce_hold'});
     expect((await prisma.contact.findUnique({where: {id: contact.id}}))?.subscribed).toBe(true);
     record.mockRestore();
   });
 
-  it('counts only the last 24 hours and other reasons not at all in the brake', async () => {
+  it('counts only the last 7 days and other reasons not at all in the brake', async () => {
     await prisma.plunkLiteSuppression.createMany({
       data: [
         ...Array.from({length: 19}, (_, i) => ({projectId, email: `gone${i}@example.com`, reason: 'SOFT_BOUNCE'})),
-        {projectId, email: 'old@example.com', reason: 'SOFT_BOUNCE', createdAt: new Date(Date.now() - 2 * DAY)},
+        {projectId, email: 'old@example.com', reason: 'SOFT_BOUNCE', createdAt: new Date(Date.now() - 8 * DAY)},
         {projectId, email: 'hard@example.com', reason: 'BOUNCE'},
       ],
     });
@@ -279,6 +298,15 @@ describe('SoftBounceService', () => {
       expect(await reasonAfter('BOUNCE', 'SOFT_BOUNCE')).toBe('BOUNCE');
       expect(await reasonAfter('COMPLAINT', 'SOFT_BOUNCE')).toBe('COMPLAINT');
       expect(await reasonAfter('COMPLAINT', 'BOUNCE')).toBe('COMPLAINT');
+    });
+
+    it('keeps the email of the row when a stronger reason comes without one', async () => {
+      const email = await factories.createEmail({projectId, contactId: contact.id});
+      await SuppressionService.record(prisma, projectId, [contact.email], 'SOFT_BOUNCE', email.id);
+      await SuppressionService.record(prisma, projectId, [contact.email], 'BOUNCE', null);
+
+      const row = await prisma.plunkLiteSuppression.findFirst({where: {projectId, email: contact.email}});
+      expect(row).toMatchObject({reason: 'BOUNCE', emailId: email.id});
     });
 
     it('lifts a soft bounce suppression without touching SES, and marks it', async () => {

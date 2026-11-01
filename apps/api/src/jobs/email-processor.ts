@@ -452,7 +452,7 @@ export async function processEmailJob(job: EmailJob): Promise<void> {
   }
 
   // An address on the project's suppression list is never sent to, transactional email
-  // included: it bounced for good or reported mail as spam, and SES would only bounce it again.
+  // included: it bounced, for good or again and again, or reported mail as spam.
   // This is the last gate whatever subscribed the contact meanwhile.
   const suppression = await SuppressionService.find(email.projectId, recipientEmail);
   if (suppression) {
