@@ -21,6 +21,8 @@ When open tracking is enabled, Plunk includes a small invisible tracking pixel a
 
 When click tracking is enabled, Plunk rewrites links in your email body to route through a tracking redirect. When a contact clicks a link, Plunk records the click and the original URL on an `email.click` event before forwarding the contact to the destination.
 
+Clicks SES marks as likely automated (`isBotEvent`) are not counted either and don't start workflows. Not every mail scanner gets that mark, so a click can still come from software: don't make a critical workflow depend on a click alone. On self-hosted instances, set `IGNORE_AUTOMATIC_CLICKS=false` to count them.
+
 ### Considerations
 
 - Some mail clients and security tools pre-scan links, which can produce false positive clicks.

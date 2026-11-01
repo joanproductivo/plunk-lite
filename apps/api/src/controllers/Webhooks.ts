@@ -14,6 +14,7 @@ import React from 'react';
 
 import {
   DASHBOARD_URI,
+  IGNORE_AUTOMATIC_CLICKS,
   IGNORE_AUTOMATIC_OPENS,
   LANDING_URI,
   STRIPE_ENABLED,
@@ -113,6 +114,41 @@ export function nextStatus(current: EmailStatus, incoming?: EmailStatus): EmailS
  */
 export function isAutomaticOpen(open?: {isBotEvent?: unknown} | null, enabled = IGNORE_AUTOMATIC_OPENS): boolean {
   return enabled && open?.isBotEvent === 'Likely';
+}
+
+/**
+ * Plunk Lite: whether SES judged a Click to be made by software, by the same mark as an Open. It
+ * does not catch them all: a mail scanner following links may well arrive as "Unlikely", which
+ * counts. No timing rule backs this up, as nothing measured sets one apart from a fast reader.
+ */
+export function isAutomaticClick(click?: {isBotEvent?: unknown} | null, enabled = IGNORE_AUTOMATIC_CLICKS): boolean {
+  return enabled && click?.isBotEvent === 'Likely';
+}
+
+const CLICK_USER_AGENT_MAX = 120;
+
+/**
+ * Plunk Lite: what a Click says about who made it, kept on its event: logs do not last long enough
+ * to tell later how many clicks each signal would catch. Each is left out if SES did not send it
+ * as expected, and never holds the IP.
+ */
+export function clickSignals(click: unknown, mail: unknown): Record<string, unknown> {
+  const fields = click && typeof click === 'object' ? (click as Record<string, unknown>) : {};
+  const sentAt = (mail as {timestamp?: unknown} | null | undefined)?.timestamp;
+  const clickedTime = typeof fields.timestamp === 'string' ? Date.parse(fields.timestamp) : NaN;
+  const sentTime = typeof sentAt === 'string' ? Date.parse(sentAt) : NaN;
+  const seconds = (clickedTime - sentTime) / 1000;
+  const userAgent =
+    typeof fields.userAgent === 'string'
+      ? // eslint-disable-next-line no-control-regex
+        fields.userAgent.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, CLICK_USER_AGENT_MAX)
+      : undefined;
+
+  return {
+    ...(typeof fields.isBotEvent === 'string' && {isBotEvent: fields.isBotEvent.slice(0, 20)}),
+    ...(Number.isFinite(seconds) && {secondsSinceSent: seconds}),
+    ...(userAgent && {userAgent}),
+  };
 }
 
 /**
@@ -557,6 +593,28 @@ export class Webhooks {
           break;
 
         case 'Click': {
+          // Like an automatic open, it stamps nothing and starts no workflow listening for a click.
+          // Its event has a name of its own, to measure what the filter leaves out and catches.
+          const signals = clickSignals(body.click, body.mail);
+          if (isAutomaticClick(body.click)) {
+            signale.info(`[WEBHOOK] Automatic click ignored for ${email.contact.email} from ${email.project.name}`);
+            try {
+              await QueueService.queueEventTracking(
+                {
+                  projectId: email.projectId,
+                  eventName: 'email.click_ignored',
+                  contactId: email.contactId,
+                  emailId: email.id,
+                  data: {...baseEventData, link: body.click?.link, ...signals},
+                },
+                snsMessageId,
+              );
+            } catch (error) {
+              // Only the measurement is lost, which is no reason for SNS to deliver it again
+              signale.error(`[WEBHOOK] Queueing the ignored click of email ${email.id} failed:`, error);
+            }
+            return res.status(200).json({success: true});
+          }
           signale.success(`[WEBHOOK] Click received for ${email.contact.email} from ${email.project.name}`);
           const clickedLink = body.click?.link;
           // Only set clickedAt on first click
@@ -571,6 +629,7 @@ export class Webhooks {
             clickedAt: email.clickedAt?.toISOString() || now.toISOString(),
             clicks: (email.clicks || 0) + 1,
             isFirstClick: !email.clickedAt,
+            ...signals,
           };
           break;
         }
