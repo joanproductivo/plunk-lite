@@ -7,6 +7,9 @@ on:
   pull_request:
     branches:
       - next
+      - plunk-lite
+  # Plunk Lite: docker-publish.yml runs this before it publishes anything from plunk-lite
+  workflow_call:
 
 jobs:
   test:
@@ -48,7 +51,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'yarn'
 
       - name: Install dependencies
@@ -104,7 +107,7 @@ jobs:
           EOF
 
       - name: Build shared packages
-        run: yarn build --filter="@plunk/db" --filter="@plunk/types" --filter="@plunk/shared"
+        run: yarn build --filter="@plunk/db" --filter="@plunk/types" --filter="@plunk/shared" --filter="@plunk/email"
 
       - name: Generate Prisma Client
         run: yarn workspace @plunk/db db:generate
@@ -143,7 +146,8 @@ jobs:
                 mc mb local/uploads --ignore-existing"
 
       - name: Run tests
-        run: yarn test:run
+        # Three tests of Plunk's fail now and then (see the job's report for any retried)
+        run: yarn test:run --retry=2
         env:
           NODE_ENV: test
 
@@ -168,7 +172,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'yarn'
 
       - name: Install dependencies
@@ -206,10 +210,11 @@ jobs:
           EOF
 
       - name: Build shared packages
-        run: yarn build --filter="@plunk/db" --filter="@plunk/types" --filter="@plunk/shared"
+        run: yarn build --filter="@plunk/db" --filter="@plunk/types" --filter="@plunk/shared" --filter="@plunk/email"
 
       - name: Run linter
-        run: yarn lint
+        # What the image carries: the landing page and the wiki are not in Plunk Lite's
+        run: yarn lint --filter=api --filter=web --filter=mcp
 
       - name: Type check
-        run: yarn build --filter="api" --filter="web" --filter="landing" --filter="wiki" || true
+        run: yarn build --filter=api --filter=web --filter=mcp

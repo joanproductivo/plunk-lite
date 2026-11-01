@@ -1,4 +1,4 @@
-import {beforeEach, describe, expect, it} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {ContactService} from '../ContactService';
 import {factories, getPrismaClient} from '../../../../../test/helpers';
 
@@ -38,12 +38,17 @@ describe('ContactService - snoozing', () => {
     it('counts calendar units, so a month lands on the same day of the next month', async () => {
       const contact = await createContact('calendar@example.com');
 
-      const before = new Date();
-      const snoozed = await ContactService.snooze(contact.id, '1_month');
-      const until = snoozed.snoozedUntil!;
+      // A fixed day: on the 31st, the next month may not have it
+      vi.useFakeTimers({now: new Date(2026, 5, 15, 12), toFake: ['Date']});
+      try {
+        const snoozed = await ContactService.snooze(contact.id, '1_month');
+        const until = snoozed.snoozedUntil!;
 
-      expect(until.getDate()).toBe(before.getDate());
-      expect(until.getMonth()).toBe((before.getMonth() + 1) % 12);
+        expect(until.getDate()).toBe(15);
+        expect(until.getMonth()).toBe(6);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('offers windows from two weeks to a year, each longer than the last', async () => {

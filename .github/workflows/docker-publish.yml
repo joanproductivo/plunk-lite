@@ -9,8 +9,13 @@ on:
       - plunk-lite
 
 jobs:
+  # Plunk Lite: nothing is published, as sha-<commit> or latest, unless the tests pass
+  tests:
+    uses: ./.github/workflows/ci.yml
+
   # Prepare metadata and tags for all builds
   prepare:
+    needs: tests
     runs-on: ubuntu-24.04
     outputs:
       is_release: ${{ steps.check-release.outputs.is_release }}
