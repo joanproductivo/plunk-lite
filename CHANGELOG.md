@@ -2,7 +2,7 @@
 
 ## Plunk Lite 1.0.0 (2026-11-01)
 
-The first named version of Plunk Lite, and the start of its own numbering. It has the same features as image `sha-5892b47`: this release only adds the project's name, version and documentation.
+The first named version of Plunk Lite, and the start of its own numbering. It has the same features as image `sha-5892b47`, without the Plunk attribution on the pages recipients see, and adds the project's name, version and documentation.
 
 It is based on Plunk 0.17.0, with changes chosen from later Plunk versions. The main differences from Plunk are listed in the [README](README.md#whats-different-from-plunk).
 
