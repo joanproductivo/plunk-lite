@@ -23,6 +23,7 @@ import {
 } from '@plunk/ui';
 import {AnimatePresence, motion} from 'framer-motion';
 import {Check, CheckCircle2, ChevronDown, Copy, Globe, RefreshCw, Trash2, XCircle} from 'lucide-react';
+import {DomainDmarcStatus} from './DomainDmarcStatus';
 import {useConfig} from '../lib/hooks/useConfig';
 import {useAddDomain, useCheckDomainVerification, useDomains, useRemoveDomain} from '../lib/hooks/useDomains';
 
@@ -594,6 +595,8 @@ export function DomainsSettings({projectId}: DomainsSettingsProps) {
                         </Button>
                       </div>
                     </div>
+
+                    <DomainDmarcStatus domainId={domain.id} />
 
                     {Array.isArray(status.tokens) && (status.tokens as string[]).length > 0 && (
                       <div className="mt-3">

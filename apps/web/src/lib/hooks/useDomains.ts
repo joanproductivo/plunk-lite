@@ -1,5 +1,6 @@
 import type {Domain} from '@plunk/db';
 import {DomainSchemas} from '@plunk/shared';
+import type {DomainDmarc} from '@plunk/types';
 import useSWR from 'swr';
 
 import {network} from '../network';
@@ -48,6 +49,15 @@ export function useCheckDomainVerification() {
   };
 
   return {checkVerification};
+}
+
+/**
+ * Plunk Lite: what DNS says about a domain's DMARC. Read once per visit: DNS rarely changes under it.
+ */
+export function useDomainDmarc(domainId: string) {
+  const {data, error} = useSWR<DomainDmarc>(`/domains/${domainId}/dmarc`, {revalidateOnFocus: false});
+
+  return {dmarc: data, error};
 }
 
 /**

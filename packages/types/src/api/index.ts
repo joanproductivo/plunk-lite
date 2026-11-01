@@ -8,6 +8,7 @@ export * from './analytics.js';
 export * from './billing.js';
 export * from './campaign.js';
 export * from './contact.js';
+export * from './domain.js';
 export * from './membership.js';
 export * from './optIn.js';
 export * from './uploads.js';
