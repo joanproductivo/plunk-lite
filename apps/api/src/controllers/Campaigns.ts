@@ -389,13 +389,14 @@ export class Campaigns {
   }
 
   /**
-   * List the recipients a campaign lost to a bounce, a spam complaint or an opt-out.
-   * GET /campaigns/:id/recipients?type=bounced|complained|unsubscribed&cursor=&limit=
+   * List the recipients a campaign lost to a bounce, a spam complaint or an opt-out, or the
+   * emails with no confirmed delivery (Plunk Lite).
+   * GET /campaigns/:id/recipients?type=bounced|complained|unsubscribed|not_delivered&cursor=&limit=
    *
    * Cursor-paginated rather than offset-paginated: a campaign can carry tens of
    * thousands of bounces, and OFFSET would make each page cost more than the last.
    * `total` comes off the campaign row, so it always matches the figure on the results
-   * panel that this list is opened from.
+   * panel that this list is opened from; `not_delivered`, which has no counter, counts its rows.
    */
   @Get(':id/recipients')
   @Middleware([requireAuth, requireEmailVerified])
@@ -405,7 +406,9 @@ export class Campaigns {
     const {id} = UtilitySchemas.id.parse(req.params);
 
     const type: CampaignRecipientType =
-      req.query.type === 'complained' || req.query.type === 'unsubscribed' ? req.query.type : 'bounced';
+      req.query.type === 'complained' || req.query.type === 'unsubscribed' || req.query.type === 'not_delivered'
+        ? req.query.type
+        : 'bounced';
     // Capped at 100 for the same reason every other list here is: one page is what a
     // reader can look at, and an uncapped limit turns a cheap range scan into a way to
     // pull a campaign's whole bounce list in one request.

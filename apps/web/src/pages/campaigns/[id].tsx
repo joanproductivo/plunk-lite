@@ -35,7 +35,7 @@ import type {CampaignRecipientType} from '@plunk/types';
 import {CampaignAudienceType, CampaignStatus, TemplateType} from '@plunk/db';
 import {CampaignSchemas, detectUnsubscribeSignal} from '@plunk/shared';
 import {AnimatedNumber} from '../../components/AnimatedNumber';
-import {CampaignRecipientsSheet} from '../../components/CampaignRecipientsSheet';
+import {CampaignRecipientsSheet, describeNotDelivered} from '../../components/CampaignRecipientsSheet';
 import {DashboardLayout} from '../../components/DashboardLayout';
 import {EmailSettings} from '../../components/EmailSettings';
 import {EmailEditor} from '../../components/EmailEditor';
@@ -79,6 +79,10 @@ interface CampaignStats {
   unsubscribedCount: number;
   /** Recipients lost to a bounce, a complaint or an opt-out, each counted once */
   lostCount: number;
+  /** Emails that left with no confirmed delivery (Plunk Lite); zero until the send has finished */
+  notDeliveredCount: number;
+  /** Emails that never left, so not in `sentCount`: a suppressed address, an unsubscribed contact */
+  notSentCount: number;
   openRate: number;
   clickRate: number;
   bounceRate: number;
@@ -1429,6 +1433,17 @@ function CampaignDetails() {
                   {' '}
                   {lostContacts === 1 ? 'receives' : 'receive'} marketing from this project.
                 </p>
+              )}
+
+              {/* Plunk Lite: a line and not a sixth figure, and only when there is something to open */}
+              {(s.notDeliveredCount > 0 || s.notSentCount > 0) && (
+                <button
+                  type="button"
+                  onClick={() => setRecipientList('not_delivered')}
+                  className="block w-full border-t border-neutral-100 pt-4 text-left text-xs text-neutral-500 underline decoration-neutral-300 underline-offset-4 transition-colors hover:decoration-neutral-900"
+                >
+                  {describeNotDelivered(s, c.sentAt)}
+                </button>
               )}
             </CardContent>
           </Card>

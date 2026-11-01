@@ -24,6 +24,7 @@ import {buildEmailFieldsUpdate} from '../utils/modelUpdate.js';
 import {uuidv5} from '../utils/uuid.js';
 
 import {BillingLimitService} from './BillingLimitService.js';
+import {CampaignNotDelivered, NOT_DELIVERED_FILTER} from './CampaignNotDelivered.js';
 import {DomainService} from './DomainService.js';
 import {buildEmailHeaders, classifyEmail, withSourceEmail} from './EmailHeaderService.js';
 import {EmailService, POSSIBLY_SENT_NOTE} from './EmailService.js';
@@ -1407,7 +1408,7 @@ export class CampaignService {
    * whole events table, since no index serves a predicate on Event.name alone. This
    * endpoint is polled every 15s while a campaign is sending, so it has to stay a
    * single indexed row lookup (Plunk Lite: plus the small `lostCount` count below,
-   * over the opt-outs alone).
+   * over the opt-outs alone, and the emails with no confirmed delivery once it has finished).
    *
    * Note what this means for a campaign that finalized before the counters were
    * written by anything: the row is authoritative, so a zero here is reported as a
@@ -1415,7 +1416,8 @@ export class CampaignService {
    * 20260824120000_backfill_campaign_engagement_counters migration repairs.
    *
    * `this.get` has already fetched the row, so the stats cost no further queries -- save one
-   * for `lostCount` (Plunk Lite), and only when it can differ from the plain sum.
+   * for `lostCount` (Plunk Lite), and only when it can differ from the plain sum, and one for
+   * the emails with no confirmed delivery, of a sent campaign only (CampaignNotDelivered).
    */
   public static async getStats(projectId: string, campaignId: string) {
     const campaign = await this.get(projectId, campaignId);
@@ -1456,6 +1458,11 @@ export class CampaignService {
         : 0;
     const lostCount = suppressedCount + unsubscribedCount - Math.min(both, suppressedCount, unsubscribedCount);
 
+    const {notDelivered, notSent} =
+      campaign.status === CampaignStatus.SENT
+        ? await CampaignNotDelivered.counts(campaignId)
+        : {notDelivered: 0, notSent: 0};
+
     return {
       totalRecipients,
       sentCount,
@@ -1466,6 +1473,8 @@ export class CampaignService {
       complainedCount,
       unsubscribedCount,
       lostCount,
+      notDeliveredCount: notDelivered,
+      notSentCount: notSent,
       openRate: sentCount > 0 ? (openedCount / sentCount) * 100 : 0,
       clickRate: sentCount > 0 ? (clickedCount / sentCount) * 100 : 0,
       bounceRate: sentCount > 0 ? (bouncedCount / sentCount) * 100 : 0,
@@ -1481,7 +1490,8 @@ export class CampaignService {
   }
 
   /**
-   * List the recipients a campaign lost to a bounce, a spam complaint or an opt-out.
+   * List the recipients a campaign lost to a bounce, a spam complaint or an opt-out, or
+   * (Plunk Lite) the emails with no confirmed delivery (CampaignNotDelivered).
    *
    * Bounces and complaints select on `status`, which is served by the existing (campaignId, status) index, so
    * finding a campaign's few thousand bounces never reads its million sent rows. That is
@@ -1503,7 +1513,8 @@ export class CampaignService {
    *
    * No COUNT(*): the total already lives on the campaign row, written by `reconcileStats`.
    * Recounting here would be the expensive half of the request and could only ever agree
-   * with the number already on the row.
+   * with the number already on the row. Plunk Lite: `not_delivered` has no counter, as Plunk's
+   * tables are not altered, so it counts the few rows its index finds.
    */
   public static async listRecipients(
     projectId: string,
@@ -1514,6 +1525,7 @@ export class CampaignService {
     // Scopes the campaign to the caller's project and 404s otherwise, so the raw query
     // below can key on campaignId alone.
     const campaign = await this.get(projectId, campaignId);
+    const notDelivered = type === 'not_delivered' ? await CampaignNotDelivered.counts(campaignId) : null;
 
     const {column, filter, total} = {
       bounced: {
@@ -1533,6 +1545,11 @@ export class CampaignService {
         // will not use it.
         filter: Prisma.sql`e."unsubscribedAt" IS NOT NULL`,
         total: campaign.unsubscribedCount,
+      },
+      not_delivered: {
+        column: Prisma.raw('"createdAt"'),
+        filter: NOT_DELIVERED_FILTER,
+        total: notDelivered ? notDelivered.notDelivered + notDelivered.notSent : 0,
       },
     }[type];
 
@@ -1558,6 +1575,7 @@ export class CampaignService {
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
     const last = page[page.length - 1];
+    const delivery = notDelivered ? await CampaignNotDelivered.details(page.map(row => row.id)) : null;
 
     return {
       data: page.map(row => ({
@@ -1565,6 +1583,7 @@ export class CampaignService {
         contactId: row.contactId,
         email: row.email,
         occurredAt: row.occurredAt.toISOString(),
+        ...(delivery?.has(row.id) && {delivery: delivery.get(row.id)}),
       })),
       cursor: hasMore && last ? this.encodeRecipientCursor(last.occurredAt, last.id) : undefined,
       hasMore,

@@ -59,12 +59,19 @@ export type CampaignListResponse = PaginatedResponse<CampaignListItem> & {
 /**
  * The ways a campaign can lose a recipient that are stamped on the email row, and so
  * answerable as a list rather than only as a count: a bounce, a spam complaint, or an
- * opt-out (unsubscribe or snooze) made from the campaign email.
+ * opt-out (unsubscribe or snooze) made from the campaign email. Plunk Lite: and the emails
+ * with no confirmed delivery, which are in none of the three.
  */
-export type CampaignRecipientType = 'bounced' | 'complained' | 'unsubscribed';
+export type CampaignRecipientType = 'bounced' | 'complained' | 'unsubscribed' | 'not_delivered';
 
 /**
- * One recipient in a campaign's bounce, complaint or unsubscribe list.
+ * Plunk Lite: why an email has no confirmed delivery. `not_sent` never left: it is not in `sentCount`.
+ * `pending` and `no_answer` are the same silence from SES, before and after SES should have given up.
+ */
+export type CampaignDeliveryState = 'soft_bounce' | 'pending' | 'no_answer' | 'suppressed' | 'failed' | 'not_sent';
+
+/**
+ * One recipient in a campaign's bounce, complaint, unsubscribe or not delivered list.
  *
  * Deliberately narrow: this feeds a list whose job is to answer "who", so it carries the
  * address, when it happened, and the ids needed to open the contact. The email body and
@@ -74,6 +81,8 @@ export interface CampaignRecipient {
   emailId: string;
   contactId: string;
   email: string;
-  /** ISO 8601. The bounce, complaint or opt-out timestamp, whichever list this is. */
+  /** ISO 8601. The bounce, complaint or opt-out timestamp, whichever list this is; when the email was created in `not_delivered`. */
   occurredAt: string;
+  /** Only in `not_delivered`. `detail` is the bounce's subtype, or the error of a failed email. */
+  delivery?: {state: CampaignDeliveryState; detail: string | null};
 }
