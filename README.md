@@ -16,8 +16,9 @@ Thanks to the Plunk team for the platform this is built on. If you find Plunk us
 
 **Lighter**
 
-- No landing site, wiki, SMTP relay or Plunk analytics
+- No landing site, wiki or SMTP relay
 - The dashboard is a static export served by nginx, with no Next.js server
+- The dashboard doesn't load the hosted Plunk service's analytics script from a third party. Your email statistics are all still there
 
 **Added**
 
