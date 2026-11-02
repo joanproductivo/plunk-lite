@@ -5,7 +5,7 @@ import {
   buttonStyle,
   type ButtonStyle,
   EMAIL_FONTS,
-  isSafeButtonHref,
+  isSafeLinkHref,
   readButtonStyle,
 } from '@plunk/shared';
 import {Node} from '@tiptap/core';
@@ -108,7 +108,7 @@ export const EmailButton = Node.create({
         default: '',
         parseHTML: element => {
           const href = buttonElement(element).getAttribute('href') ?? '';
-          return isSafeButtonHref(href) ? href : '';
+          return isSafeLinkHref(href) ? href : '';
         },
         renderHTML: () => ({}),
       },
@@ -140,7 +140,7 @@ export const EmailButton = Node.create({
     const href = attrs.href.trim();
     const link = [
       'a',
-      {class: 'email-button', ...(isSafeButtonHref(href) ? {href} : {}), style: buttonStyle(attrs)},
+      {class: 'email-button', ...(isSafeLinkHref(href) ? {href} : {}), style: buttonStyle(attrs)},
       attrs.text,
     ] as const;
     const alignment = blockAlignment(attrs.textAlign);

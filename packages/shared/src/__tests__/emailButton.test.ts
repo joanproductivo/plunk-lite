@@ -5,7 +5,6 @@ import {
   buttonStyle,
   type ButtonStyle,
   EMAIL_FONTS,
-  isSafeButtonHref,
   normalizeHexColor,
   readButtonStyle,
   toButtonStyle,
@@ -26,27 +25,6 @@ describe('normalizeHexColor', () => {
     'rejects %s',
     input => {
       expect(normalizeHexColor(input)).toBeNull();
-    },
-  );
-});
-
-describe('isSafeButtonHref', () => {
-  it.each([
-    'https://example.com',
-    'http://example.com',
-    'mailto:hi@example.com',
-    'tel:+34600000000',
-    '#top',
-    '{{unsubscribeUrl}}',
-    '{% if pro %}https://a.com{% else %}https://b.com{% endif %}',
-  ])('allows %s', href => {
-    expect(isSafeButtonHref(href)).toBe(true);
-  });
-
-  it.each(['javascript:alert(1)', ' JavaScript:alert(1)', 'data:text/html,x', 'example.com', '', null])(
-    'rejects %s',
-    href => {
-      expect(isSafeButtonHref(href)).toBe(false);
     },
   );
 });

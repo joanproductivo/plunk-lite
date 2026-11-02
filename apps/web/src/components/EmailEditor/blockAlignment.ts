@@ -18,6 +18,21 @@ export function parseBlockAlignment(element: HTMLElement): BlockAlignment | null
 }
 
 /**
+ * A link holding one image with a source and nothing else, so reading it as a block (a video, or an
+ * image with a link) never drops anything. Only whether its href is one the block may have is left
+ * to the block.
+ */
+export function isLoneImageLink(element: Element | null): element is HTMLAnchorElement {
+  return (
+    !!element &&
+    element.matches('a') &&
+    element.childElementCount === 1 &&
+    element.firstElementChild!.matches('img[src]') &&
+    !/[^ \t\n\r\f]/.test(element.textContent ?? '')
+  );
+}
+
+/**
  * A paragraph holding one element matching `selector` and nothing else, so claiming it as that
  * block can never drop text or Liquid tags. Only the paragraph's own text counts: the block's
  * text (a button label) is part of the block. A non-breaking space counts as content (it is

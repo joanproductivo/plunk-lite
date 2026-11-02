@@ -8,7 +8,7 @@ import {
   insertFooter,
   type EmailBrand,
   isFramedBrand,
-  isSafeButtonHref,
+  isSafeLinkHref,
   isSafeVideoHrefAttribute,
   readButtonStyle,
   readPixels,
@@ -81,7 +81,7 @@ function hairSpaces(px: number): [percent: number, count: number] {
 function addOutlookButtonPadding($: CheerioAPI, emailFont: string): void {
   $('a.email-button').each((_, element) => {
     const link = $(element);
-    if (!isSafeButtonHref(link.attr('href'))) {
+    if (!isSafeLinkHref(link.attr('href'))) {
       link.removeAttr('href');
       return;
     }
@@ -137,6 +137,30 @@ function sizeVideos($: CheerioAPI, brand: EmailBrand): void {
     if (!isSafeVideoHrefAttribute(link.attr('href'))) {
       link.removeAttr('href');
     }
+  });
+}
+
+/**
+ * Editor images with a link (see the dashboard's ResizableImage): a link holding one image and
+ * nothing else, not a video's or a button's. The link loses its href unless it is one a block may
+ * have, checked here after Liquid has filled it in, and neither it nor the image may be framed: no
+ * underline, which the prose styles have just inlined, and no border in the link's colour.
+ */
+function linkImages($: CheerioAPI): void {
+  $('a:not(.email-video):not(.email-button)').each((_, element) => {
+    const link = $(element);
+    // Only tags and text that is not blank count: anything else beside the image (a comment, a
+    // processing instruction) would otherwise let an unchecked link by
+    const contents = link
+      .contents()
+      .filter((_, node) => node.type === 'tag' || (node.type === 'text' && /[^ \t\n\r\f]/.test($(node).text())));
+    if (contents.length !== 1 || !contents.first().is('img.email-image')) return;
+
+    if (!isSafeLinkHref(link.attr('href'))) {
+      link.removeAttr('href');
+    }
+    link.attr('style', withDeclaration(link.attr('style'), 'text-decoration', 'none'));
+    contents.first().attr('style', withDeclaration(contents.first().attr('style'), 'border', '0px'));
   });
 }
 
@@ -220,6 +244,16 @@ function wrapWithEmailStyles(htmlBody: string, brand: EmailBrand, emailId?: stri
     } catch (error) {
       // A video at its poster's size still shows everywhere but Outlook for Windows
       warnAtMostEveryMinute('video', `[EMAIL] Failed to size videos${emailId ? ` of email ${emailId}` : ''}:`, error);
+    }
+    try {
+      linkImages($);
+    } catch (error) {
+      // Linked images go out as written, which only lets a link the editor never writes through
+      warnAtMostEveryMinute(
+        'image-link',
+        `[EMAIL] Failed to check image links${emailId ? ` of email ${emailId}` : ''}:`,
+        error,
+      );
     }
     try {
       convertBoxes($, brand);

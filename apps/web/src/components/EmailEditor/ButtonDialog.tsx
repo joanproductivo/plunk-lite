@@ -3,7 +3,8 @@ import {
   type ButtonShape,
   type ButtonSize,
   type ButtonStyle,
-  isSafeButtonHref,
+  isValidLinkHref,
+  LINK_HREF_HINT,
   normalizeHexColor,
 } from '@plunk/shared';
 import {Button, Checkbox, Dialog, DialogContent, DialogHeader, DialogTitle, Input, Label} from '@plunk/ui';
@@ -14,11 +15,6 @@ import {ColorField, FontSelect, OptionSelect} from './BlockFields';
 import {type ButtonAttrs, ButtonFace} from './EmailButton';
 import {FileDialog} from './FileDialog';
 import type {BlockDialogProps} from './useBlockDialog';
-
-// Spaces outside Liquid tags would break the link (and read as custom HTML attributes).
-function isValidHref(href: string): boolean {
-  return isSafeButtonHref(href) && !/\s/.test(href.trim().replace(/\{\{[\s\S]*?\}\}|\{%[\s\S]*?%\}/g, ''));
-}
 
 const SHAPES: Record<ButtonShape, string> = {rectangle: 'Rectangle', rounded: 'Rounded', pill: 'Pill'};
 const SIZES: Record<ButtonSize, string> = {small: 'Small', medium: 'Medium', large: 'Large'};
@@ -66,7 +62,8 @@ function ButtonForm({
     setAttrs(prev => ({...prev, [key]: value}));
   const backgroundColor = normalizeHexColor(attrs.backgroundColor);
   const textColor = normalizeHexColor(attrs.textColor);
-  const valid = attrs.text.trim() !== '' && isValidHref(attrs.href) && backgroundColor !== null && textColor !== null;
+  const valid =
+    attrs.text.trim() !== '' && isValidLinkHref(attrs.href) && backgroundColor !== null && textColor !== null;
 
   const submit = () => {
     if (!valid) return;
@@ -92,10 +89,8 @@ function ButtonForm({
           onChange={e => set('href', e.target.value)}
           placeholder="https://example.com"
         />
-        {attrs.href.trim() !== '' && !isValidHref(attrs.href) && (
-          <p className="mt-1 text-xs text-red-700">
-            Use an https://, mailto: or tel: link, a #anchor, or a {'{{variable}}'}.
-          </p>
+        {attrs.href.trim() !== '' && !isValidLinkHref(attrs.href) && (
+          <p className="mt-1 text-xs text-red-700">{LINK_HREF_HINT}</p>
         )}
         {canUpload && (
           <>

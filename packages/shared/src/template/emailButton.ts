@@ -62,16 +62,6 @@ export function normalizeHexColor(value: string | null | undefined): string | nu
   return null;
 }
 
-/**
- * Whether a button may link to `href`: web, mail and phone links, in-page anchors, and links
- * built with Liquid (a variable such as `{{unsubscribeUrl}}` or a `{% if %}` that picks one).
- * Anything else, `javascript:` above all, is never written into a button.
- */
-export function isSafeButtonHref(href: string | null | undefined): boolean {
-  const value = (href ?? '').trim();
-  return /^(https?:\/\/|mailto:|tel:|#|\{\{|\{%)/i.test(value);
-}
-
 // Font stacks compared without quotes or spaces: juice rewrites double quotes as single ones.
 function fontKey(stack: string): string {
   return stack.replace(/["'\s]/g, '').toLowerCase();
