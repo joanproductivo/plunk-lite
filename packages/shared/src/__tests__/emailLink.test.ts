@@ -8,6 +8,7 @@ describe('isSafeLinkHref', () => {
     'http://example.com',
     'mailto:hi@example.com',
     'tel:+34600000000',
+    'sms:+34600000000',
     '#top',
     '{{unsubscribeUrl}}',
     '{% if pro %}https://a.com{% else %}https://b.com{% endif %}',

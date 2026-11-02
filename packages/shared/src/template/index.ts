@@ -1,6 +1,13 @@
 import {LiquidError, type Template} from 'liquidjs';
 
-import {renderEngine, SCOPE_ALIAS, validationEngine} from './engine.js';
+import {
+  renderEngine,
+  SCOPE_ALIAS,
+  subjectRenderEngine,
+  type TemplateMode,
+  textRenderEngine,
+  validationEngine,
+} from './engine.js';
 import {renderLegacyTemplate} from './legacy.js';
 import {preprocessTemplate} from './preprocess.js';
 
@@ -15,10 +22,18 @@ export * from './emailLink.js';
 export * from './emailProseCss.js';
 export * from './emailVideo.js';
 export * from './emailVideoSize.js';
-export {escapeHtml} from './html.js';
+export {escapeHtml, neutralizeLiquid} from './html.js';
 export {declarations, readPixels, withDeclaration} from './inlineStyle.js';
 export * from './optInEmail.js';
-export {type EmailMarkers, joinEmailMarkers, preheaderToText, splitEmailMarkers, textToPreheader} from './markers.js';
+export {
+  type EmailMarkers,
+  joinEmailMarkers,
+  markVisualContent,
+  preheaderToText,
+  readEmailContent,
+  splitEmailMarkers,
+  textToPreheader,
+} from './markers.js';
 export * from './unsubscribeFooter.js';
 
 /** A template parsed once and ready to be rendered against many recipients. */
@@ -45,6 +60,7 @@ export interface TemplateValidationResult {
  * Parsed templates are cached so the existing per-email call sites (which pass the same
  * campaign body once per recipient) pay the parse cost once per worker rather than once
  * per send. Bounded on both entry count and template size to keep worker memory flat.
+ * One cache per mode: Liquid fixes an output's escaping when it parses it.
  */
 const MAX_CACHE_ENTRIES = 32;
 const MAX_CACHEABLE_LENGTH = 200_000;
@@ -63,7 +79,13 @@ type ParseResult =
   | {templates: Template[]; renderFailed: boolean; error?: undefined}
   | {templates?: undefined; renderFailed?: undefined; error: Error};
 
-const parseCache = new Map<string, ParseResult>();
+const ENGINES = {html: renderEngine, subject: subjectRenderEngine, text: textRenderEngine};
+
+const parseCaches: Record<TemplateMode, Map<string, ParseResult>> = {
+  html: new Map(),
+  subject: new Map(),
+  text: new Map(),
+};
 
 /** Bounded set of template sources already reported, so a bad template logs once. */
 const reportedSources = new Set<string>();
@@ -83,16 +105,17 @@ function reportOnce(source: string, stage: string, error: unknown): void {
   console.warn(`[TEMPLATE] Failed to ${stage} template, falling back to plain variable substitution: ${message}`);
 }
 
-function parse(source: string): ParseResult {
+function parse(source: string, mode: TemplateMode): ParseResult {
   try {
-    return {templates: renderEngine.parse(preprocessTemplate(source)), renderFailed: false};
+    return {templates: ENGINES[mode].parse(preprocessTemplate(source)), renderFailed: false};
   } catch (error) {
     reportOnce(source, 'parse', error);
     return {error: error instanceof Error ? error : new Error(String(error))};
   }
 }
 
-function parseCached(source: string): ParseResult {
+function parseCached(source: string, mode: TemplateMode): ParseResult {
+  const parseCache = parseCaches[mode];
   const cached = parseCache.get(source);
   if (cached) {
     // Re-insert to mark as most recently used.
@@ -101,7 +124,7 @@ function parseCached(source: string): ParseResult {
     return cached;
   }
 
-  const result = parse(source);
+  const result = parse(source, mode);
 
   if (source.length <= MAX_CACHEABLE_LENGTH) {
     if (parseCache.size >= MAX_CACHE_ENTRIES) {
@@ -135,21 +158,14 @@ function buildScope(variables: Record<string, unknown>): Record<string, unknown>
   return scope;
 }
 
-/**
- * Parse a template once so it can be rendered for many recipients.
- *
- * Never throws: a template that fails to parse falls back to plain `{{variable}}`
- * substitution, and `valid` reports which path it took. Use `validateTemplate` to
- * surface syntax errors to the author.
- */
-export function compileTemplate(source: string): CompiledTemplate {
-  const parsed = parseCached(source);
+function compile(source: string, mode: TemplateMode): CompiledTemplate {
+  const parsed = parseCached(source, mode);
 
   if (parsed.error) {
     return {
       source,
       valid: false,
-      render: variables => renderLegacyTemplate(source, variables),
+      render: variables => renderLegacyTemplate(source, variables, mode),
     };
   }
 
@@ -161,23 +177,42 @@ export function compileTemplate(source: string): CompiledTemplate {
       // recipient, so stop asking. Retrying spends the render budget per contact on a
       // campaign that is going out through the legacy renderer regardless.
       if (parsed.renderFailed) {
-        return renderLegacyTemplate(source, variables);
+        return renderLegacyTemplate(source, variables, mode);
       }
 
       try {
-        return String(renderEngine.renderSync(parsed.templates, buildScope(variables)));
+        return String(ENGINES[mode].renderSync(parsed.templates, buildScope(variables)));
       } catch (error) {
         // A render error means a runtime limit was hit (e.g. an unbounded loop).
         parsed.renderFailed = true;
         reportOnce(source, 'render', error);
-        return renderLegacyTemplate(source, variables);
+        return renderLegacyTemplate(source, variables, mode);
       }
     },
   };
 }
 
 /**
- * Render an email template.
+ * Parse an email body once so it can be rendered for many recipients.
+ *
+ * Bodies are HTML: every output is escaped (braces included, so a second render finds no
+ * tag in the data) unless it ends in `| raw` or comes from `escape` and its kin or `{% capture %}`.
+ *
+ * Never throws: a template that fails to parse falls back to plain `{{variable}}`
+ * substitution, and `valid` reports which path it took. Use `validateTemplate` to
+ * surface syntax errors to the author.
+ */
+export function compileTemplate(source: string): CompiledTemplate {
+  return compile(source, 'html');
+}
+
+/** `compileTemplate` for a subject: plain text, nothing escaped, and no tag left in the data. */
+export function compileSubjectTemplate(source: string): CompiledTemplate {
+  return compile(source, 'subject');
+}
+
+/**
+ * Render an email body.
  *
  * Templates are Liquid, so conditionals, loops and filters are available on top of the
  * `{{variable}}` and `{{variable ?? fallback}}` syntax Plunk has always supported:
@@ -186,12 +221,26 @@ export function compileTemplate(source: string): CompiledTemplate {
  *   renderTemplate('Hello {{data.name}}!', {data: {name: 'World'}})     -> 'Hello World!'
  *   renderTemplate('Hello {{name ?? Guest}}!', {})                      -> 'Hello Guest!'
  *   renderTemplate('{% if plan == "pro" %}Pro{% endif %}', {plan: 'pro'}) -> 'Pro'
+ *   renderTemplate('Hi {{name}}', {name: '<b>Ann</b>'})                 -> 'Hi &lt;b&gt;Ann&lt;/b&gt;'
  *
  * Never throws. For a template rendered against many recipients, prefer
  * `compileTemplate` to hoist the parse out of the loop.
  */
 export function renderTemplate(template: string, variables: Record<string, unknown>): string {
   return compileTemplate(template).render(variables);
+}
+
+/** `renderTemplate` for a subject. */
+export function renderSubjectTemplate(template: string, variables: Record<string, unknown>): string {
+  return compileSubjectTemplate(template).render(variables);
+}
+
+/**
+ * `renderTemplate` for text that is neither HTML nor rendered again, such as a webhook's
+ * URL, headers and body: outputs go in as they are.
+ */
+export function renderTextTemplate(template: string, variables: Record<string, unknown>): string {
+  return compile(template, 'text').render(variables);
 }
 
 /**
@@ -227,6 +276,8 @@ export function validateTemplate(source: string): TemplateValidationResult {
 
 /** Test seam: drop parsed templates and warning state. */
 export function clearTemplateCache(): void {
-  parseCache.clear();
+  for (const parseCache of Object.values(parseCaches)) {
+    parseCache.clear();
+  }
   reportedSources.clear();
 }

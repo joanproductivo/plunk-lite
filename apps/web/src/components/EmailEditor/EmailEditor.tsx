@@ -38,7 +38,9 @@ import {
   detectCustomHtmlPatterns,
   isFramedBrand,
   joinEmailMarkers,
+  markVisualContent,
   preheaderToText,
+  renderSubjectTemplate,
   renderTemplate,
   splitEmailMarkers,
 } from '@plunk/shared';
@@ -332,7 +334,10 @@ export function EmailEditor({
   // Never throws: a template that doesn't parse yet falls back to plain {{variable}} substitution
   const renderPreview = (text: string) => renderTemplate(text, previewVariables());
 
-  const getPreviewHtml = () => renderPreview(mode === 'visual' ? editor?.getHTML() || '' : htmlContent);
+  const getPreviewHtml = () => {
+    const source = mode === 'visual' ? editor?.getHTML() || '' : htmlContent;
+    return markVisualContent(source, renderPreview(source));
+  };
 
   const getPreviewContainerWidth = () => {
     // Return the actual width the iframe should have (for media queries)
@@ -630,7 +635,9 @@ export function EmailEditor({
                     {subject && (
                       <div>
                         <p className="text-xs text-neutral-500 uppercase tracking-wide font-medium">Subject</p>
-                        <p className="text-base font-semibold text-neutral-900 mt-1">{renderPreview(subject)}</p>
+                        <p className="text-base font-semibold text-neutral-900 mt-1">
+                          {renderSubjectTemplate(subject, previewVariables())}
+                        </p>
                       </div>
                     )}
                     {preheader && (

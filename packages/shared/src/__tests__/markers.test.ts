@@ -4,7 +4,9 @@ import {
   BRAND_DEFAULTS,
   type EmailBrand,
   joinEmailMarkers,
+  markVisualContent,
   preheaderToText,
+  readEmailContent,
   renderTemplate,
   splitEmailMarkers,
   textToPreheader,
@@ -137,5 +139,52 @@ describe('brand marker', () => {
 
     expect(validateTemplate(value).valid).toBe(true);
     expect(renderTemplate(value, {name: 'Ana'})).toBe(join('', '<p>Ana</p>', BRAND));
+  });
+});
+
+describe('visual content marker (Plunk Lite)', () => {
+  const render = (template: string, data: Record<string, unknown>) =>
+    markVisualContent(template, renderTemplate(template, {data}));
+
+  it('keeps an editor email one, whatever its data reads as once filled in', () => {
+    for (const [template, data] of [
+      ['<p>Follow us @{{ data.h }}</p>', {h: 'media'}],
+      ['<p><a href="{{ data.a }}{{ data.b }}">x</a></p>', {a: 'x data', b: '-y'}],
+      ['<p><a href="{{ data.a }}{{ data.b }}">x</a></p>', {a: 'x id', b: '=y'}],
+    ] as const) {
+      const {content, custom} = readEmailContent(splitEmailMarkers(render(template, data)).body);
+      expect(custom).toBe(false);
+      expect(content).not.toContain('plunk:visual');
+    }
+  });
+
+  it('keeps the preheader and brand in front, and marks once however many times it is rendered', () => {
+    const brand = {...BRAND_DEFAULTS, textColor: '#111111'} as EmailBrand;
+    const template = joinEmailMarkers({preheader: 'Hi {{ data.n }}', brand, body: '<p>{{ data.n }}</p>'});
+    const once = render(template, {n: 'Ann'});
+    const twice = render(once, {n: 'Ann'});
+
+    expect(twice).toBe(once);
+    expect(splitEmailMarkers(once)).toMatchObject({preheader: 'Hi Ann', brand});
+    expect(once.match(/plunk:visual/g)).toHaveLength(1);
+  });
+
+  it('leaves a brand marker as it was written', () => {
+    const template = '<!--plunk:brand:zzz=1;text=#111111--><p>{{ data.n }}</p>';
+    expect(render(template, {n: 'Ann'})).toBe('<!--plunk:brand:zzz=1;text=#111111--><!--plunk:visual--><p>Ann</p>');
+  });
+
+  it('takes | raw only inside Liquid, the preheader included', () => {
+    expect(render('<p>Price | raw</p><p>@{{ data.h }}</p>', {h: 'media'})).toContain('plunk:visual');
+    const preheader = joinEmailMarkers({preheader: '{{ data.p | raw }}', brand: null, body: '<p>a</p>'});
+    expect(render(preheader, {p: 'x'})).not.toContain('plunk:visual');
+  });
+
+  it('leaves custom HTML and templates that print HTML with | raw to be judged as rendered', () => {
+    const custom = '<table><tr><td>{{ data.n }}</td></tr></table>';
+    const raw = '<p>{{ data.html | raw }}</p>';
+
+    expect(render(custom, {n: 'Ann'})).toBe(renderTemplate(custom, {data: {n: 'Ann'}}));
+    expect(readEmailContent(render(raw, {html: '<table><tr><td>x</td></tr></table>'})).custom).toBe(true);
   });
 });

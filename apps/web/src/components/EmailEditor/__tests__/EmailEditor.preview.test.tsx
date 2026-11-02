@@ -139,4 +139,25 @@ describe('Preview tab', () => {
     );
     expect(shown?.textContent).toBe('Tom & "Jerry"');
   });
+
+  it("shows a contact's data as text in the subject, the preview text and the body", async () => {
+    const name = 'Tom & <b>{{x}}</b>';
+    contacts = [{...ANA, data: {name}}];
+    await render(
+      'For {{name}}',
+      joinEmailMarkers({preheader: textToPreheader('Hi {{name}}'), brand: null, body: '<p>Hi {{name}}</p>'}),
+    );
+    await click('Preview');
+    await act(async () => undefined);
+    const preheader = [...container.querySelectorAll('p')].find(
+      p => p.previousElementSibling?.textContent === 'Preview text',
+    );
+
+    // The subject keeps no Liquid tag for the second render, behind a zero-width space
+    expect(subjectShown()?.textContent).toBe('For Tom & <b>{\u200b{\u200bx}}</b>');
+    expect(preheader?.textContent).toBe(`Hi ${name}`);
+    const body = iframe()?.contentDocument?.body;
+    expect(body?.textContent).toContain(`Hi ${name}`);
+    expect(body?.querySelector('b')).toBeNull();
+  });
 });

@@ -5,6 +5,7 @@ import {UnrecoverableError} from 'bullmq';
 
 import {prisma as appPrisma} from '../../database/prisma';
 import {CampaignService} from '../../services/CampaignService';
+import {EmailService} from '../../services/EmailService';
 import {EventService} from '../../services/EventService';
 import {SecurityService} from '../../services/SecurityService';
 import {SuppressionService} from '../../services/SuppressionService';
@@ -404,6 +405,63 @@ describe('processEmailJob', () => {
       const [params] = vi.mocked(sendRawEmail).mock.calls[0]!;
       const {email: address} = await prisma.contact.findUniqueOrThrow({where: {id: email.contactId}});
       expect(params.content.subject).toBe(`Hi ${address}`);
+    });
+
+    // The API renders a transactional or workflow email once when it queues it, and the worker
+    // renders it again: data written as Liquid must reach the reader as it was written
+    it.each([EmailSourceType.TRANSACTIONAL, EmailSourceType.WORKFLOW])(
+      'sends Liquid and markup in the data of a %s email as text, in the body and the subject',
+      async sourceType => {
+        const email = await pendingEmail({sourceType});
+        const name = '{{ unsubscribeUrl }} <b>Ann</b>';
+        const queued = EmailService.format({subject: 'Hi {{ name }}', body: '<p>Hi {{ name }}</p>', data: {name}});
+        await prisma.email.update({where: {id: email.id}, data: queued});
+
+        await processEmailJob(makeJob(email.id));
+
+        const [params] = vi.mocked(sendRawEmail).mock.calls[0]!;
+        expect(params.content.subject).toBe('Hi {\u200b{\u200b unsubscribeUrl }} <b>Ann</b>');
+        expect(params.content.html).toContain('Hi &#123;&#123; unsubscribeUrl &#125;&#125; &lt;b&gt;Ann&lt;/b&gt;');
+        // A workflow email has its footer's unsubscribe link, but never in the contact's name
+        expect(params.content.html).not.toMatch(/Hi https?:/);
+      },
+    );
+
+    it('sends an editor email as one, with its links checked, whatever its data makes of it', async () => {
+      const email = await pendingEmail({sourceType: EmailSourceType.TRANSACTIONAL});
+      const queued = EmailService.format({
+        subject: 'Hi',
+        body: '<p>Follow us @{{ h }}</p><p><a href="{{ url }}">x</a></p>',
+        data: {h: 'media', url: 'javascript:alert(1)'},
+      });
+      await prisma.email.update({where: {id: email.id}, data: queued});
+
+      await processEmailJob(makeJob(email.id));
+
+      const [params] = vi.mocked(sendRawEmail).mock.calls[0]!;
+      expect(params.content.html).toContain('<!DOCTYPE html>');
+      expect(params.content.html).not.toContain('javascript:');
+      expect(params.content.html).not.toContain('plunk:visual');
+    });
+
+    it('sends a body built by its sender, with no Liquid of its own, as it was before', async () => {
+      // How the club sends its access codes through /v1/send
+      const body =
+        '<h2>Hola Paco</h2>\n<p>Tu código de acceso es:</p>\n' +
+        '<p style="font-size:32px;font-weight:bold;letter-spacing:4px;color:#6366f1;">22234</p>\n' +
+        '<p><a href="https://club.test/acceso?c=22234&amp;u=1" style="color:#6366f1;">Acceder ahora</a></p>\n' +
+        '<p style="color:#999;font-size:12px;">Este código expira en 10 minutos.</p>';
+      const email = await pendingEmail({sourceType: EmailSourceType.TRANSACTIONAL});
+      const queued = EmailService.format({subject: 'Tu código', body, data: {}});
+      expect(queued.body).toBe(`<!--plunk:visual-->${body}`);
+      await prisma.email.update({where: {id: email.id}, data: queued});
+
+      await processEmailJob(makeJob(email.id));
+
+      const [params] = vi.mocked(sendRawEmail).mock.calls[0]!;
+      expect(params.content.html).toContain('Hola Paco</h2>');
+      expect(params.content.html).toContain('22234</p>');
+      expect(params.content.html).toContain('href="https://club.test/acceso?c=22234&amp;u=1"');
     });
   });
 

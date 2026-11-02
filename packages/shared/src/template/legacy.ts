@@ -1,3 +1,24 @@
+import {withoutCustomHtmlPatterns} from './emailDocument.js';
+import type {TemplateMode} from './engine.js';
+import {escapeBraces, escapeHtml, neutralizeLiquid} from './html.js';
+
+// The fallback must not throw itself: data such as `{"toString": "x"}` has no text form
+function asText(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+}
+
+// As the Liquid engine of each mode writes a value; `'` too, as Liquid's escape does, since
+// a value may sit in a single-quoted attribute
+const WRITERS: Record<TemplateMode, (value: unknown) => string> = {
+  html: value => withoutCustomHtmlPatterns(escapeBraces(escapeHtml(asText(value)).replace(/'/g, '&#39;'))),
+  subject: value => neutralizeLiquid(asText(value)),
+  text: value => asText(value),
+};
+
 /**
  * The pre-Liquid renderer, kept as a safety net.
  *
@@ -9,9 +30,12 @@
  * author.
  *
  * Supports `{{variable}}`, `{{variable ?? defaultValue}}` and nested access
- * (`{{data.firstName}}`).
+ * (`{{data.firstName}}`). Values are written as the Liquid engine of `mode` writes them:
+ * escaped in a body, with no template tag left in a subject, as they are in a webhook.
  */
-export function renderLegacyTemplate(template: string, variables: Record<string, unknown>): string {
+export function renderLegacyTemplate(template: string, variables: Record<string, unknown>, mode: TemplateMode): string {
+  const write = WRITERS[mode];
+
   return template.replace(/\{\{(.*?)\}\}/g, (_match, key) => {
     const [mainKey, defaultValue] = key.split('??').map((s: string) => s.trim());
 
@@ -33,9 +57,9 @@ export function renderLegacyTemplate(template: string, variables: Record<string,
 
     // Handle array values (for lists)
     if (Array.isArray(value)) {
-      return value.map((e: string) => `<li>${e}</li>`).join('\n');
+      return value.map((e: unknown) => `<li>${write(asText(e))}</li>`).join('\n');
     }
 
-    return value ?? defaultValue ?? '';
+    return write(value ?? defaultValue ?? '');
   });
 }

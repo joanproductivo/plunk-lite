@@ -1,5 +1,6 @@
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {CampaignAudienceType, CampaignStatus} from '@plunk/db';
+import {readEmailContent} from '@plunk/shared';
 import {CampaignService} from '../CampaignService';
 import {factories, getPrismaClient} from '../../../../../test/helpers';
 
@@ -721,13 +722,13 @@ describe('CampaignService', () => {
       );
 
       expect(byFirstName.get('Ada')?.subject).toBe('Your offer');
-      expect(byFirstName.get('Ada')?.body).toBe('<p>Hi Ada, you are on PRO.</p>');
+      expect(readEmailContent(byFirstName.get('Ada')!.body).content).toBe('<p>Hi Ada, you are on PRO.</p>');
 
       expect(byFirstName.get('Bruno')?.subject).toBe('Tu oferta');
-      expect(byFirstName.get('Bruno')?.body).toBe('<p>Hi Bruno, you are on FREE.</p>');
+      expect(readEmailContent(byFirstName.get('Bruno')!.body).content).toBe('<p>Hi Bruno, you are on FREE.</p>');
 
       // Contact without a firstName falls back
-      expect(byFirstName.get(null)?.body).toBe('<p>Hi there, you are on FREE.</p>');
+      expect(readEmailContent(byFirstName.get(null)!.body).content).toBe('<p>Hi there, you are on FREE.</p>');
     });
 
     it('renders loops over contact data', async () => {
@@ -739,7 +740,7 @@ describe('CampaignService', () => {
         [{cart: [{name: 'Starter'}, {name: 'Team'}]}],
       );
 
-      expect(emails[0]?.body).toBe('<ul><li>Starter</li><li>Team</li></ul>');
+      expect(readEmailContent(emails[0]!.body).content).toBe('<ul><li>Starter</li><li>Team</li></ul>');
     });
 
     it('still injects the per-recipient unsubscribe URL', async () => {

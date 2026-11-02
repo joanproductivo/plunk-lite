@@ -1,7 +1,6 @@
 import {
   BRAND_DEFAULTS,
   BUTTON_PADDING,
-  detectCustomHtmlPatterns,
   emailDocument,
   emailFontFamily,
   emailProseCss,
@@ -11,6 +10,7 @@ import {
   isSafeLinkHref,
   isSafeVideoHrefAttribute,
   readButtonStyle,
+  readEmailContent,
   readPixels,
   readSpacerHeight,
   readVideoSize,
@@ -156,12 +156,33 @@ function linkImages($: CheerioAPI): void {
       .filter((_, node) => node.type === 'tag' || (node.type === 'text' && /[^ \t\n\r\f]/.test($(node).text())));
     if (contents.length !== 1 || !contents.first().is('img.email-image')) return;
 
+    // checkLinks does it again for every link; this one still holds if that check fails
     if (!isSafeLinkHref(link.attr('href'))) {
       link.removeAttr('href');
     }
     link.attr('style', withDeclaration(link.attr('style'), 'text-decoration', 'none'));
     contents.first().attr('style', withDeclaration(contents.first().attr('style'), 'border', '0px'));
   });
+}
+
+/**
+ * Every link of an email that is not custom HTML, text links included, may only go where a
+ * block may link to: whatever Liquid filled in (a contact's data, say), `javascript:` and its
+ * kin lose their href.
+ * The attribute is read as written (the document loads without decoding entities), so
+ * `&#106;avascript:` is caught too, as is a scheme written with entities that would be safe.
+ * Returns how many links lost theirs.
+ */
+function checkLinks($: CheerioAPI): number {
+  let removed = 0;
+  $('a[href]').each((_, element) => {
+    const link = $(element);
+    if (!isSafeLinkHref(link.attr('href'))) {
+      link.removeAttr('href');
+      removed += 1;
+    }
+  });
+  return removed;
 }
 
 /**
@@ -194,10 +215,11 @@ function wrapWithEmailStyles(htmlBody: string, brand: EmailBrand, emailId?: stri
     if (framed) {
       $('div.prose').first().html(htmlBody);
     }
-    // Browsers serialise quoted font names in a style attribute as &quot;, which juice, reading
-    // the text undecoded, would take for the end of a declaration
+    // Browsers serialise quoted font names in a style attribute as &quot;, and Liquid writes
+    // quotes and ampersands in data as entities, whose `;` juice, reading the text undecoded,
+    // would take for the end of a declaration
     $('[style]').each((_, element) => {
-      element.attribs.style = element.attribs.style!.replace(/&quot;/g, "'");
+      element.attribs.style = element.attribs.style!.replace(/&quot;|&#34;|&#39;/g, "'").replace(/&amp;/g, '&');
     });
     juice.inlineDocument($, emailProseCss(brand), {
       applyWidthAttributes: false,
@@ -256,6 +278,23 @@ function wrapWithEmailStyles(htmlBody: string, brand: EmailBrand, emailId?: stri
       );
     }
     try {
+      const removed = checkLinks($);
+      if (removed > 0) {
+        // Without the address: it may be a contact's data
+        warnAtMostEveryMinute(
+          'link',
+          `[EMAIL] Removed the href of ${removed} link(s) that no email may carry${emailId ? ` in email ${emailId}` : ''}`,
+        );
+      }
+    } catch (error) {
+      // Links go out as Liquid wrote them, as they did before every link was checked
+      warnAtMostEveryMinute(
+        'link-check',
+        `[EMAIL] Failed to check links${emailId ? ` of email ${emailId}` : ''}:`,
+        error,
+      );
+    }
+    try {
       convertBoxes($, brand);
       spanFullWidthBoxes($, brand);
     } catch (error) {
@@ -302,8 +341,9 @@ function insertPreheader(html: string, preheader: string): string {
  * preheader, if any, goes at the top.
  */
 export function renderBody(content: string, emailId?: string, footer = ''): string {
-  const {preheader, brand, body} = splitEmailMarkers(content);
-  const custom = detectCustomHtmlPatterns(body);
+  const markers = splitEmailMarkers(content);
+  const {preheader, brand} = markers;
+  const {content: body, custom} = readEmailContent(markers.body);
   const look = brand ?? BRAND_DEFAULTS;
   const wrapped = custom ? body : wrapWithEmailStyles(body, look, emailId);
   const html = insertPreheader(wrapped, preheader);
