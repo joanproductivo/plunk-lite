@@ -1,5 +1,5 @@
 import {type EmailBrand, toEmailBrand} from './brand.js';
-import {escapeHtml} from './html.js';
+import {decodeDataEntities, escapeHtml} from './html.js';
 import {decodeEntities} from './preprocess.js';
 
 /**
@@ -83,9 +83,14 @@ export function joinEmailMarkers({preheader, brand, body}: EmailMarkers): string
   ].join('');
 }
 
-/** The stored preheader as the plain text an author typed. */
+/**
+ * The stored preheader as the plain text an author typed, or as a reader sees it once rendered:
+ * a body's outputs write braces as entities too.
+ */
 export function preheaderToText(preheader: string): string {
-  return decodeEntities(preheader);
+  // The data's own entities first: a `&#123;` the author typed is stored as `&amp;#123;`, and
+  // stays as typed
+  return decodeEntities(decodeDataEntities(preheader));
 }
 
 /** Plain text typed by an author as a stored preheader. Blank text means no preheader. */

@@ -32,6 +32,12 @@ const ENTITY_PATTERN = /&(?:lt|gt|quot|apos|amp|nbsp|#34|#39|#160);/g;
  */
 const BARE_PATH = /^[A-Za-z_][\w .-]*$/;
 
+/**
+ * A filter that ends an output's chain and keeps it from being escaped again: `| raw`, or one
+ * that escapes (see the body engine).
+ */
+const FINAL_FILTER = /\s*\|\s*(?:raw|escape|escape_once|xml_escape|newline_to_br)\s*$/;
+
 /** `{% raw %}` content must survive verbatim, so preprocessing skips over it. */
 const RAW_TAG = /^\s*raw\s*$/;
 const END_RAW_TAG = /\{%-?\s*endraw\s*-?%\}/;
@@ -168,7 +174,10 @@ function rewriteOutput(inner: string): string {
   }
 
   const defaults = fallbacks.map(fallback => ` | default: ${toLiquidLiteral(fallback)}`).join('');
-  return `${OUTPUT_OPEN}${prefix} ${expression}${defaults} ${suffix}${OUTPUT_CLOSE}`;
+  // That filter must stay last, or the value would be escaped (again) after the fallback
+  const final = FINAL_FILTER.exec(expression);
+  const value = final ? expression.slice(0, final.index) : expression;
+  return `${OUTPUT_OPEN}${prefix} ${value}${defaults}${final ? final[0] : ''} ${suffix}${OUTPUT_CLOSE}`;
 }
 
 /**

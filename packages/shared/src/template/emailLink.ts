@@ -1,6 +1,7 @@
 /**
- * Links of the email editor's blocks (buttons and images): which ones they may carry. The
- * dashboard checks them when writing and reading a block; the API checks them again when sending.
+ * Links of the email editor: which ones its blocks (buttons and images) may carry. The dashboard
+ * checks them when writing and reading a block; the API checks every link of an editor email
+ * again when sending.
  */
 
 /**

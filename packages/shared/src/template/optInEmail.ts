@@ -6,7 +6,7 @@ import {BRAND_DEFAULTS, type EmailBrand, isFramedBrand} from './brand.js';
 import {BUTTON_DEFAULTS, type ButtonStyle, buttonStyle} from './emailButton.js';
 import {emailFontFamily} from './emailFonts.js';
 import {EMAIL_DEFAULT_WIDTH, emailDocument} from './emailDocument.js';
-import {escapeHtml} from './html.js';
+import {escapeBraces, escapeHtml, neutralizeLiquid} from './html.js';
 import {countOccurrences, isVisibleLabel, plainText, readTextsByLanguage} from './unsubscribeFooter.js';
 
 /**
@@ -127,7 +127,7 @@ export function isPlunkOptInText(text: OptInText, language: string): boolean {
 // Escaped for HTML, with braces as entities: sending runs Liquid over the body, and a project name
 // is not to be read as a template tag there
 function escapeForBody(value: string): string {
-  return escapeHtml(value).replace(/\{/g, '&#123;').replace(/\}/g, '&#125;');
+  return escapeBraces(escapeHtml(value));
 }
 
 /**
@@ -176,7 +176,7 @@ export function optInEmail(params: {
   return {
     // Sending runs Liquid over the subject too: no tag survives, however the project's name joins
     // the text around it (the texts hold none of their own)
-    subject: subject.replaceAll('{projectName}', () => params.projectName).replace(/\{(?=[{%])/g, '{\u200b'),
+    subject: neutralizeLiquid(subject.replaceAll('{projectName}', () => params.projectName)),
     body: emailDocument(`${logo}${paragraphs}\n    ${button}\n    ${ignore}`, column),
   };
 }
