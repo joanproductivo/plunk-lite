@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import {isSafeLinkHref} from '@plunk/shared';
+import {isValidLinkHref} from '@plunk/shared';
 import {mergeAttributes, Node} from '@tiptap/core';
 import type {DOMOutputSpec} from '@tiptap/pm/model';
 import {NodeViewWrapper, type ReactNodeViewProps, ReactNodeViewRenderer} from '@tiptap/react';
@@ -15,7 +15,7 @@ interface ImageAttrs {
   width?: number | string;
   height?: number | string;
   textAlign?: string | null;
-  /** Where the image links to, if anywhere (see isSafeLinkHref). */
+  /** Where the image links to, if anywhere (see isValidLinkHref). */
   href?: string | null;
 }
 
@@ -31,14 +31,14 @@ const ALIGNED_IMAGE_STYLES: Record<BlockAlignment, string> = {
 // Some clients frame a linked image with a border in the link's colour.
 const LINKED_IMAGE_STYLE = 'border: 0px';
 
-// A link the editor writes around an image (see renderHTML): one image alone, with a safe href. A
-// video's or a button's link is never one: their blocks come after the image in the schema, so the
-// image's rules, tried first, would take them.
+// A link the editor writes around an image (see renderHTML): one image alone, with an href the link
+// popover would take (see isValidLinkHref). A video's or a button's link is never one: their blocks
+// come after the image in the schema, so the image's rules, tried first, would take them.
 function isImageLink(element: Element | null): element is HTMLAnchorElement {
   return (
     isLoneImageLink(element) &&
     !element.matches('.email-video, .email-button') &&
-    isSafeLinkHref(element.getAttribute('href'))
+    isValidLinkHref(element.getAttribute('href') ?? '')
   );
 }
 
@@ -332,7 +332,7 @@ export const ResizableImage = Node.create({
 
   renderHTML({node, HTMLAttributes}) {
     const alignment = blockAlignment(node.attrs.textAlign);
-    const href = isSafeLinkHref(node.attrs.href) ? (node.attrs.href as string) : null;
+    const href = isValidLinkHref(node.attrs.href ?? '') ? (node.attrs.href as string) : null;
     const style = [alignment && ALIGNED_IMAGE_STYLES[alignment], href && LINKED_IMAGE_STYLE].filter(Boolean).join('; ');
 
     const image: DOMOutputSpec = [

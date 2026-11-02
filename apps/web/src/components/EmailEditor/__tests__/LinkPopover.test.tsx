@@ -165,6 +165,20 @@ describe('LinkPopover', () => {
       expect(editor.getText()).not.toContain('guide.pdf');
     });
 
+    it('closes when the selection moves from the image to text, so its link never lands there', async () => {
+      selectImage();
+      await render();
+
+      await click('Link');
+      await typeLink('https://example.com/offer');
+      // Clicking into the text after the image, as the toolbar re-renders on selection changes
+      editor.commands.setTextSelection(6);
+      await render();
+
+      expect(container.querySelector('input')).toBeNull();
+      expect(editor.getHTML()).not.toContain('example.com/offer');
+    });
+
     it('asks for a full link rather than saving one a block may not have', async () => {
       selectImage();
       await render();

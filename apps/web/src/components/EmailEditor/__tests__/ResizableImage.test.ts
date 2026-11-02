@@ -231,6 +231,13 @@ describe('image link', () => {
     },
   );
 
+  it('reads an image inside a link with a space without it, as the link popover would not take it', () => {
+    createLinkingEditor('<p>a</p><p><a href="https://example.com/a b"><img src="x.png"></a></p><p>b</p>');
+    selectImage();
+
+    expect(editor.getAttributes('image').href).toBeNull();
+  });
+
   it('writes no link a block may not have, whatever the attribute holds', () => {
     createLinkingEditor(`<p>a</p>${IMAGE}<p>b</p>`);
     selectImage();

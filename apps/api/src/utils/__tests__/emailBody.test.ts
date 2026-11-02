@@ -415,8 +415,11 @@ describe('renderBody', () => {
       expect(html).toContain('src="https://files.example.com/a.png"');
     });
 
-    it('checks a link with a comment beside its image too', () => {
-      const html = renderBody(linked('javascript:alert(1)', `<!-- note -->${img}`));
+    it.each([
+      ['a comment', '<!-- note -->'],
+      ['a processing instruction', '<?x y?>'],
+    ])('checks a link with %s beside its image too', (_label, beside) => {
+      const html = renderBody(linked('javascript:alert(1)', `${beside}${img}`));
 
       expect(html).not.toMatch(/<a [^>]*href=/);
       expect(styleOf(html, 'img')).toMatch(/border: 0px/);

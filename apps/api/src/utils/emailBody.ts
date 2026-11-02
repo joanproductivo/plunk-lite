@@ -149,10 +149,11 @@ function sizeVideos($: CheerioAPI, brand: EmailBrand): void {
 function linkImages($: CheerioAPI): void {
   $('a:not(.email-video):not(.email-button)').each((_, element) => {
     const link = $(element);
-    // Comments and blank text are not content: a comment would otherwise let an unchecked link by
+    // Only tags and text that is not blank count: anything else beside the image (a comment, a
+    // processing instruction) would otherwise let an unchecked link by
     const contents = link
       .contents()
-      .filter((_, node) => node.type !== 'comment' && (node.type !== 'text' || /[^ \t\n\r\f]/.test($(node).text())));
+      .filter((_, node) => node.type === 'tag' || (node.type === 'text' && /[^ \t\n\r\f]/.test($(node).text())));
     if (contents.length !== 1 || !contents.first().is('img.email-image')) return;
 
     if (!isSafeLinkHref(link.attr('href'))) {

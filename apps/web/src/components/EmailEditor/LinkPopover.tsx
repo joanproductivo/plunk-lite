@@ -28,6 +28,14 @@ export function LinkPopover({editor, canUpload}: {editor: Editor; canUpload: boo
     setShowLinkInput(false);
   };
 
+  // Opened for an image or for text, the popover is for that: clicking from one to the other closes
+  // it, rather than leaving the link typed for one to land on the other unchecked
+  const [openedForImage, setOpenedForImage] = useState(image);
+  if (openedForImage !== image) {
+    setOpenedForImage(image);
+    close();
+  }
+
   /**
    * Links the selection to `href`. An existing link is updated whole; with nothing selected,
    * `text` (a file's name) is inserted already linked, as there is nothing else to link: apart
