@@ -427,6 +427,23 @@ describe('processEmailJob', () => {
       },
     );
 
+    it('sends an editor email as one, with its links checked, whatever its data makes of it', async () => {
+      const email = await pendingEmail({sourceType: EmailSourceType.TRANSACTIONAL});
+      const queued = EmailService.format({
+        subject: 'Hi',
+        body: '<p>Follow us @{{ h }}</p><p><a href="{{ url }}">x</a></p>',
+        data: {h: 'media', url: 'javascript:alert(1)'},
+      });
+      await prisma.email.update({where: {id: email.id}, data: queued});
+
+      await processEmailJob(makeJob(email.id));
+
+      const [params] = vi.mocked(sendRawEmail).mock.calls[0]!;
+      expect(params.content.html).toContain('<!DOCTYPE html>');
+      expect(params.content.html).not.toContain('javascript:');
+      expect(params.content.html).not.toContain('plunk:visual');
+    });
+
     it('sends a body built by its sender, with no Liquid of its own, as it was before', async () => {
       // How the club sends its access codes through /v1/send
       const body =
@@ -436,7 +453,7 @@ describe('processEmailJob', () => {
         '<p style="color:#999;font-size:12px;">Este código expira en 10 minutos.</p>';
       const email = await pendingEmail({sourceType: EmailSourceType.TRANSACTIONAL});
       const queued = EmailService.format({subject: 'Tu código', body, data: {}});
-      expect(queued.body).toBe(body);
+      expect(queued.body).toBe(`<!--plunk:visual-->${body}`);
       await prisma.email.update({where: {id: email.id}, data: queued});
 
       await processEmailJob(makeJob(email.id));

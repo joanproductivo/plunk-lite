@@ -13,6 +13,7 @@ import type {OptInOutcome, SegmentChangesResult, UpdateContactSegmentChanges} fr
 import {toPrismaJson} from '@plunk/types';
 import {
   canScopeWaitToExecution,
+  markVisualContent,
   renderSubjectTemplate,
   renderTemplate,
   renderTextTemplate,
@@ -745,7 +746,7 @@ export class WorkflowExecutionService {
     };
 
     const renderedSubject = renderSubjectTemplate(step.template.subject, variables);
-    const renderedBody = renderTemplate(step.template.body, variables);
+    const renderedBody = markVisualContent(step.template.body, renderTemplate(step.template.body, variables));
 
     // Send email via EmailService
     const email = await EmailService.sendWorkflowEmail({

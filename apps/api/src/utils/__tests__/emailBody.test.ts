@@ -1,13 +1,13 @@
 import {
   buttonStyle,
   BUTTON_DEFAULTS,
-  detectCustomHtmlPatterns,
   type EmailBrand,
   EMAIL_FONTS,
   isFullWidthBox,
   isSafeVideoHrefAttribute,
   joinEmailMarkers,
   readButtonStyle,
+  readEmailContent,
   readSpacerHeight,
   renderTemplate,
   spacerStyle,
@@ -24,10 +24,10 @@ vi.mock('@plunk/shared', async importOriginal => {
   const actual = await importOriginal<typeof import('@plunk/shared')>();
   return {
     ...actual,
-    detectCustomHtmlPatterns: vi.fn(actual.detectCustomHtmlPatterns),
     isFullWidthBox: vi.fn(actual.isFullWidthBox),
     isSafeVideoHrefAttribute: vi.fn(actual.isSafeVideoHrefAttribute),
     readButtonStyle: vi.fn(actual.readButtonStyle),
+    readEmailContent: vi.fn(actual.readEmailContent),
     readSpacerHeight: vi.fn(actual.readSpacerHeight),
   };
 });
@@ -357,7 +357,7 @@ describe('renderBody', () => {
     });
 
     it('drops a link that is not one a video may have, still sizing the poster', () => {
-      vi.mocked(detectCustomHtmlPatterns).mockReturnValueOnce(false);
+      vi.mocked(readEmailContent).mockImplementationOnce(body => ({content: body, custom: false}));
 
       const html = renderBody(video(image(), 'javascript:alert(1)'));
 

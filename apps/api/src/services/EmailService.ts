@@ -9,6 +9,7 @@ import {HttpException} from '../exceptions/index.js';
 import {
   contactLanguage,
   footerParagraph,
+  markVisualContent,
   type ProjectFooters,
   renderSubjectTemplate,
   renderTemplate,
@@ -388,7 +389,8 @@ export class EmailService {
    * When rendering a known template for many contacts in one pass, prefer
    * `compileTemplate` and `compileSubjectTemplate` to hoist the parse out of the loop entirely
    * (see CampaignService).
-   * The body is HTML, so its outputs are escaped; the subject is plain text.
+   * The body is HTML, so its outputs are escaped, and it keeps whether its template was visual
+   * editor content (see `markVisualContent`); the subject is plain text.
    */
   public static format({subject, body, data}: {subject: string; body: string; data: Record<string, unknown>}): {
     subject: string;
@@ -396,7 +398,7 @@ export class EmailService {
   } {
     return {
       subject: renderSubjectTemplate(subject, data),
-      body: renderTemplate(body, data),
+      body: markVisualContent(body, renderTemplate(body, data)),
     };
   }
 

@@ -38,6 +38,7 @@ import {
   detectCustomHtmlPatterns,
   isFramedBrand,
   joinEmailMarkers,
+  markVisualContent,
   preheaderToText,
   renderSubjectTemplate,
   renderTemplate,
@@ -333,7 +334,10 @@ export function EmailEditor({
   // Never throws: a template that doesn't parse yet falls back to plain {{variable}} substitution
   const renderPreview = (text: string) => renderTemplate(text, previewVariables());
 
-  const getPreviewHtml = () => renderPreview(mode === 'visual' ? editor?.getHTML() || '' : htmlContent);
+  const getPreviewHtml = () => {
+    const source = mode === 'visual' ? editor?.getHTML() || '' : htmlContent;
+    return markVisualContent(source, renderPreview(source));
+  };
 
   const getPreviewContainerWidth = () => {
     // Return the actual width the iframe should have (for media queries)

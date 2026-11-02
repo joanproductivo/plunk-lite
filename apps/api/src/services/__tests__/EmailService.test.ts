@@ -1,6 +1,6 @@
 import {beforeEach, describe, expect, it, vi, type Mock} from 'vitest';
 import {EmailSourceType, EmailStatus, TemplateType, TrackingMode} from '@plunk/db';
-import {ActionSchemas} from '@plunk/shared';
+import {ActionSchemas, readEmailContent} from '@plunk/shared';
 import {EmailService} from '../EmailService';
 import {ProjectService} from '../ProjectService';
 import {sendRawEmail} from '../SESService';
@@ -1086,7 +1086,7 @@ describe('Template rendering — hostile contact data keys (no DB)', () => {
     expect(run).not.toThrow();
     const {subject, body} = run();
     expect(subject).toBe('Hello Jane');
-    expect(body).toBe('Body Jane');
+    expect(readEmailContent(body).content).toBe('Body Jane');
   });
 
   it('renders promptly when a data key is a catastrophic-backtracking pattern', () => {

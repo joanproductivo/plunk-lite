@@ -25,7 +25,15 @@ export * from './emailVideoSize.js';
 export {escapeHtml, neutralizeLiquid} from './html.js';
 export {declarations, readPixels, withDeclaration} from './inlineStyle.js';
 export * from './optInEmail.js';
-export {type EmailMarkers, joinEmailMarkers, preheaderToText, splitEmailMarkers, textToPreheader} from './markers.js';
+export {
+  type EmailMarkers,
+  joinEmailMarkers,
+  markVisualContent,
+  preheaderToText,
+  readEmailContent,
+  splitEmailMarkers,
+  textToPreheader,
+} from './markers.js';
 export * from './unsubscribeFooter.js';
 
 /** A template parsed once and ready to be rendered against many recipients. */

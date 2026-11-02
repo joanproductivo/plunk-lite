@@ -1,6 +1,6 @@
 import type {Campaign, Contact} from '@plunk/db';
 import {CampaignAudienceType, CampaignStatus, EmailSourceType, EmailStatus, Prisma, TemplateType} from '@plunk/db';
-import {compileSubjectTemplate, compileTemplate} from '@plunk/shared';
+import {compileSubjectTemplate, compileTemplate, markVisualContent} from '@plunk/shared';
 import type {
   CampaignBatchJobData,
   CampaignListResponse,
@@ -795,7 +795,7 @@ export class CampaignService {
         };
 
         const renderedSubject = subjectTemplate.render(variables);
-        const renderedBody = bodyTemplate.render(variables);
+        const renderedBody = markVisualContent(campaign.body, bodyTemplate.render(variables));
 
         // The check at the top of the batch is long gone by now: the campaign may have been
         // cancelled, or cancelled and sent again, since. Each email is created under a lock on the

@@ -1,7 +1,6 @@
 import {
   BRAND_DEFAULTS,
   BUTTON_PADDING,
-  detectCustomHtmlPatterns,
   emailDocument,
   emailFontFamily,
   emailProseCss,
@@ -11,6 +10,7 @@ import {
   isSafeLinkHref,
   isSafeVideoHrefAttribute,
   readButtonStyle,
+  readEmailContent,
   readPixels,
   readSpacerHeight,
   readVideoSize,
@@ -341,8 +341,9 @@ function insertPreheader(html: string, preheader: string): string {
  * preheader, if any, goes at the top.
  */
 export function renderBody(content: string, emailId?: string, footer = ''): string {
-  const {preheader, brand, body} = splitEmailMarkers(content);
-  const custom = detectCustomHtmlPatterns(body);
+  const markers = splitEmailMarkers(content);
+  const {preheader, brand} = markers;
+  const {content: body, custom} = readEmailContent(markers.body);
   const look = brand ?? BRAND_DEFAULTS;
   const wrapped = custom ? body : wrapWithEmailStyles(body, look, emailId);
   const html = insertPreheader(wrapped, preheader);
