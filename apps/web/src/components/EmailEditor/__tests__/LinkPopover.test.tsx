@@ -1,11 +1,14 @@
 // @vitest-environment happy-dom
+import {LINK_HREF_HINT} from '@plunk/shared';
 import {Editor} from '@tiptap/core';
+import {NodeSelection} from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import {act} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {LinkPopover} from '../LinkPopover';
+import {ResizableImage} from '../ResizableImage';
 
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?: boolean}).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -46,7 +49,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  editor = new Editor({extensions: [StarterKit], content: '<p>Read the guide</p>'});
+  editor = new Editor({extensions: [StarterKit, ResizableImage], content: '<p>Read the guide</p>'});
 });
 
 afterEach(async () => {
@@ -101,5 +104,77 @@ describe('LinkPopover', () => {
     await click('Link');
 
     expect(button('File…')).toBeUndefined();
+  });
+
+  describe('with an image selected', () => {
+    // What clicking the image in the editor does
+    function selectImage() {
+      editor.commands.setContent('<p>a</p><img src="x.png"><p>b</p>');
+      editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, 3)));
+    }
+
+    async function typeLink(url: string) {
+      const input = container.querySelector('input')!;
+      await act(async () => {
+        const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+        setValue.call(input, url);
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+      });
+    }
+
+    it('links the image, not text, and keeps it selected', async () => {
+      selectImage();
+      await render();
+
+      await click('Link');
+      await typeLink('https://example.com/offer');
+      await click('Add');
+
+      expect(editor.getAttributes('image').href).toBe('https://example.com/offer');
+      expect(editor.state.selection).toBeInstanceOf(NodeSelection);
+      expect(editor.getHTML()).not.toContain('noopener');
+    });
+
+    it('shows the link to edit it, and removes it', async () => {
+      selectImage();
+      editor.commands.updateAttributes('image', {href: 'https://example.com/offer'});
+      await render();
+
+      expect(button('Link')!.dataset.active).toBe('true');
+      await click('Link');
+      expect(container.querySelector('input')!.value).toBe('https://example.com/offer');
+      await typeLink('https://example.com/new');
+      await click('Update');
+      expect(editor.getAttributes('image').href).toBe('https://example.com/new');
+
+      await click('Link');
+      await click('Remove link');
+
+      expect(editor.getAttributes('image').href).toBeNull();
+    });
+
+    it('links the image to a file', async () => {
+      selectImage();
+      await render();
+
+      await click('Link');
+      await click('File…');
+      await click('Pick guide');
+
+      expect(editor.getAttributes('image').href).toBe(FILE_URL);
+      expect(editor.getText()).not.toContain('guide.pdf');
+    });
+
+    it('asks for a full link rather than saving one a block may not have', async () => {
+      selectImage();
+      await render();
+
+      await click('Link');
+      await typeLink('www.example.com');
+      await click('Add');
+
+      expect(editor.getAttributes('image').href).toBeNull();
+      expect(container.textContent).toContain(LINK_HREF_HINT);
+    });
   });
 });

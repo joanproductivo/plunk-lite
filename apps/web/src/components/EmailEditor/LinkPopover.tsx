@@ -1,4 +1,6 @@
+import {isValidLinkHref, LINK_HREF_HINT} from '@plunk/shared';
 import {Button} from '@plunk/ui';
+import {NodeSelection} from '@tiptap/pm/state';
 import {type Editor} from '@tiptap/react';
 import {FileText, Link} from 'lucide-react';
 import {useState} from 'react';
@@ -6,16 +8,23 @@ import {useState} from 'react';
 import {FileDialog} from './FileDialog';
 
 /**
- * The toolbar's link button and its popover: links the selected text to a URL, or, with storage
- * configured, to a file uploaded for it.
+ * The toolbar's link button and its popover: links the selected text, or the selected image, to a
+ * URL, or, with storage configured, to a file uploaded for it.
  */
 export function LinkPopover({editor, canUpload}: {editor: Editor; canUpload: boolean}) {
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
+  const [invalid, setInvalid] = useState(false);
   const [showFileDialog, setShowFileDialog] = useState(false);
+
+  // An image, selected with a click, carries its link itself (see ResizableImage)
+  const {selection} = editor.state;
+  const image = selection instanceof NodeSelection && selection.node.type.name === 'image';
+  const active = image ? !!editor.getAttributes('image').href : editor.isActive('link');
 
   const close = () => {
     setLinkUrl('');
+    setInvalid(false);
     setShowLinkInput(false);
   };
 
@@ -25,7 +34,14 @@ export function LinkPopover({editor, canUpload}: {editor: Editor; canUpload: boo
    * from the word before it, and closed, so what is typed next is not part of the link.
    */
   const applyLink = (href: string, text?: string) => {
-    if (editor.isActive('link')) {
+    if (image) {
+      // Only what a block may link to: the link goes out as it is, with no text to fall back on
+      if (!isValidLinkHref(href)) {
+        setInvalid(true);
+        return;
+      }
+      editor.chain().focus().updateAttributes('image', {href: href.trim()}).run();
+    } else if (editor.isActive('link')) {
       editor.chain().focus().extendMarkRange('link').setLink({href}).run();
     } else if (editor.state.selection.empty && text) {
       const {$from} = editor.state.selection;
@@ -50,14 +66,19 @@ export function LinkPopover({editor, canUpload}: {editor: Editor; canUpload: boo
   };
 
   const removeLink = () => {
-    editor.chain().focus().unsetLink().run();
+    if (image) {
+      editor.chain().focus().updateAttributes('image', {href: null}).run();
+    } else {
+      editor.chain().focus().unsetLink().run();
+    }
     close();
   };
 
   const toggle = () => {
-    if (editor.isActive('link')) {
+    setInvalid(false);
+    if (active) {
       // Get the current link URL and show the input to edit it
-      setLinkUrl(editor.getAttributes('link').href || '');
+      setLinkUrl(editor.getAttributes(image ? 'image' : 'link').href || '');
       setShowLinkInput(true);
     } else {
       setShowLinkInput(!showLinkInput);
@@ -73,7 +94,7 @@ export function LinkPopover({editor, canUpload}: {editor: Editor; canUpload: boo
         size="icon"
         onMouseDown={e => e.preventDefault()}
         onClick={toggle}
-        data-active={editor.isActive('link')}
+        data-active={active}
         className="h-8 w-8 data-[active=true]:bg-neutral-200"
         title="Link"
       >
@@ -85,7 +106,10 @@ export function LinkPopover({editor, canUpload}: {editor: Editor; canUpload: boo
             <input
               type="url"
               value={linkUrl}
-              onChange={e => setLinkUrl(e.target.value)}
+              onChange={e => {
+                setLinkUrl(e.target.value);
+                setInvalid(false);
+              }}
               placeholder="https://example.com"
               className="px-2 py-1 text-sm border border-neutral-200 rounded w-64"
               onKeyDown={e => {
@@ -98,9 +122,10 @@ export function LinkPopover({editor, canUpload}: {editor: Editor; canUpload: boo
               autoFocus
             />
             <Button type="button" size="sm" onMouseDown={e => e.preventDefault()} onClick={addLink}>
-              {editor.isActive('link') ? 'Update' : 'Add'}
+              {active ? 'Update' : 'Add'}
             </Button>
           </div>
+          {invalid && <p className="mb-2 max-w-80 text-xs text-red-700">{LINK_HREF_HINT}</p>}
           <div className="flex justify-end gap-2">
             {canUpload && (
               <Button
@@ -114,7 +139,7 @@ export function LinkPopover({editor, canUpload}: {editor: Editor; canUpload: boo
                 File…
               </Button>
             )}
-            {editor.isActive('link') && (
+            {active && (
               <Button
                 type="button"
                 size="sm"
