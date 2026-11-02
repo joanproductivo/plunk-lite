@@ -87,8 +87,9 @@ function hasForeignDiv(html: string): boolean {
  * rather than the visual editor.
  *
  * The TipTap editor loads StarterKit + TextAlign + Color + TextStyle + Link +
- * ResizableImage + EmailButton + EmailDivider (styled <hr>) + EmailSpacer + EmailVideo + EmailBox (a
- * <div class="email-box">, the only div it writes) + VariableMention.
+ * ResizableImage (an <img>, alone or in a link) + EmailButton + EmailDivider (styled <hr>) +
+ * EmailSpacer + EmailVideo + EmailBox (a <div class="email-box">, the only div it writes) +
+ * VariableMention.
  * TextStyle/Color/Link round-trip <span style="..."> and <a style="..."> markup. This detection
  * therefore PERMITS span + inline styles and only REJECTS markup TipTap cannot represent (tables,
  * other divs, forms, embeds, custom attrs, <style> blocks, etc).

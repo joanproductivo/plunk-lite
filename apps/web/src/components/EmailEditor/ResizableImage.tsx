@@ -1,9 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import {isSafeLinkHref} from '@plunk/shared';
 import {mergeAttributes, Node} from '@tiptap/core';
+import type {DOMOutputSpec} from '@tiptap/pm/model';
 import {NodeViewWrapper, type ReactNodeViewProps, ReactNodeViewRenderer} from '@tiptap/react';
+import {Link} from 'lucide-react';
 import {useEffect, useRef, useState} from 'react';
 
-import {blockAlignment, type BlockAlignment, isLoneChildParagraph} from './blockAlignment';
+import {blockAlignment, type BlockAlignment, isLoneChildParagraph, isLoneImageLink} from './blockAlignment';
 
 interface ImageAttrs {
   src: string;
@@ -12,6 +15,8 @@ interface ImageAttrs {
   width?: number | string;
   height?: number | string;
   textAlign?: string | null;
+  /** Where the image links to, if anywhere (see isSafeLinkHref). */
+  href?: string | null;
 }
 
 // An aligned image is wrapped in <p style="text-align: …"> (see renderHTML). The inline
@@ -23,10 +28,30 @@ const ALIGNED_IMAGE_STYLES: Record<BlockAlignment, string> = {
   right: 'display: block; margin-left: auto; margin-right: 0',
 };
 
-// The attributes live on the <img>: the matched element itself, or the only child of the
-// paragraph matched by the second parse rule.
+// Some clients frame a linked image with a border in the link's colour.
+const LINKED_IMAGE_STYLE = 'border: 0px';
+
+// A link the editor writes around an image (see renderHTML): one image alone, with a safe href. A
+// video's or a button's link is never one: their blocks come after the image in the schema, so the
+// image's rules, tried first, would take them.
+function isImageLink(element: Element | null): element is HTMLAnchorElement {
+  return (
+    isLoneImageLink(element) &&
+    !element.matches('.email-video, .email-button') &&
+    isSafeLinkHref(element.getAttribute('href'))
+  );
+}
+
+// The attributes live on the <img>: the matched element itself, the only child of the matched
+// link, or the only child of the paragraph matched by the last parse rule, itself or in its link.
 function imageElement(element: HTMLElement): Element {
-  return element.matches('img') ? element : element.firstElementChild!;
+  const child = element.matches('img') ? element : element.firstElementChild!;
+  return child.matches('a') ? child.firstElementChild! : child;
+}
+
+// The link around the image: the matched link, or the paragraph's only child.
+function linkElement(element: HTMLElement): Element | null {
+  return element.matches('a') ? element : element.firstElementChild;
 }
 
 function ResizableImageComponent({node, updateAttributes, selected}: ReactNodeViewProps) {
@@ -105,7 +130,7 @@ function ResizableImageComponent({node, updateAttributes, selected}: ReactNodeVi
     setResizeDirection(direction);
   };
 
-  const {src, alt, title, width, height} = attrs;
+  const {src, alt, title, width, height, href} = attrs;
 
   return (
     <NodeViewWrapper className="resizable-image-wrapper" style={{textAlign: alignment ?? undefined}}>
@@ -129,6 +154,26 @@ function ResizableImageComponent({node, updateAttributes, selected}: ReactNodeVi
             width: width ? `${width}px` : 'auto',
           }}
         />
+        {href && (
+          // The editor is no place to follow the link: this only shows where it goes.
+          <span
+            className="image-link-badge"
+            title={href}
+            style={{
+              position: 'absolute',
+              top: '10px',
+              left: '10px',
+              display: 'flex',
+              padding: '4px',
+              borderRadius: '9999px',
+              backgroundColor: 'rgba(23, 23, 23, 0.75)',
+              color: 'white',
+              zIndex: 5,
+            }}
+          >
+            <Link className="h-3.5 w-3.5" />
+          </span>
+        )}
         {selected && (
           <>
             {/* Resize handles */}
@@ -253,6 +298,15 @@ export const ResizableImage = Node.create({
           };
         },
       },
+      href: {
+        default: null,
+        parseHTML: element => {
+          const link = linkElement(element);
+          return isImageLink(link) ? link.getAttribute('href') : null;
+        },
+        // Written on the link around the image (see renderHTML)
+        renderHTML: () => ({}),
+      },
     };
   },
 
@@ -261,27 +315,34 @@ export const ResizableImage = Node.create({
       {
         tag: 'img[src]',
       },
+      // Ahead of the Link mark's `a[href]` (default priority 50), which an image cannot carry.
+      {tag: 'a[href]', priority: 60, getAttrs: element => (isImageLink(element) ? null : false)},
       // Ahead of Paragraph's own `p` rule (default priority 50).
       {
         tag: 'p',
         priority: 51,
-        getAttrs: element => (isLoneChildParagraph(element, 'img[src]') ? null : false),
+        getAttrs: element =>
+          isLoneChildParagraph(element, 'img[src]') ||
+          (isLoneChildParagraph(element, 'a') && isImageLink(element.firstElementChild))
+            ? null
+            : false,
       },
     ];
   },
 
   renderHTML({node, HTMLAttributes}) {
     const alignment = blockAlignment(node.attrs.textAlign);
+    const href = isSafeLinkHref(node.attrs.href) ? (node.attrs.href as string) : null;
+    const style = [alignment && ALIGNED_IMAGE_STYLES[alignment], href && LINKED_IMAGE_STYLE].filter(Boolean).join('; ');
 
-    if (!alignment) {
-      return ['img', mergeAttributes(HTMLAttributes, {class: 'email-image'})];
-    }
-
-    return [
-      'p',
-      {style: `text-align: ${alignment}`},
-      ['img', mergeAttributes(HTMLAttributes, {class: 'email-image', style: ALIGNED_IMAGE_STYLES[alignment]})],
+    const image: DOMOutputSpec = [
+      'img',
+      mergeAttributes(HTMLAttributes, {class: 'email-image', ...(style ? {style} : {})}),
     ];
+    // Without rel or target, as videos and buttons: the link is the image's, not text's
+    const block: DOMOutputSpec = href ? ['a', {href, style: 'text-decoration: none;'}, image] : image;
+
+    return alignment ? ['p', {style: `text-align: ${alignment}`}, block] : block;
   },
 
   addNodeView() {

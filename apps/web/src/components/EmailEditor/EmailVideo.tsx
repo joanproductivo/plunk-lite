@@ -12,7 +12,7 @@ import {
 import {Node} from '@tiptap/core';
 import {NodeViewWrapper, type ReactNodeViewProps, ReactNodeViewRenderer} from '@tiptap/react';
 
-import {isLoneChildParagraph} from './blockAlignment';
+import {isLoneChildParagraph, isLoneImageLink} from './blockAlignment';
 import {emitEditBlock} from './useBlockDialog';
 
 export interface VideoAttrs {
@@ -33,13 +33,7 @@ const VIDEO = 'a.email-video';
 // A video is a watch link holding one image with a source and nothing else, so reading it as a
 // block never drops anything; any other a.email-video stays custom HTML (see emailDocument).
 function isVideoLink(element: Element | null): element is HTMLAnchorElement {
-  return (
-    !!element &&
-    isSafeVideoHref(element.getAttribute('href')) &&
-    element.childElementCount === 1 &&
-    element.firstElementChild!.matches('img[src]') &&
-    !/[^ \t\n\r\f]/.test(element.textContent ?? '')
-  );
+  return isLoneImageLink(element) && isSafeVideoHref(element.getAttribute('href'));
 }
 
 // The attributes live on the link and its image: the matched link, or the paragraph's only child.

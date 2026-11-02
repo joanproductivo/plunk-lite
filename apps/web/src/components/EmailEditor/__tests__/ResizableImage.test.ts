@@ -5,7 +5,9 @@ import {NodeSelection} from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import {afterEach, describe, expect, it} from 'vitest';
 
+import {EmailButton} from '../EmailButton';
 import {EmailTextAlign} from '../EmailTextAlign';
+import {EmailVideo} from '../EmailVideo';
 import {ResizableImage} from '../ResizableImage';
 
 /**
@@ -24,6 +26,21 @@ let editor: Editor;
 function createEditor(content: string) {
   editor = new Editor({
     extensions: [StarterKit.configure({heading: {levels: [1, 2, 3]}}), EmailTextAlign, ResizableImage],
+    content,
+  });
+}
+
+// With the link mark and the blocks that are links too, in the editor's order (see EmailEditor):
+// rules of equal priority are tried in it, so the image's come before the button's and video's.
+function createLinkingEditor(content: string) {
+  editor = new Editor({
+    extensions: [
+      StarterKit.configure({heading: {levels: [1, 2, 3]}}),
+      EmailTextAlign,
+      ResizableImage,
+      EmailButton,
+      EmailVideo,
+    ],
     content,
   });
 }
@@ -156,5 +173,109 @@ describe('image alignment', () => {
     for (const part of kept) {
       expect(editor.getHTML()).toContain(part);
     }
+  });
+});
+
+describe('image link', () => {
+  const LINKED = `<a href="https://example.com/offer" style="text-decoration: none;"><img src="x.png" width="300" height="200" class="email-image" style="border: 0px;"></a>`;
+  const LINKED_CENTERED = `<p style="text-align: center;"><a href="https://example.com/offer" style="text-decoration: none;"><img src="x.png" width="300" height="200" class="email-image" style="display: block; margin-left: auto; margin-right: auto; border: 0px;"></a></p>`;
+
+  it('links a selected image, as visual-editor content that survives reopening', () => {
+    createLinkingEditor(`<p>a</p>${IMAGE}<p>b</p>`);
+    selectImage();
+
+    editor.commands.updateAttributes('image', {href: 'https://example.com/offer'});
+    const html = editor.getHTML();
+
+    expect(html).toBe(`<p>a</p>${LINKED}<p>b</p>`);
+    expect(detectCustomHtmlPatterns(html)).toBe(false);
+    expect(reopen(html)).toBe(html);
+  });
+
+  it('keeps the link of an aligned image inside its paragraph', () => {
+    createLinkingEditor(`<p>a</p>${LINKED}<p>b</p>`);
+    selectImage();
+
+    editor.commands.setTextAlign('center');
+
+    expect(editor.getHTML()).toBe(`<p>a</p>${LINKED_CENTERED}<p>b</p>`);
+    expect(reopen(editor.getHTML())).toBe(`<p>a</p>${LINKED_CENTERED}<p>b</p>`);
+  });
+
+  it('reads a linked image written by hand, in a paragraph or not, without leaving an empty paragraph', () => {
+    for (const written of [
+      '<a href="https://example.com/offer"><img src="x.png" width="300" height="200"></a>',
+      '<p><a href="https://example.com/offer"> <img src="x.png" width="300" height="200"> </a></p>',
+    ]) {
+      createLinkingEditor(`<p>a</p>${written}<p>b</p>`);
+
+      expect(editor.getHTML()).toBe(`<p>a</p>${LINKED}<p>b</p>`);
+      editor.destroy();
+    }
+    createLinkingEditor('<p>a</p>');
+  });
+
+  it('keeps a Liquid link', () => {
+    createLinkingEditor('<p>a</p><a href="{{ offerUrl }}"><img src="x.png"></a><p>b</p>');
+    selectImage();
+
+    expect(editor.getAttributes('image').href).toBe('{{ offerUrl }}');
+  });
+
+  it.each(['javascript:alert(1)', '&#106;avascript:alert(1)'])(
+    'reads an image inside a link to %s without it',
+    href => {
+      createLinkingEditor(`<p>a</p><a href="${href}"><img src="x.png"></a><p>b</p>`);
+
+      expect(editor.getHTML()).toBe('<p>a</p><img src="x.png" class="email-image"><p>b</p>');
+    },
+  );
+
+  it('writes no link a block may not have, whatever the attribute holds', () => {
+    createLinkingEditor(`<p>a</p>${IMAGE}<p>b</p>`);
+    selectImage();
+
+    editor.commands.updateAttributes('image', {href: 'javascript:alert(1)'});
+
+    expect(editor.getHTML()).toBe(`<p>a</p>${IMAGE}<p>b</p>`);
+  });
+
+  it('removes the link', () => {
+    createLinkingEditor(`<p>a</p>${LINKED}<p>b</p>`);
+    selectImage();
+
+    editor.commands.updateAttributes('image', {href: null});
+
+    expect(editor.getHTML()).toBe(`<p>a</p>${IMAGE}<p>b</p>`);
+  });
+
+  it('leaves a link holding an image and text as it always read', () => {
+    createLinkingEditor('<p><a href="https://example.com"><img src="x.png">Read more</a></p>');
+
+    expect(editor.getHTML()).toContain('Read more</a>');
+    expect(editor.getHTML()).not.toMatch(/<a [^>]*><img/);
+  });
+
+  it.each([
+    [
+      'a video in its paragraph',
+      '<p style="text-align: center;"><a class="email-video" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ" style="text-decoration: none;"><img class="email-image" src="p.png" alt="" style="display: block; width: 100%; max-width: 600px; margin: 0px auto; border: 0px; border-radius: 12px;"></a></p>',
+      'video',
+    ],
+    [
+      'a video on its own',
+      '<a class="email-video" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"><img class="email-image" src="p.png"></a>',
+      'video',
+    ],
+    ['a button', '<p><a class="email-button" href="https://example.com">Go</a></p>', 'button'],
+  ])('leaves %s to its own block', (_label, html, type) => {
+    createLinkingEditor(`<p>a</p>${html}<p>b</p>`);
+
+    const types: string[] = [];
+    editor.state.doc.descendants(node => {
+      types.push(node.type.name);
+    });
+    expect(types).toContain(type);
+    expect(types).not.toContain('image');
   });
 });
