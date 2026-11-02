@@ -653,6 +653,18 @@ describe('renderBody', () => {
       expect(html).not.toContain('javascript:');
     });
 
+    it('keeps a quote or an ampersand from data from breaking a style', () => {
+      const body = renderTemplate('<p><span style="font-family: {{ f }}, sans-serif; color: #111;">x</span></p>', {
+        f: `O'Brien & "Co"`,
+      });
+
+      expect(styleOf(renderBody(body), 'span')).toBe(`font-family: O'Brien & 'Co', sans-serif; color: #111;`);
+    });
+
+    it('keeps a text-message link', () => {
+      expect(renderBody('<p><a href="sms:+34600000000">Text us</a></p>')).toContain('href="sms:+34600000000"');
+    });
+
     it('leaves the footer and custom HTML alone', () => {
       const custom = '<table><tr><td><a href="javascript:x">Hi</a></td></tr></table>';
       expect(renderBody(custom)).toBe(custom);

@@ -28,7 +28,7 @@ Thanks to the Plunk team for the platform this is built on. If you find Plunk us
 - **Double opt-in:** per project, off by default
 - **Suppression you can see:** a "Suppressed" status with its reason, and removal that also clears the address from SES
 - **Sending safeguards:** a cut-off for repeated soft bounces, automatic clicks left out of the statistics, and a DMARC check for each domain
-- **Template data as text:** in email bodies, `{{ variables }}` are HTML-escaped (add `| raw` to print HTML you trust), data never runs as Liquid when an email is rendered again, and links in editor emails can only go to web, mail or phone addresses and anchors
+- **Template data as text:** in email bodies, `{{ variables }}` are HTML-escaped (add `| raw` to print HTML you trust), data never runs as Liquid when an email is rendered again, and links in emails that are not custom HTML can only go to web, mail, phone or text-message addresses and anchors
 - **Failure alerts:** a dashboard banner and emails, covering sending reputation and domains SES stops verifying
 - **Webhook steps:** HMAC signatures, retries with backoff and a Retry button on failed executions
 - **SES event recovery:** the dead-letter queue is drained automatically

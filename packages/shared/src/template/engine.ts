@@ -75,6 +75,11 @@ class SafeHtml extends Drop {
   toString(): string {
     return this.html;
   }
+
+  // `| json` writes the markup, not the object holding it
+  toJSON(): string {
+    return this.html;
+  }
 }
 
 /** What Liquid passes a filter as `this`: the render context, which counts memory. */
@@ -189,8 +194,9 @@ function registerHtmlEscaping(engine: Liquid): void {
   for (const name of ['escape', 'xml_escape'] as const) {
     engine.registerFilter(name, {
       raw: true,
+      // What is already safe (a capture, say) is escaped once, not twice
       handler(this: FilterScope, value: unknown) {
-        return new SafeHtml(escapeText(this, value));
+        return value instanceof SafeHtml ? value : new SafeHtml(escapeText(this, value));
       },
     });
   }

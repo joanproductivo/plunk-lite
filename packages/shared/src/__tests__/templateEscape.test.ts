@@ -136,6 +136,12 @@ describe('escaped Liquid output', () => {
       expect(renderTemplate('{% capture g %}<i>{% endcapture %}{% assign h = g %}{{ h }}', vars)).toBe('<i>');
     });
 
+    it('escapes what a capture holds once with | escape, and writes it as text with | json', () => {
+      const vars = {a: 'a&<b>'};
+      expect(renderTemplate('{% capture h %}{{ a }}{% endcapture %}{{ h | escape }}', vars)).toBe('a&amp;&lt;b&gt;');
+      expect(renderTemplate('{% capture g %}x{% endcapture %}{{ g | json }}', {})).toBe('&#34;x&#34;');
+    });
+
     it('compares and measures what a capture holds as text', () => {
       expect(renderTemplate('{% capture g %}abc{% endcapture %}{% if g == "abc" %}same{% endif %}', {})).toBe('same');
       expect(renderTemplate('{% capture g %}abc{% endcapture %}{{ g | size }}', {})).toBe('3');

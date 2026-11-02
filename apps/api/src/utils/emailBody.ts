@@ -166,8 +166,9 @@ function linkImages($: CheerioAPI): void {
 }
 
 /**
- * Every link of an editor email, text links included, may only go where a block may link to:
- * whatever Liquid filled in (a contact's data, say), `javascript:` and its kin lose their href.
+ * Every link of an email that is not custom HTML, text links included, may only go where a
+ * block may link to: whatever Liquid filled in (a contact's data, say), `javascript:` and its
+ * kin lose their href.
  * The attribute is read as written (the document loads without decoding entities), so
  * `&#106;avascript:` is caught too, as is a scheme written with entities that would be safe.
  * Returns how many links lost theirs.
@@ -214,11 +215,11 @@ function wrapWithEmailStyles(htmlBody: string, brand: EmailBrand, emailId?: stri
     if (framed) {
       $('div.prose').first().html(htmlBody);
     }
-    // Browsers serialise quoted font names in a style attribute as &quot;, and Liquid writes a
-    // quote in data as &#34;, which juice, reading the text undecoded, would take for the end of
-    // a declaration
+    // Browsers serialise quoted font names in a style attribute as &quot;, and Liquid writes
+    // quotes and ampersands in data as entities, whose `;` juice, reading the text undecoded,
+    // would take for the end of a declaration
     $('[style]').each((_, element) => {
-      element.attribs.style = element.attribs.style!.replace(/&quot;|&#34;/g, "'");
+      element.attribs.style = element.attribs.style!.replace(/&quot;|&#34;|&#39;/g, "'").replace(/&amp;/g, '&');
     });
     juice.inlineDocument($, emailProseCss(brand), {
       applyWidthAttributes: false,
