@@ -11,13 +11,15 @@ import {OptInSettings} from '../OptInSettings';
 
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?: boolean}).IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock('../../lib/network', () => ({network: {fetch: vi.fn()}}));
+vi.mock('../../lib/network', () => ({network: {fetch: vi.fn(), upload: vi.fn()}}));
 vi.mock('sonner', () => ({toast: {success: vi.fn(), error: vi.fn()}}));
 
 const SAVED = {
   enabled: false,
   fromEmail: null,
   fromName: null,
+  logoUrl: null,
+  logoWidth: null,
   texts: {de: {subject: 'Bitte bestätigen', text: 'Hallo von {projectName}', buttonText: 'Bestätigen'}},
 };
 
@@ -25,7 +27,11 @@ let root: Root;
 let container: HTMLDivElement;
 const fetcher = vi.fn(
   async (url: string): Promise<unknown> =>
-    url.endsWith('/optin') ? SAVED : {...BRAND_DEFAULTS, button: BUTTON_DEFAULTS},
+    url.endsWith('/optin')
+      ? SAVED
+      : url === '/config'
+        ? {features: {storage: {s3Enabled: false}}}
+        : {...BRAND_DEFAULTS, button: BUTTON_DEFAULTS},
 );
 
 async function render(canEdit = true) {
@@ -91,6 +97,8 @@ describe('OptInSettings', () => {
       enabled: true,
       fromEmail: 'hola@acme.test',
       fromName: null,
+      logoUrl: null,
+      logoWidth: null,
       texts: {
         ...SAVED.texts,
         es: {
@@ -110,6 +118,35 @@ describe('OptInSettings', () => {
 
     expect(buttonNamed('Save')!.disabled).toBe(true);
     expect(container.textContent).toContain('the texts cannot hold template tags');
+  });
+
+  it('adds a logo to the preview at the default size, and removing it leaves nothing to save', async () => {
+    const logo = 'https://files.example.com/logo.png';
+    await render();
+
+    await act(async () => buttonNamed('Choose logo')!.click());
+    await type(document.querySelector<HTMLInputElement>('#image-url')!, logo);
+    await act(async () => buttonNamed('Insert')!.click());
+
+    expect(preview()).toContain(`<img src="${logo}"`);
+    expect(preview()).toContain('width="160"');
+    expect(buttonNamed('Save')!.disabled).toBe(false);
+
+    await act(async () => buttonNamed('Remove')!.click());
+    expect(preview()).not.toContain('<img');
+    expect(buttonNamed('Save')!.disabled).toBe(true);
+  });
+
+  it('does not save a logo it cannot send, and says why', async () => {
+    await render();
+
+    await act(async () => buttonNamed('Choose logo')!.click());
+    await type(document.querySelector<HTMLInputElement>('#image-url')!, 'http://files.example.com/logo.png');
+    await act(async () => buttonNamed('Insert')!.click());
+
+    expect(preview()).not.toContain('<img');
+    expect(buttonNamed('Save')!.disabled).toBe(true);
+    expect(container.textContent).toContain("the logo's address must start with https://");
   });
 
   it('does not offer saving to members who are not admins', async () => {

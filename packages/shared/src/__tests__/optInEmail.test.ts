@@ -1,7 +1,17 @@
 import {describe, expect, it} from 'vitest';
 
 import {SUPPORTED_LANGUAGES} from '../i18n/index.js';
-import {isPlunkOptInText, optInEmail, plunkOptInText, renderTemplate, toOptInTexts} from '../template/index.js';
+import {
+  BRAND_DEFAULTS,
+  EMAIL_FONT_FAMILY,
+  EMAIL_FONTS,
+  isPlunkOptInText,
+  optInEmail,
+  plunkOptInText,
+  renderTemplate,
+  toOptInLogo,
+  toOptInTexts,
+} from '../template/index.js';
 
 const valid = {subject: 'Confirm {projectName}', text: 'Hello.\n\nPlease confirm.', buttonText: 'Confirm'};
 
@@ -41,7 +51,7 @@ describe('optInEmail', () => {
   it("uses the project's own text in that language", () => {
     const {subject, body} = optInEmail({language: 'en', projectName: 'Vida', url, texts: {en: valid}});
     expect(subject).toBe('Confirm Vida');
-    expect(body).toContain('<p style="color: #374151;">Hello.</p>');
+    expect(body).toMatch(/<p style="text-align: center; color: #374151; font-size: 16px;[^"]*">Hello\.<\/p>/);
   });
 
   it('escapes the texts and keeps Liquid from reading the project name when the email is sent', () => {
@@ -69,6 +79,101 @@ describe('optInEmail', () => {
 
   it("keeps the confirmation link out of SES's click tracking", () => {
     expect(optInEmail({language: 'en', projectName: 'Vida', url}).body).toMatch(/<a href="[^"]+" ses:no-track /);
+  });
+});
+
+describe('toOptInLogo', () => {
+  const url = 'https://files.example.com/logo.png';
+
+  it('keeps an https address in one of the sizes, 160 px by default, and no address means no logo', () => {
+    expect(toOptInLogo(` ${url} `, 240)).toEqual({logo: {url, width: 240}, errors: []});
+    expect(toOptInLogo(url, null).logo).toEqual({url, width: 160});
+    expect(toOptInLogo(null, null)).toEqual({logo: null, errors: []});
+    expect(toOptInLogo('', 999)).toEqual({logo: null, errors: []});
+  });
+
+  it.each([
+    ['http://files.example.com/logo.png', 160],
+    ['javascript:alert(1)', 160],
+    ['not a url', 160],
+    ['https://files.example.com/{{ email }}.png', 160],
+    ['https://files.example.com/logo.png?a={{ email }}', 160],
+    ['https://user:secret@files.example.com/logo.png', 160],
+    ['https://%7B%7Bemail%7D%7D.example.com/logo.png', 160],
+    ['https://｛｛email｝｝.example.com/logo.png', 160],
+    [`https://files.example.com/${'"'.repeat(1990)}.png`, 160],
+    ['https://files.example.com/LOGO.SVG?v=1', 160],
+    [`https://files.example.com/${'a'.repeat(2000)}.png`, 160],
+    ['https://files.example.com/logo.png', 100],
+    ['https://files.example.com/logo.png', '160'],
+  ])('refuses %s at %s, with the reason', (address, width) => {
+    const {logo, errors} = toOptInLogo(address, width);
+    expect(logo).toBeNull();
+    expect(errors.length).toBeGreaterThan(0);
+  });
+});
+
+it('toOptInLogo reads what it keeps the same way', () => {
+  const {logo} = toOptInLogo('https://files.example.com/a b.png?x=%7B', 240);
+  expect(toOptInLogo(logo!.url, logo!.width)).toEqual({logo, errors: []});
+});
+
+describe('optInEmail layout', () => {
+  const url = 'https://app.example.com/confirm#token';
+  const logo = {url: 'https://files.example.com/logo.png?a=1&b="2', width: 240};
+
+  it('centres the text, the button and the note, with or without a logo', () => {
+    const {body} = optInEmail({language: 'en', projectName: 'Vida', url});
+    const paragraphs = body.match(/<p style="[^"]*"/g)!;
+    expect(paragraphs.length).toBeGreaterThanOrEqual(3);
+    for (const paragraph of paragraphs) expect(paragraph).toContain('text-align: center');
+    expect(body).not.toContain('<img');
+  });
+
+  it('puts the logo first, escaped, named after the project', () => {
+    const {body} = optInEmail({language: 'en', projectName: '<b>{{ email }}</b>', url, logo});
+    const img = /<img [^>]*>/.exec(body)![0];
+    expect(img).toContain('src="https://files.example.com/logo.png?a=1&amp;b=&quot;2"');
+    expect(img).toContain('width="240"');
+    expect(img).not.toContain('<b>');
+    expect(optInEmail({language: 'en', projectName: 'Vida', url, logo}).body).toContain('alt="Vida"');
+    expect(body.indexOf('<img')).toBeLessThan(body.indexOf('<a href'));
+    expect(renderTemplate(body, {email: 'attacker@example.com'})).not.toContain('attacker@example.com');
+  });
+
+  it('writes the font and size of campaigns and templates, or the font of the brand', () => {
+    expect(optInEmail({language: 'en', projectName: 'Vida', url}).body).toContain(
+      `font-size: 16px; line-height: 1.6; font-family: ${EMAIL_FONT_FAMILY};`,
+    );
+    const font = Object.keys(EMAIL_FONTS)[0] as keyof typeof EMAIL_FONTS;
+    const {body} = optInEmail({language: 'en', projectName: 'Vida', url, brand: {...BRAND_DEFAULTS, font}});
+    expect(body).toContain(`font-family: ${EMAIL_FONTS[font]};`);
+  });
+
+  it('gives a brand without a frame a white column of 600 px, whatever colour it kept', () => {
+    const {body} = optInEmail({
+      language: 'en',
+      projectName: 'Vida',
+      url,
+      brand: {...BRAND_DEFAULTS, contentColor: '#000000'},
+    });
+    expect(body).toContain('max-width: 600px;');
+    expect(body).toContain('background-color: #ffffff');
+    expect(body).not.toContain('#000000');
+  });
+
+  it('gives a framed brand with no width of its own a column of 600 px, in its own colour', () => {
+    const brand = {...BRAND_DEFAULTS, backgroundColor: '#eeeeee', contentColor: '#fafafa'};
+    const {body} = optInEmail({language: 'en', projectName: 'Vida', url, brand});
+    expect(body).toContain('max-width: 600px;');
+    expect(body).toContain('background-color: #fafafa');
+  });
+
+  it("keeps a framed brand's width and colours", () => {
+    const brand = {...BRAND_DEFAULTS, contentWidth: 560, contentColor: '#fafafa'};
+    const {body} = optInEmail({language: 'en', projectName: 'Vida', url, brand});
+    expect(body).toContain('max-width: 560px;');
+    expect(body).toContain('background-color: #fafafa');
   });
 });
 

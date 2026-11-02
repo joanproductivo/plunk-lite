@@ -235,7 +235,14 @@ describe('double opt-in', () => {
     it('saves the switch, the sender and the texts from the dashboard only', async () => {
       const texts = {es: {subject: 'Confirma', text: 'Hola {projectName}', buttonText: 'Confirmar'}};
 
-      const body = {enabled: true, fromEmail: 'news@plunk.test', fromName: 'News', texts};
+      const body = {
+        enabled: true,
+        fromEmail: 'news@plunk.test',
+        fromName: 'News',
+        texts,
+        logoUrl: null,
+        logoWidth: null,
+      };
 
       expect((await save(body)).body).toMatchObject(body);
       expect((await save(body, {...apiKey, projectId: project.id})).status).toBe(403);
@@ -243,6 +250,9 @@ describe('double opt-in', () => {
       const tags = {es: {subject: '{{ x }}', text: 'a', buttonText: 'Confirm'}};
       expect((await save({...body, texts: tags})).status).toBe(400);
       expect((await save({enabled: true})).status).toBe(400);
+      // Without its fields, a save never removes the logo
+      const {logoUrl: _logoUrl, logoWidth: _logoWidth, ...noLogo} = body;
+      expect((await save(noLogo)).status).toBe(400);
     });
   });
 });
