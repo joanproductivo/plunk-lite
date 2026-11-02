@@ -1,12 +1,15 @@
 import {
   BRAND_DEFAULTS,
   isPlunkOptInText,
+  OPT_IN_LOGO_WIDTH_DEFAULT,
+  OPT_IN_LOGO_WIDTHS,
   type OptInSchemas,
   optInEmail,
   plunkOptInText,
   type ProjectBrand,
   resolveContactLanguage,
   SUPPORTED_LANGUAGES,
+  toOptInLogo,
   toOptInTexts,
 } from '@plunk/shared';
 import type {OptInSettingsData, OptInText, OptInTexts} from '@plunk/types';
@@ -26,13 +29,17 @@ import {useState} from 'react';
 import {toast} from 'sonner';
 import useSWR from 'swr';
 
+import {useConfig} from '../lib/hooks/useConfig';
 import {network} from '../lib/network';
 
 import {OptionSelect} from './EmailEditor/BlockFields';
+import {ImageDialog} from './EmailEditor/ImageDialog';
 import {brandUrl} from './EmailEditor/useEmailBrand';
 
 /** The URL a project's double opt-in is read from and saved to. */
 const optInUrl = (projectId: string) => `/projects/${projectId}/optin`;
+
+const LOGO_SIZES = Object.fromEntries(OPT_IN_LOGO_WIDTHS.map(width => [String(width), `${width} px`]));
 
 // The texts as JSON whatever order their languages were added in, to tell whether they changed
 const canonical = (settings: OptInSettingsData) =>
@@ -88,7 +95,8 @@ function OptInForm({
 
   const own = Object.hasOwn(settings.texts, code) ? settings.texts[code] : undefined;
   const shown = own ?? plunkOptInText(code);
-  const {errors} = toOptInTexts(settings.texts);
+  const {logo, errors: logoErrors} = toOptInLogo(settings.logoUrl, settings.logoWidth);
+  const errors = [...toOptInTexts(settings.texts).errors, ...logoErrors];
   const changed = canonical(settings) !== canonical(saved);
   const missingSender = settings.enabled && !settings.fromEmail?.trim();
 
@@ -135,6 +143,7 @@ function OptInForm({
     url: '#',
     texts: settings.texts,
     brand: brand ?? BRAND_DEFAULTS,
+    logo,
   });
 
   return (
@@ -187,6 +196,13 @@ function OptInForm({
             />
           </div>
         </div>
+
+        <OptInLogoField
+          url={settings.logoUrl}
+          width={settings.logoWidth}
+          disabled={!canEdit}
+          onChange={(logoUrl, logoWidth) => setSettings(prev => ({...prev, logoUrl, logoWidth}))}
+        />
 
         <OptionSelect label="Language" value={code} options={languages} onChange={setCode} />
         <div>
@@ -264,6 +280,62 @@ function OptInForm({
           className="h-[360px] w-full rounded border border-neutral-200 bg-white"
         />
       </div>
+    </div>
+  );
+}
+
+/** The logo at the top of the email: chosen as an image in an email is, in one of a few sizes. */
+function OptInLogoField({
+  url,
+  width,
+  disabled,
+  onChange,
+}: {
+  url: string | null;
+  width: number | null;
+  disabled: boolean;
+  onChange: (url: string | null, width: number | null) => void;
+}) {
+  const [choosing, setChoosing] = useState(false);
+  const {data: config} = useConfig();
+
+  return (
+    <div>
+      <Label className="text-sm font-medium mb-2 block">Logo</Label>
+      {url && (
+        // eslint-disable-next-line @next/next/no-img-element -- an image the project chose, of any host
+        <img src={url} alt="" className="mb-2 max-h-16 max-w-full rounded border border-neutral-200 p-1" />
+      )}
+      <div className="flex gap-2">
+        <Button type="button" variant="outline" disabled={disabled} onClick={() => setChoosing(true)}>
+          {url ? 'Change logo' : 'Choose logo'}
+        </Button>
+        {url && (
+          <Button type="button" variant="outline" disabled={disabled} onClick={() => onChange(null, null)}>
+            Remove
+          </Button>
+        )}
+      </div>
+      <p className="mt-1 text-xs text-neutral-500">
+        Centred at the top of the email. Upload it at twice its size so it looks sharp. An address of your own must be
+        https and end in .jpg, .jpeg, .png, .gif or .webp.
+      </p>
+      {url && !disabled && (
+        <div className="mt-3">
+          <OptionSelect
+            label="Logo size"
+            value={String(width ?? OPT_IN_LOGO_WIDTH_DEFAULT)}
+            options={LOGO_SIZES}
+            onChange={size => onChange(url, Number(size))}
+          />
+        </div>
+      )}
+      <ImageDialog
+        open={choosing}
+        onOpenChange={setChoosing}
+        canUpload={Boolean(config?.features.storage.s3Enabled)}
+        onInsert={src => onChange(src.trim(), width ?? OPT_IN_LOGO_WIDTH_DEFAULT)}
+      />
     </div>
   );
 }

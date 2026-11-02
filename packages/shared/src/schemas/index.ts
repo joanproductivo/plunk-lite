@@ -10,6 +10,7 @@ import {
   WORKFLOW_SEGMENT_CHANGES_MAX,
 } from '../segments.js';
 import type {ProjectBrand} from '../template/brand.js';
+import {OPT_IN_LOGO_URL_MAX} from '../template/optInEmail.js';
 import type {ProjectFooters} from '../template/unsubscribeFooter.js';
 
 const literalSchema = z.union([z.string(), z.number(), z.boolean(), z.null(), z.date()]);
@@ -775,6 +776,9 @@ export const OptInSchemas = {
       value => typeof value === 'object' && value !== null && !Array.isArray(value),
       'The texts must be an object',
     ),
+    // Required, so a request without them never removes the logo; toOptInLogo checks them, with its reasons
+    logoUrl: z.string().max(OPT_IN_LOGO_URL_MAX).nullable(),
+    logoWidth: z.number().nullable(),
   }),
   /** The link's token, sent by the confirmation page in the body rather than the path */
   token: z.object({token: z.string().max(200)}),

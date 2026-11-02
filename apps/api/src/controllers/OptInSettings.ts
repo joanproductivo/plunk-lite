@@ -55,7 +55,7 @@ export class OptInSettings {
     if (!body.success) {
       throw new HttpException(
         400,
-        'The double opt-in needs enabled, fromEmail, fromName and texts',
+        'The double opt-in needs enabled, fromEmail, fromName, texts, logoUrl and logoWidth',
         ErrorCode.INVALID_REQUEST_BODY,
       );
     }

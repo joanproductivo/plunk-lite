@@ -55,8 +55,46 @@ describe('OptInService', () => {
   describe('settings', () => {
     it('is off for a project that never saved it', async () => {
       const other = (await factories.createUserWithProject()).project.id;
-      expect(await OptInService.settings(other)).toEqual({enabled: false, fromEmail: null, fromName: null, texts: {}});
+      expect(await OptInService.settings(other)).toEqual({
+        enabled: false,
+        fromEmail: null,
+        fromName: null,
+        texts: {},
+        logoUrl: null,
+        logoWidth: null,
+      });
       expect(await OptInService.isRequired(other)).toBe(false);
+    });
+
+    it('keeps a valid logo, refuses another with its reason, and reads a bad row as none', async () => {
+      const url = 'https://files.example.com/logo.png';
+      const base = {enabled: false, fromEmail: null, fromName: null, texts: {}};
+      await expect(
+        OptInService.saveSettings(projectId, {...base, logoUrl: url, logoWidth: null}),
+      ).resolves.toMatchObject({
+        logoUrl: url,
+        logoWidth: 160,
+      });
+      await expect(OptInService.saveSettings(projectId, {...base, logoUrl: 'http://x.test/a.png'})).rejects.toThrow(
+        'https',
+      );
+      expect((await OptInService.settings(projectId)).logoUrl).toBe(url);
+
+      await prisma.plunkLiteOptInSettings.update({where: {projectId}, data: {logoUrl: 'javascript:alert(1)'}});
+      expect(await OptInService.settings(projectId)).toMatchObject({logoUrl: null, logoWidth: null});
+    });
+
+    it('puts the logo in the email it sends, with the link to confirm', async () => {
+      const url = 'https://files.example.com/logo.png';
+      await prisma.plunkLiteOptInSettings.update({where: {projectId}, data: {logoUrl: url, logoWidth: 240}});
+      const contact = await factories.createContact({projectId, subscribed: false});
+
+      expect(await OptInService.request(contact)).toBe('sent');
+
+      const email = await prisma.email.findFirstOrThrow({where: {contactId: contact.id}});
+      expect(email.body).toContain(`<img src="${url}"`);
+      expect(email.body).toContain('width="240"');
+      expect(email.body).toContain('/confirm#');
     });
 
     it('needs a sender on a verified domain of the project to turn it on', async () => {

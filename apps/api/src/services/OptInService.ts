@@ -1,7 +1,7 @@
 import {createHash, randomBytes} from 'node:crypto';
 
 import {type Contact, Prisma} from '@plunk/db';
-import {contactLanguage, optInEmail, toOptInTexts} from '@plunk/shared';
+import {contactLanguage, optInEmail, toOptInLogo, toOptInTexts} from '@plunk/shared';
 import type {OptInLink, OptInOutcome, OptInRequestInfo, OptInSettingsData} from '@plunk/types';
 import {toPrismaJson} from '@plunk/types';
 import signale from 'signale';
@@ -62,12 +62,15 @@ export class OptInService {
   /** The project's settings, or the defaults (off) */
   public static async settings(projectId: string): Promise<OptInSettingsData> {
     const row = await prisma.plunkLiteOptInSettings.findUnique({where: {projectId}});
+    const {logo} = toOptInLogo(row?.logoUrl, row?.logoWidth);
     return {
       enabled: row?.enabled ?? false,
       fromEmail: row?.fromEmail ?? null,
       fromName: row?.fromName ?? null,
       // Read through the same checks as a request, whatever the row holds
       texts: toOptInTexts(row?.texts).texts,
+      logoUrl: logo?.url ?? null,
+      logoWidth: logo?.width ?? null,
     };
   }
 
@@ -87,8 +90,9 @@ export class OptInService {
   public static async saveSettings(projectId: string, value: unknown): Promise<OptInSettingsData> {
     const data = (value && typeof value === 'object' && !Array.isArray(value) ? value : {}) as Record<string, unknown>;
     const {texts, errors} = toOptInTexts(data.texts);
-    if (errors.length > 0) {
-      throw new HttpException(400, errors.join('; '), ErrorCode.VALIDATION_ERROR);
+    const {logo, errors: logoErrors} = toOptInLogo(data.logoUrl, data.logoWidth);
+    if (errors.length > 0 || logoErrors.length > 0) {
+      throw new HttpException(400, [...errors, ...logoErrors].join('; '), ErrorCode.VALIDATION_ERROR);
     }
 
     const enabled = data.enabled === true;
@@ -104,9 +108,11 @@ export class OptInService {
       await DomainService.verifyEmailDomain(fromEmail, projectId);
     }
 
-    const row = {enabled, fromEmail, fromName, texts: toPrismaJson(texts)};
+    const logoUrl = logo?.url ?? null;
+    const logoWidth = logo?.width ?? null;
+    const row = {enabled, fromEmail, fromName, texts: toPrismaJson(texts), logoUrl, logoWidth};
     await prisma.plunkLiteOptInSettings.upsert({where: {projectId}, create: {projectId, ...row}, update: row});
-    return {enabled, fromEmail, fromName, texts};
+    return {enabled, fromEmail, fromName, texts, logoUrl, logoWidth};
   }
 
   /**
@@ -397,6 +403,8 @@ export class OptInService {
         url: `${DASHBOARD_URI}/confirm#${token}`,
         texts: settings.texts,
         brand: await BrandService.get(projectId),
+        // Already checked by settings(), which leaves both or neither
+        logo: settings.logoUrl && settings.logoWidth ? {url: settings.logoUrl, width: settings.logoWidth} : null,
       });
     } catch (error) {
       await this.keepWaiting(contact, segmentIds);

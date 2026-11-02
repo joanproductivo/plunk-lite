@@ -996,7 +996,7 @@ model PlunkLiteWebhookSecret {
 }
 
 /// Plunk Lite: a project's double opt-in (see OptInService): whether sign-ups from the API wait for
-/// the contact to confirm, the sender of the confirmation email, and its texts by language. No
+/// the contact to confirm, the sender of the confirmation email, its texts by language and its logo. No
 /// relation to Project, like the other tables of Plunk Lite.
 model PlunkLiteOptInSettings {
   projectId String   @id
@@ -1004,6 +1004,8 @@ model PlunkLiteOptInSettings {
   fromEmail String?
   fromName  String?
   texts     Json     @default("{}")
+  logoUrl   String?
+  logoWidth Int?
   updatedAt DateTime @updatedAt
 
   @@map("plunk_lite_optin_settings")

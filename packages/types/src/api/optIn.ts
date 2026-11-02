@@ -19,6 +19,9 @@ export interface OptInSettingsData {
   fromEmail: string | null;
   fromName: string | null;
   texts: OptInTexts;
+  /** The logo at the top of the email, centred; both null without one */
+  logoUrl: string | null;
+  logoWidth: number | null;
 }
 
 /**

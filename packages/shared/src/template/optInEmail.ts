@@ -2,10 +2,10 @@ import type {OptInText, OptInTexts} from '@plunk/types';
 
 import {createTranslatorSync} from '../i18n/index.js';
 
-import {BRAND_DEFAULTS, type EmailBrand} from './brand.js';
+import {BRAND_DEFAULTS, type EmailBrand, isFramedBrand} from './brand.js';
 import {BUTTON_DEFAULTS, type ButtonStyle, buttonStyle} from './emailButton.js';
-import {EMAIL_FONTS} from './emailFonts.js';
-import {emailDocument} from './emailDocument.js';
+import {emailFontFamily} from './emailFonts.js';
+import {EMAIL_DEFAULT_WIDTH, emailDocument} from './emailDocument.js';
 import {escapeHtml} from './html.js';
 import {countOccurrences, isVisibleLabel, plainText, readTextsByLanguage} from './unsubscribeFooter.js';
 
@@ -69,6 +69,55 @@ export function toOptInTexts(value: unknown): {texts: OptInTexts; errors: string
   );
 }
 
+/** The sizes the logo at the top of a confirmation email comes in, in px */
+export const OPT_IN_LOGO_WIDTHS = [120, 160, 240, 320];
+export const OPT_IN_LOGO_WIDTH_DEFAULT = 160;
+export const OPT_IN_LOGO_URL_MAX = 2000;
+const OPT_IN_LOGO_EXTENSION = /\.(jpe?g|png|gif|webp)$/i;
+
+export interface OptInLogo {
+  url: string;
+  width: number;
+}
+
+/**
+ * A project's logo from untrusted data, with the reasons it cannot be kept. The URL has no braces,
+ * as sending runs Liquid over the email. What counts is the URL as kept: `new URL` leaves them as
+ * they are in a query and decodes them in a host, and encoding makes it longer.
+ */
+export function toOptInLogo(url: unknown, width: unknown): {logo: OptInLogo | null; errors: string[]} {
+  const raw = typeof url === 'string' ? url.trim() : '';
+  if (!raw) return {logo: null, errors: []};
+
+  const errors: string[] = [];
+  let href = '';
+  if (/[{}]/.test(raw)) {
+    errors.push("the logo's address cannot hold braces");
+  } else {
+    try {
+      const parsed = new URL(raw);
+      if (parsed.protocol !== 'https:') errors.push("the logo's address must start with https://");
+      else if (parsed.username || parsed.password) errors.push("the logo's address cannot hold a user or password");
+      // The formats every email client shows, as uploads are named: Gmail hides SVG, Outlook AVIF
+      else if (!OPT_IN_LOGO_EXTENSION.test(parsed.pathname)) {
+        errors.push("the logo's address must end in .jpg, .jpeg, .png, .gif or .webp");
+      } else if (!/^[a-z0-9.-]+$/.test(parsed.hostname) || /[{}]/.test(parsed.href)) {
+        errors.push("the logo's address has characters it cannot hold");
+      } else if (parsed.href.length > OPT_IN_LOGO_URL_MAX) {
+        errors.push(`the logo's address can have at most ${OPT_IN_LOGO_URL_MAX} characters`);
+      } else href = parsed.href;
+    } catch {
+      errors.push("the logo's address is not a valid URL");
+    }
+  }
+
+  const size = width ?? OPT_IN_LOGO_WIDTH_DEFAULT;
+  if (typeof size !== 'number' || !OPT_IN_LOGO_WIDTHS.includes(size)) {
+    errors.push(`the logo's width must be one of ${OPT_IN_LOGO_WIDTHS.join(', ')} px`);
+  }
+  return errors.length > 0 ? {logo: null, errors} : {logo: {url: href, width: size as number}, errors};
+}
+
 /** Whether `text` says just what Plunk's would in `language`, so it needs no text of its own */
 export function isPlunkOptInText(text: OptInText, language: string): boolean {
   const plunk = plunkOptInText(language);
@@ -83,7 +132,8 @@ function escapeForBody(value: string): string {
 
 /**
  * The confirmation email for a contact in `language`: the project's own text in that language, or
- * else Plunk's, with the link to confirm as a button in the project's brand.
+ * else Plunk's, with the project's logo if it has one and the link to confirm as a button in the
+ * project's brand, all centred.
  */
 export function optInEmail(params: {
   language: string;
@@ -91,11 +141,13 @@ export function optInEmail(params: {
   url: string;
   texts?: OptInTexts;
   brand?: EmailBrand & {button?: ButtonStyle};
+  logo?: OptInLogo | null;
 }): {subject: string; body: string} {
   const own = params.texts && Object.hasOwn(params.texts, params.language) ? params.texts[params.language] : undefined;
   const {subject, text, buttonText} = own ?? plunkOptInText(params.language);
   const brand = params.brand ?? BRAND_DEFAULTS;
-  const font = brand.font ? ` font-family: ${EMAIL_FONTS[brand.font]};` : '';
+  // The font and size campaigns and templates have: this email takes no stylesheet, so they are written here
+  const font = ` font-family: ${emailFontFamily(brand)};`;
   const name = escapeForBody(params.projectName);
 
   const paragraphs = text
@@ -105,17 +157,26 @@ export function optInEmail(params: {
         .split('{projectName}')
         .map(part => escapeForBody(part).replace(/\n/g, '<br>'))
         .join(name);
-      return `<p style="color: ${brand.textColor};${font}">${html}</p>`;
+      return `<p style="text-align: center; color: ${brand.textColor}; font-size: 16px; line-height: 1.6;${font}">${html}</p>`;
     })
     .join('\n    ');
   // Never through SES's click tracking: its event would keep the link, which confirms the sign-up
-  const button = `<p><a href="${escapeHtml(params.url)}" ses:no-track style="${buttonStyle(params.brand?.button ?? BUTTON_DEFAULTS)}">${escapeForBody(buttonText)}</a></p>`;
-  const ignore = `<p style="color: #6b7280; font-size: 12px;${font}">${escapeForBody(createTranslatorSync(params.language).t('email.optin.ignore'))}</p>`;
+  const button = `<p style="text-align: center; font-size: 16px;${font}"><a href="${escapeHtml(params.url)}" ses:no-track style="${buttonStyle(params.brand?.button ?? BUTTON_DEFAULTS)}">${escapeForBody(buttonText)}</a></p>`;
+  const ignore = `<p style="text-align: center; color: #6b7280; font-size: 12px;${font}">${escapeForBody(createTranslatorSync(params.language).t('email.optin.ignore'))}</p>`;
+
+  const logo = params.logo
+    ? `<p style="text-align: center; margin: 0 0 24px; color: ${brand.textColor};${font}"><img src="${escapeHtml(params.logo.url)}" alt="${name}" width="${params.logo.width}" style="display: inline-block; width: ${params.logo.width}px; max-width: 100%; height: auto; border: 0;"></p>\n    `
+    : '';
+  // Centred text needs a column to read well. A brand without a frame keeps a content colour that
+  // shows nowhere, so its column is white rather than bringing that colour back
+  const column = isFramedBrand(brand)
+    ? {...brand, contentWidth: brand.contentWidth ?? EMAIL_DEFAULT_WIDTH}
+    : {...brand, contentColor: BRAND_DEFAULTS.contentColor, contentWidth: EMAIL_DEFAULT_WIDTH};
 
   return {
     // Sending runs Liquid over the subject too: no tag survives, however the project's name joins
     // the text around it (the texts hold none of their own)
     subject: subject.replaceAll('{projectName}', () => params.projectName).replace(/\{(?=[{%])/g, '{\u200b'),
-    body: emailDocument(`${paragraphs}\n    ${button}\n    ${ignore}`, brand),
+    body: emailDocument(`${logo}${paragraphs}\n    ${button}\n    ${ignore}`, column),
   };
 }
