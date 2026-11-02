@@ -1,6 +1,6 @@
 import type {Campaign, Contact} from '@plunk/db';
 import {CampaignAudienceType, CampaignStatus, EmailSourceType, EmailStatus, Prisma, TemplateType} from '@plunk/db';
-import {compileTemplate} from '@plunk/shared';
+import {compileSubjectTemplate, compileTemplate} from '@plunk/shared';
 import type {
   CampaignBatchJobData,
   CampaignListResponse,
@@ -773,7 +773,7 @@ export class CampaignService {
 
     // Parse the Liquid templates once per batch rather than once per recipient. The
     // subject and body are identical for every contact, only the variables differ.
-    const subjectTemplate = compileTemplate(campaign.subject);
+    const subjectTemplate = compileSubjectTemplate(campaign.subject);
     const bodyTemplate = compileTemplate(campaign.body);
 
     // Queue emails for each contact

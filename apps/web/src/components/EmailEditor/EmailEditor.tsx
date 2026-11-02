@@ -39,6 +39,7 @@ import {
   isFramedBrand,
   joinEmailMarkers,
   preheaderToText,
+  renderSubjectTemplate,
   renderTemplate,
   splitEmailMarkers,
 } from '@plunk/shared';
@@ -630,7 +631,9 @@ export function EmailEditor({
                     {subject && (
                       <div>
                         <p className="text-xs text-neutral-500 uppercase tracking-wide font-medium">Subject</p>
-                        <p className="text-base font-semibold text-neutral-900 mt-1">{renderPreview(subject)}</p>
+                        <p className="text-base font-semibold text-neutral-900 mt-1">
+                          {renderSubjectTemplate(subject, previewVariables())}
+                        </p>
                       </div>
                     )}
                     {preheader && (

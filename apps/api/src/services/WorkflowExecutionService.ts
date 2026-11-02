@@ -11,7 +11,13 @@ import type {
 import {StepExecutionStatus, WorkflowExecutionStatus} from '@plunk/db';
 import type {OptInOutcome, SegmentChangesResult, UpdateContactSegmentChanges} from '@plunk/types';
 import {toPrismaJson} from '@plunk/types';
-import {canScopeWaitToExecution, renderTemplate, WorkflowStepConfigSchemas} from '@plunk/shared';
+import {
+  canScopeWaitToExecution,
+  renderSubjectTemplate,
+  renderTemplate,
+  renderTextTemplate,
+  WorkflowStepConfigSchemas,
+} from '@plunk/shared';
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import signale from 'signale';
@@ -738,8 +744,8 @@ export class WorkflowExecutionService {
       manageUrl: `${DASHBOARD_URI}/manage/${contact.id}`,
     };
 
-    const renderedSubject = this.renderTemplate(step.template.subject, variables);
-    const renderedBody = this.renderTemplate(step.template.body, variables);
+    const renderedSubject = renderSubjectTemplate(step.template.subject, variables);
+    const renderedBody = renderTemplate(step.template.body, variables);
 
     // Send email via EmailService
     const email = await EmailService.sendWorkflowEmail({
@@ -1256,9 +1262,9 @@ export class WorkflowExecutionService {
       manageUrl: `${DASHBOARD_URI}/manage/${contact.id}`,
     };
 
-    const renderedUrl = this.renderTemplate(url, variables);
+    const renderedUrl = renderTextTemplate(url, variables);
     const renderedHeaders = headers
-      ? Object.fromEntries(Object.entries(headers).map(([key, value]) => [key, this.renderTemplate(value, variables)]))
+      ? Object.fromEntries(Object.entries(headers).map(([key, value]) => [key, renderTextTemplate(value, variables)]))
       : undefined;
     const renderedBody = body ? this.renderJsonTemplate(body, variables) : undefined;
 
@@ -1454,7 +1460,7 @@ export class WorkflowExecutionService {
    */
   private static renderJsonTemplate(value: unknown, variables: Record<string, unknown>): unknown {
     if (typeof value === 'string') {
-      return this.renderTemplate(value, variables);
+      return renderTextTemplate(value, variables);
     }
     if (Array.isArray(value)) {
       return value.map(item => this.renderJsonTemplate(item, variables));
@@ -1815,14 +1821,6 @@ export class WorkflowExecutionService {
     }
 
     return count > 0;
-  }
-
-  /**
-   * Helper: Render template with variables
-   * Uses shared template rendering from @plunk/shared
-   */
-  private static renderTemplate(template: string, variables: Record<string, unknown>): string {
-    return renderTemplate(template, variables);
   }
 
   /**

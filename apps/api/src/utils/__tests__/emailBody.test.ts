@@ -9,6 +9,7 @@ import {
   joinEmailMarkers,
   readButtonStyle,
   readSpacerHeight,
+  renderTemplate,
   spacerStyle,
   toEmailBrand,
 } from '@plunk/shared';
@@ -612,6 +613,52 @@ describe('renderBody', () => {
       expect(htmlToPlainText(renderBody(`<p>a</p>${box('<h2>Title</h2><p>Text</p>')}<p>b</p>`))).toBe(
         'a\n\n\nTitle\n\nText\n\nb',
       );
+    });
+  });
+
+  describe('every link (Plunk Lite)', () => {
+    it.each(['javascript:alert(1)', '&#106;avascript:alert(1)', 'data:text/html,x', 'vbscript:x'])(
+      'drops a text link to %s, keeping its text',
+      href => {
+        const html = renderBody(`<p>See <a href="${href}">this</a></p>`);
+
+        expect(html).not.toMatch(/<a [^>]*href=/);
+        expect(html).toContain('>this</a>');
+      },
+    );
+
+    it.each([
+      'https://example.com/a?b=1&amp;c=2',
+      'http://example.com',
+      'mailto:a@example.com',
+      'tel:+34600000000',
+      '#top',
+    ])('keeps a text link to %s', href => {
+      expect(renderBody(`<p><a href="${href}">x</a></p>`)).toContain(`href="${href}"`);
+    });
+
+    it.each([
+      ['@media in the text', {name: 'Ann @media', url: 'javascript:alert(1)'}],
+      ['an attribute in a link', {name: 'Ann', url: 'javascript:alert(1)// data-x'}],
+      ['a class in an alt text', {name: ' class=', url: 'javascript:alert(1)'}],
+    ])('keeps an editor email one when its data holds %s', (_label, data) => {
+      const body = renderTemplate(
+        '<p>Hola {{ data.name }}</p><p><a class="email-button" href="{{ data.url }}">Go</a></p>' +
+          '<p><a href="{{ data.url }}">x</a><img class="email-image" src="https://f.test/a.png" alt="{{ data.name }}"></p>',
+        {data},
+      );
+      const html = renderBody(body);
+
+      expect(html).toContain('<!DOCTYPE html>');
+      expect(html).not.toContain('javascript:');
+    });
+
+    it('leaves the footer and custom HTML alone', () => {
+      const custom = '<table><tr><td><a href="javascript:x">Hi</a></td></tr></table>';
+      expect(renderBody(custom)).toBe(custom);
+
+      const html = renderBody('<p>Hi</p>', undefined, '<p><a href="sms:+34600000000">Text us</a></p>');
+      expect(html).toContain('href="sms:+34600000000"');
     });
   });
 

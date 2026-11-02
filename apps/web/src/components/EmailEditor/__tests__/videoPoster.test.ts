@@ -109,7 +109,7 @@ describe('composeVideoPoster', () => {
     const {fake} = tools({maxresdefault: {width: 1280, height: 720}});
 
     expect((await composeVideoPoster(VIDEO, fake)).title).toBe(
-      "{\u200b{ '%22%3E' | url_decode }} and {\u200b% if x %} {not}",
+      "{\u200b{\u200b '%22%3E' | url_decode }} and {\u200b% if x %} {\u200bnot}",
     );
   });
 

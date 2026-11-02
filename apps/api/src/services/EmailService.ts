@@ -10,6 +10,7 @@ import {
   contactLanguage,
   footerParagraph,
   type ProjectFooters,
+  renderSubjectTemplate,
   renderTemplate,
   unsubscribeFooterHtml,
 } from '@plunk/shared';
@@ -385,14 +386,16 @@ export class EmailService {
    * Uses the shared Liquid renderer from @plunk/shared, which caches parsed templates,
    * so the per-email call sites here don't re-parse the same body for every recipient.
    * When rendering a known template for many contacts in one pass, prefer
-   * `compileTemplate` to hoist the parse out of the loop entirely (see CampaignService).
+   * `compileTemplate` and `compileSubjectTemplate` to hoist the parse out of the loop entirely
+   * (see CampaignService).
+   * The body is HTML, so its outputs are escaped; the subject is plain text.
    */
   public static format({subject, body, data}: {subject: string; body: string; data: Record<string, unknown>}): {
     subject: string;
     body: string;
   } {
     return {
-      subject: renderTemplate(subject, data),
+      subject: renderSubjectTemplate(subject, data),
       body: renderTemplate(body, data),
     };
   }

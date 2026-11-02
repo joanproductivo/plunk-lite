@@ -1,4 +1,4 @@
-import {type YouTubeVideo, youTubeWatchUrl} from '@plunk/shared';
+import {neutralizeLiquid, type YouTubeVideo, youTubeWatchUrl} from '@plunk/shared';
 
 /** A video's poster with a play button drawn on it, ready to upload, and the video's title. */
 export interface VideoPoster {
@@ -67,12 +67,6 @@ const PLAY_TRIANGLE = '#ff0000';
 /** The play button's diameter, as a share of the poster's width. */
 const PLAY_SIZE = 0.17;
 
-// A video's title is a stranger's text going into the email, where Liquid would run it: it keeps
-// its braces, but none opens a tag
-function withoutLiquid(text: string): string {
-  return text.replace(/\{(?=[{%])/g, '{\u200b');
-}
-
 // The title and shape YouTube gives; null when it cannot be asked
 async function readOEmbed(video: YouTubeVideo): Promise<{title: string | null; ratio: number} | null> {
   let response: Response;
@@ -94,7 +88,8 @@ async function readOEmbed(video: YouTubeVideo): Promise<{title: string | null; r
     const width = Number(data.width);
     const height = Number(data.height);
     return {
-      title: typeof data.title === 'string' && data.title.trim() ? withoutLiquid(data.title.trim()) : null,
+      // A stranger's text going into the email, where Liquid would run it: no brace opens a tag
+      title: typeof data.title === 'string' && data.title.trim() ? neutralizeLiquid(data.title.trim()) : null,
       ratio: width > 0 && height > 0 ? width / height : WIDEST,
     };
   } catch {
