@@ -11,6 +11,7 @@ export * from './emailBox.js';
 export * from './emailButton.js';
 export * from './emailDocument.js';
 export * from './emailFonts.js';
+export * from './emailLink.js';
 export * from './emailProseCss.js';
 export * from './emailVideo.js';
 export * from './emailVideoSize.js';

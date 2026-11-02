@@ -8,7 +8,7 @@ import {
   insertFooter,
   type EmailBrand,
   isFramedBrand,
-  isSafeButtonHref,
+  isSafeLinkHref,
   isSafeVideoHrefAttribute,
   readButtonStyle,
   readPixels,
@@ -81,7 +81,7 @@ function hairSpaces(px: number): [percent: number, count: number] {
 function addOutlookButtonPadding($: CheerioAPI, emailFont: string): void {
   $('a.email-button').each((_, element) => {
     const link = $(element);
-    if (!isSafeButtonHref(link.attr('href'))) {
+    if (!isSafeLinkHref(link.attr('href'))) {
       link.removeAttr('href');
       return;
     }
