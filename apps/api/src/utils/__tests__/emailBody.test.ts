@@ -384,6 +384,69 @@ describe('renderBody', () => {
     });
   });
 
+  describe('editor images with a link', () => {
+    const img = '<img class="email-image" src="https://files.example.com/a.png" alt="Offer" width="300">';
+    const linked = (href = 'https://example.com/offer?a=1&amp;b=2', inner = img) => `<a href="${href}">${inner}</a>`;
+
+    it('keeps the link, without underline or border, even when saved without them', () => {
+      const html = renderBody(`<p>Hi</p>${linked()}`);
+
+      expect(html).toContain('href="https://example.com/offer?a=1&amp;b=2"');
+      expect(styleOf(html, 'a')).toMatch(/text-decoration: none$/);
+      expect(styleOf(html, 'img')).toMatch(/border: 0px/);
+    });
+
+    it('keeps the link of an aligned image, inside its paragraph', () => {
+      const html = renderBody(`<p style="text-align: center;">${linked()}</p>`);
+
+      expect(html).toMatch(/<p style="[^"]*text-align: center[^"]*"><a href="https:\/\/example\.com\/offer/);
+    });
+
+    it.each([
+      'javascript:alert(1)',
+      ' JaVaScRiPt:alert(1)',
+      '&#106;avascript:alert(1)',
+      'java&Tab;script:alert(1)',
+      'data:text/html,x',
+    ])('drops a link a block may not have (%s), keeping the image', href => {
+      const html = renderBody(linked(href));
+
+      expect(html).not.toMatch(/<a [^>]*href=/);
+      expect(html).toContain('src="https://files.example.com/a.png"');
+    });
+
+    it('checks a link with a comment beside its image too', () => {
+      const html = renderBody(linked('javascript:alert(1)', `<!-- note -->${img}`));
+
+      expect(html).not.toMatch(/<a [^>]*href=/);
+      expect(styleOf(html, 'img')).toMatch(/border: 0px/);
+    });
+
+    it('leaves videos and buttons to their own handling', () => {
+      const html = renderBody(
+        '<p><a class="email-button" href="https://example.com/go">Go</a></p>' +
+          '<p style="text-align: center;"><a class="email-video" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ" style="text-decoration: none;"><img class="email-image" src="https://files.example.com/p.jpg" width="1280" height="720" style="display: block; width: 100%; height: auto; margin: 0px; border-radius: 12px;"></a></p>',
+      );
+
+      expect(html).toContain('href="https://example.com/go"');
+      expect(html).toContain('href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"');
+      expect(styleOf(html, 'img')).not.toMatch(/border: 0px/);
+    });
+
+    it('leaves a link holding an image and text as it is', () => {
+      const html = renderBody(`<p>${linked('https://example.com', `${img} Read more`)}</p>`);
+
+      expect(styleOf(html, 'a')).toContain('text-decoration: underline');
+      expect(styleOf(html, 'img')).not.toContain('border: 0px');
+    });
+
+    it('reads as the link in the plain-text part', () => {
+      expect(htmlToPlainText(renderBody(`<p>a</p>${linked('https://example.com/offer')}<p>b</p>`))).toBe(
+        'a\n\nhttps://example.com/offer\n\nb',
+      );
+    });
+  });
+
   describe('editor boxes', () => {
     const box = (inner: string, {full = false, style = 'background-color: #111827; color: #ffffff;'} = {}) =>
       `<div class="email-box${full ? ' email-box-full' : ''}" style="${style}">${inner}</div>`;
