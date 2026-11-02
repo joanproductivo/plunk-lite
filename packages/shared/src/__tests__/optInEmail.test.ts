@@ -92,6 +92,12 @@ describe('toOptInLogo', () => {
     expect(toOptInLogo('', 999)).toEqual({logo: null, errors: []});
   });
 
+  it('keeps the formats every email client shows, whatever their case', () => {
+    for (const name of ['logo.jpg', 'logo.JPEG', 'logo.gif', 'logo.webp?v=2']) {
+      expect(toOptInLogo(`https://files.example.com/${name}`, 160).logo).not.toBeNull();
+    }
+  });
+
   it.each([
     ['http://files.example.com/logo.png', 160],
     ['javascript:alert(1)', 160],
@@ -103,6 +109,9 @@ describe('toOptInLogo', () => {
     ['https://｛｛email｝｝.example.com/logo.png', 160],
     [`https://files.example.com/${'"'.repeat(1990)}.png`, 160],
     ['https://files.example.com/LOGO.SVG?v=1', 160],
+    ['https://files.example.com/logo.avif', 160],
+    ['https://files.example.com/logo', 160],
+    ['https://files.example.com/logo.png/', 160],
     [`https://files.example.com/${'a'.repeat(2000)}.png`, 160],
     ['https://files.example.com/logo.png', 100],
     ['https://files.example.com/logo.png', '160'],

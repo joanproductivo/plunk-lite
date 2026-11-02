@@ -317,8 +317,8 @@ function OptInLogoField({
         )}
       </div>
       <p className="mt-1 text-xs text-neutral-500">
-        Centred at the top of the email. Upload it at twice its size so it looks sharp: JPEG, PNG, GIF or WebP, over
-        https.
+        Centred at the top of the email. Upload it at twice its size so it looks sharp. An address of your own must be
+        https and end in .jpg, .jpeg, .png, .gif or .webp.
       </p>
       {url && !disabled && (
         <div className="mt-3">

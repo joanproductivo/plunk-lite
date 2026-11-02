@@ -11,7 +11,7 @@ It is a Plunk Lite feature, off by default, set per project in **Settings → Br
 ## Turning it on
 
 1. Choose the **From address** of the confirmation emails, on one of the project's verified domains, and optionally a name.
-2. Edit the email if you want: a subject, a text and a button, per language. Languages without a text of their own use Plunk's. `{projectName}` becomes the project's name; template tags (`{{ … }}`, `{% … %}`) are not allowed. You can add a logo, one per project, at the top of the email; it goes out centred, like the text and the button, in the font of your campaigns.
+2. Edit the email if you want: a subject, a text and a button, per language. Languages without a text of their own use Plunk's. `{projectName}` becomes the project's name; template tags (`{{ … }}`, `{% … %}`) are not allowed. You can add a logo, one per project, at the top of the email, at 120, 160, 240 or 320 px wide: upload it, pick it from your images, or give an https address ending in `.jpg`, `.jpeg`, `.png`, `.gif` or `.webp` (SVG is not shown by Gmail). The email goes out in a centred column of 600 px (or your brand's width), with the logo, the text and the button centred, in the font of your campaigns.
 3. Switch it on and save.
 
 The email goes to each contact in their language: their `locale` field, else the project's language. It carries no unsubscribe footer. It is sent as a transactional email, so it counts as one and follows the project's open tracking; its link is never click-tracked, so the confirmation link is not kept in an event.

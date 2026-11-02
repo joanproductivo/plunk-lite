@@ -73,6 +73,7 @@ export function toOptInTexts(value: unknown): {texts: OptInTexts; errors: string
 export const OPT_IN_LOGO_WIDTHS = [120, 160, 240, 320];
 export const OPT_IN_LOGO_WIDTH_DEFAULT = 160;
 export const OPT_IN_LOGO_URL_MAX = 2000;
+const OPT_IN_LOGO_EXTENSION = /\.(jpe?g|png|gif|webp)$/i;
 
 export interface OptInLogo {
   url: string;
@@ -97,10 +98,10 @@ export function toOptInLogo(url: unknown, width: unknown): {logo: OptInLogo | nu
       const parsed = new URL(raw);
       if (parsed.protocol !== 'https:') errors.push("the logo's address must start with https://");
       else if (parsed.username || parsed.password) errors.push("the logo's address cannot hold a user or password");
-      // Gmail does not show them
-      else if (parsed.pathname.toLowerCase().endsWith('.svg'))
-        errors.push('the logo cannot be an SVG: Gmail hides them');
-      else if (!/^[a-z0-9.-]+$/.test(parsed.hostname) || /[{}]/.test(parsed.href)) {
+      // The formats every email client shows, as uploads are named: Gmail hides SVG, Outlook AVIF
+      else if (!OPT_IN_LOGO_EXTENSION.test(parsed.pathname)) {
+        errors.push("the logo's address must end in .jpg, .jpeg, .png, .gif or .webp");
+      } else if (!/^[a-z0-9.-]+$/.test(parsed.hostname) || /[{}]/.test(parsed.href)) {
         errors.push("the logo's address has characters it cannot hold");
       } else if (parsed.href.length > OPT_IN_LOGO_URL_MAX) {
         errors.push(`the logo's address can have at most ${OPT_IN_LOGO_URL_MAX} characters`);

@@ -403,7 +403,8 @@ export class OptInService {
         url: `${DASHBOARD_URI}/confirm#${token}`,
         texts: settings.texts,
         brand: await BrandService.get(projectId),
-        logo: toOptInLogo(settings.logoUrl, settings.logoWidth).logo,
+        // Already checked by settings(), which leaves both or neither
+        logo: settings.logoUrl && settings.logoWidth ? {url: settings.logoUrl, width: settings.logoWidth} : null,
       });
     } catch (error) {
       await this.keepWaiting(contact, segmentIds);
