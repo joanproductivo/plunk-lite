@@ -62,7 +62,11 @@ import useSWR from 'swr';
 import {WorkflowSchemas} from '@plunk/shared';
 import dayjs from 'dayjs';
 
-type WorkflowRow = Workflow & {_count?: {steps: number; executions: number}};
+type WorkflowRow = Workflow & {
+  _count?: {steps: number; executions: number};
+  // Plunk Lite: distinct contacts that ever entered, and those still RUNNING or WAITING
+  contactCounts?: {entered: number; inProgress: number};
+};
 
 // Status facet values. Maps onto the API's `?status=active|disabled` filter
 // (which the backend resolves to the `enabled` boolean).
@@ -85,7 +89,8 @@ const DEFAULT_COLUMN_VISIBILITY: VisibilityState = {
   trigger: true,
   status: true,
   steps: true,
-  executions: true,
+  entered: true,
+  inProgress: true,
   updatedAt: true,
   actions: true,
 };
@@ -130,6 +135,15 @@ function EditedAt({date, className = ''}: {date: Date | string; className?: stri
         {dayjs(date).format('DD MMMM YYYY, HH:mm')}
       </div>
     </div>
+  );
+}
+
+// Greyed out at zero, so the workflows with contacts still in them stand out
+function InProgressCount({count}: {count: number}) {
+  return (
+    <strong className={'text-sm font-semibold tabular-nums ' + (count > 0 ? 'text-neutral-900' : 'text-neutral-400')}>
+      {count.toLocaleString()}
+    </strong>
   );
 }
 
@@ -374,19 +388,38 @@ export default function WorkflowsPage() {
         ),
       },
       {
-        id: 'executions',
+        id: 'entered',
         enableSorting: false, // The API only sorts on steps among the counts.
-        meta: {label: 'Executions', headClassName: 'text-right', cellClassName: 'text-right'} satisfies DataTableColumnMeta,
+        meta: {
+          label: 'Entered',
+          headClassName: 'text-right',
+          cellClassName: 'text-right',
+        } satisfies DataTableColumnMeta,
         header: ({column}) => (
           <DataTableColumnHeader column={column} align="right">
-            Executions
+            Entered
           </DataTableColumnHeader>
         ),
         cell: ({row}) => (
           <span className="text-sm font-semibold tabular-nums text-neutral-900">
-            {(row.original._count?.executions ?? 0).toLocaleString()}
+            {(row.original.contactCounts?.entered ?? 0).toLocaleString()}
           </span>
         ),
+      },
+      {
+        id: 'inProgress',
+        enableSorting: false, // The API only sorts on steps among the counts.
+        meta: {
+          label: 'In progress',
+          headClassName: 'text-right',
+          cellClassName: 'text-right',
+        } satisfies DataTableColumnMeta,
+        header: ({column}) => (
+          <DataTableColumnHeader column={column} align="right">
+            In progress
+          </DataTableColumnHeader>
+        ),
+        cell: ({row}) => <InProgressCount count={row.original.contactCounts?.inProgress ?? 0} />,
       },
       {
         id: 'updatedAt',
@@ -579,7 +612,7 @@ export default function WorkflowsPage() {
                           <div className="mt-3">
                             <Trigger workflow={workflow} />
                           </div>
-                          <div className="mt-4 flex items-center gap-3 text-sm">
+                          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                             <span>
                               <strong className="font-semibold text-neutral-900 tabular-nums">
                                 {workflow._count?.steps ?? 0}
@@ -589,9 +622,14 @@ export default function WorkflowsPage() {
                             <span className="h-3 w-px bg-neutral-200" aria-hidden="true" />
                             <span>
                               <strong className="font-semibold text-neutral-900 tabular-nums">
-                                {(workflow._count?.executions ?? 0).toLocaleString()}
+                                {(workflow.contactCounts?.entered ?? 0).toLocaleString()}
                               </strong>
-                              <span className="text-neutral-400 ml-1 text-xs">executions</span>
+                              <span className="text-neutral-400 ml-1 text-xs">entered</span>
+                            </span>
+                            <span className="h-3 w-px bg-neutral-200" aria-hidden="true" />
+                            <span>
+                              <InProgressCount count={workflow.contactCounts?.inProgress ?? 0} />
+                              <span className="text-neutral-400 ml-1 text-xs">in progress</span>
                             </span>
                           </div>
                         </Link>

@@ -396,8 +396,8 @@ export default function WorkflowEditorPage() {
             </AlertTitle>
             <AlertDescription>
               <p>
-                <strong>{activeExecutionsCount}</strong> contact{activeExecutionsCount !== 1 ? 's are' : ' is'} part way
-                through this workflow
+                <strong>{activeExecutionsCount}</strong> execution{activeExecutionsCount !== 1 ? 's are' : ' is'} part
+                way through this workflow
                 {!workflow.enabled && ', and disabling it does not stop them'}. Until they finish, you can&apos;t:
               </p>
               <ul className="list-disc list-inside space-y-1 mt-2">
