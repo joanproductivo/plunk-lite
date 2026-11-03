@@ -2,6 +2,7 @@ import {BRAND_DEFAULTS, type EmailBrand, isFramedBrand} from './brand.js';
 import {BOX_INHERITED_COLOUR, BOX_PADDING, BOX_RADIUS} from './emailBox.js';
 import {columnTextWidth, EMAIL_COLUMN_PADDING} from './emailDocument.js';
 import {emailFontFamily} from './emailFonts.js';
+import {SOCIAL_GAP} from './emailSocial.js';
 
 /**
  * Typography for visual editor emails in `brand`. Sending moves it into style attributes,
@@ -334,6 +335,17 @@ export function emailProseCss(brand: EmailBrand = BRAND_DEFAULTS, {preview = fal
 /* Videos no wider than the email's text, however wide the window; their own size may cap them narrower */
 .prose .email-video img {
   max-width: ${columnTextWidth(brand)}px;
+}
+
+/* Social icons in a row, as sending lays them out in a table (see the API's emailSocial) */
+.prose .email-social a {
+  text-decoration: none;
+}
+
+.prose .email-social img {
+  display: inline-block;
+  margin: 0 ${SOCIAL_GAP / 2}px;
+  vertical-align: middle;
 }
 
 .prose .email-box {

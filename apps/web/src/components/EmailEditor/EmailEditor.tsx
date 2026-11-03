@@ -18,9 +18,11 @@ import {EmailBox, EmailDocument} from './EmailBox';
 import {ImageDialog} from './ImageDialog';
 import {type DividerAttrs, EmailDivider} from './EmailDivider';
 import {DividerDialog} from './DividerDialog';
+import {EmailSocial} from './EmailSocial';
 import {EmailSpacer, type SpacerAttrs} from './EmailSpacer';
 import {EmailVideo, type VideoAttrs} from './EmailVideo';
 import {SlashCommand} from './SlashCommand';
+import {SocialDialog, type SocialDialogAttrs} from './SocialDialog';
 import {SpacerDialog} from './SpacerDialog';
 import {VideoDialog} from './VideoDialog';
 import {useBlockDialog} from './useBlockDialog';
@@ -199,6 +201,7 @@ export function EmailEditor({
       EmailSpacer,
       EmailVideo,
       EmailBox,
+      EmailSocial,
       Variable,
       VariableMention,
       LogicMention,
@@ -234,6 +237,7 @@ export function EmailEditor({
   const divider = useBlockDialog<DividerAttrs>(editor, 'horizontalRule', true);
   const spacer = useBlockDialog<SpacerAttrs>(editor, 'spacer', true);
   const video = useBlockDialog<VideoAttrs>(editor, 'video');
+  const social = useBlockDialog<SocialDialogAttrs>(editor, 'social');
   const box = useBoxDialog(editor, emailBrand.look);
 
   // The slash menu's image row opens the same dialog as the toolbar
@@ -523,6 +527,7 @@ export function EmailEditor({
               onSpacer={spacer.onToolbar}
               onVideo={video.onToolbar}
               onBox={box.onToolbar}
+              onSocial={social.onToolbar}
               canUpload={canUpload}
             />
             <div
@@ -799,6 +804,7 @@ export function EmailEditor({
       <DividerDialog {...divider.dialogProps} />
       <SpacerDialog {...spacer.dialogProps} />
       <VideoDialog {...video.dialogProps} />
+      <SocialDialog {...social.dialogProps} social={emailBrand.social} />
       <BoxDialog
         {...box.dialogProps}
         buttonColor={emailBrand.button?.backgroundColor ?? BUTTON_DEFAULTS.backgroundColor}

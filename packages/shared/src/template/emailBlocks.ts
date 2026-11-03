@@ -17,6 +17,7 @@ export const EDITOR_BLOCK_CLASSES: readonly string[] = [
   'email-video',
   'email-box',
   'email-box-full',
+  'email-social',
 ];
 
 /** The option of `table` whose value is closest to `value`, for blocks whose HTML set another. */

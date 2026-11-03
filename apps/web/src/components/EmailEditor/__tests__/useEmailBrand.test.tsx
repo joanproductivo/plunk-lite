@@ -6,6 +6,7 @@ import {
   EMAIL_FONT_FAMILY,
   EMAIL_FONTS,
   type ProjectBrand,
+  SOCIAL_DEFAULTS,
 } from '@plunk/shared';
 import {act} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
@@ -74,7 +75,13 @@ describe('editor styles', () => {
 describe('useEmailBrand', () => {
   let root: Root;
   let container: HTMLDivElement;
-  const stored = vi.fn(async (): Promise<ProjectBrand> => ({...PROJECT, button: {...BUTTON_DEFAULTS, shape: 'pill'}}));
+  const stored = vi.fn(
+    async (): Promise<ProjectBrand> => ({
+      ...PROJECT,
+      button: {...BUTTON_DEFAULTS, shape: 'pill'},
+      social: SOCIAL_DEFAULTS,
+    }),
+  );
 
   // Renders what the hook returns, for the test to read
   function Probe({brand, body}: {brand: EmailBrand | null; body: string}) {

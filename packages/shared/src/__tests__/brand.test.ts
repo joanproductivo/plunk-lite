@@ -1,6 +1,13 @@
 import {describe, expect, it} from 'vitest';
 
-import {BRAND_DEFAULTS, BUTTON_DEFAULTS, sameEmailBrand, toEmailBrand, toProjectBrand} from '../template/index.js';
+import {
+  BRAND_DEFAULTS,
+  BUTTON_DEFAULTS,
+  sameEmailBrand,
+  SOCIAL_DEFAULTS,
+  toEmailBrand,
+  toProjectBrand,
+} from '../template/index.js';
 
 describe('toEmailBrand', () => {
   it('falls back to the defaults for missing or invalid data', () => {
@@ -59,8 +66,8 @@ describe('toEmailBrand', () => {
 });
 
 describe('toProjectBrand', () => {
-  it('adds the button, with its own defaults', () => {
-    expect(toProjectBrand({})).toEqual({...BRAND_DEFAULTS, button: BUTTON_DEFAULTS});
+  it('adds the button and the social links, with their own defaults', () => {
+    expect(toProjectBrand({})).toEqual({...BRAND_DEFAULTS, button: BUTTON_DEFAULTS, social: SOCIAL_DEFAULTS});
     expect(toProjectBrand({button: {shape: 'pill', backgroundColor: '#ff0000'}}).button).toEqual({
       ...BUTTON_DEFAULTS,
       shape: 'pill',

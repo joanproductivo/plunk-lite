@@ -20,6 +20,7 @@ export * from './emailDocument.js';
 export * from './emailFonts.js';
 export * from './emailLink.js';
 export * from './emailProseCss.js';
+export * from './emailSocial.js';
 export * from './emailVideo.js';
 export * from './emailVideoSize.js';
 export {escapeHtml, neutralizeLiquid} from './html.js';

@@ -10,13 +10,15 @@ export function OptionSelect<T extends string>(props: {
   options: Record<T, string>;
   onChange: (value: T) => void;
   optionStyle?: (value: T) => CSSProperties;
+  /** Shown while no option is chosen. */
+  placeholder?: string;
 }) {
   return (
     <div>
       <Label className="text-sm font-medium mb-2 block">{props.label}</Label>
       <Select value={props.value} onValueChange={value => props.onChange(value as T)}>
         <SelectTrigger>
-          <SelectValue />
+          <SelectValue placeholder={props.placeholder} />
         </SelectTrigger>
         <SelectContent>
           {(Object.keys(props.options) as T[]).map(key => (

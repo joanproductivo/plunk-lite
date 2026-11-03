@@ -1,4 +1,4 @@
-import {BRAND_DEFAULTS, BUTTON_DEFAULTS} from '@plunk/shared';
+import {BRAND_DEFAULTS, BUTTON_DEFAULTS, SOCIAL_DEFAULTS} from '@plunk/shared';
 import {beforeEach, describe, expect, it} from 'vitest';
 
 import {BrandService} from '../BrandService';
@@ -14,7 +14,11 @@ describe('BrandService', () => {
   });
 
   it('gives a project without a brand the look emails always had', async () => {
-    expect(await BrandService.get(projectId)).toEqual({...BRAND_DEFAULTS, button: BUTTON_DEFAULTS});
+    expect(await BrandService.get(projectId)).toEqual({
+      ...BRAND_DEFAULTS,
+      button: BUTTON_DEFAULTS,
+      social: SOCIAL_DEFAULTS,
+    });
   });
 
   it('saves a brand and reads it back, replacing the previous one', async () => {
@@ -32,16 +36,37 @@ describe('BrandService', () => {
       backgroundColor: '#f3f4f6',
       contentWidth: 600,
       button: {...BUTTON_DEFAULTS, shape: 'pill'},
+      social: SOCIAL_DEFAULTS,
     });
     expect(await BrandService.get(projectId)).toEqual(saved);
     expect(await prisma.plunkLiteProjectBrand.count({where: {projectId}})).toBe(1);
+  });
+
+  it('saves the social links through their allowlist (Plunk Lite)', async () => {
+    const icon = 'https://files.example.com/p/1-0123456789abcdef-plunk-social-youtube-circle-111827.png';
+    const saved = await BrandService.save(projectId, {
+      social: {
+        links: [
+          {network: 'youtube', url: 'https://youtube.com/@plunk'},
+          {network: 'x', url: 'https://x.com/{{ evil }}'},
+        ],
+        icons: {youtube: icon, x: icon},
+      },
+    });
+
+    expect(saved.social).toEqual({
+      ...SOCIAL_DEFAULTS,
+      links: [{network: 'youtube', url: 'https://youtube.com/@plunk'}],
+      icons: {youtube: icon},
+    });
+    expect((await BrandService.get(projectId)).social).toEqual(saved.social);
   });
 
   it('only stores known values', async () => {
     await BrandService.save(projectId, {textColor: 'red; x', font: 'comic-sans', evil: '<script>'});
 
     const row = await prisma.plunkLiteProjectBrand.findUniqueOrThrow({where: {projectId}});
-    expect(row.brand).toEqual({...BRAND_DEFAULTS, button: BUTTON_DEFAULTS});
+    expect(row.brand).toEqual({...BRAND_DEFAULTS, button: BUTTON_DEFAULTS, social: SOCIAL_DEFAULTS});
   });
 
   it('reads a row edited by hand through the same allowlist', async () => {
@@ -53,6 +78,7 @@ describe('BrandService', () => {
       ...BRAND_DEFAULTS,
       linkColor: '#0a7c3e',
       button: BUTTON_DEFAULTS,
+      social: SOCIAL_DEFAULTS,
     });
   });
 

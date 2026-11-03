@@ -19,6 +19,7 @@ import {
   RectangleHorizontal,
   Redo,
   SeparatorHorizontal,
+  Share2,
   Strikethrough,
   Undo,
   UnfoldVertical,
@@ -44,6 +45,8 @@ interface ToolbarProps {
   onVideo: () => void;
   /** Wraps the selected blocks in a box, or opens the settings of the box the cursor is in. */
   onBox: () => void;
+  /** Places the brand's social links, or opens the settings of the selected ones. */
+  onSocial: () => void;
   canUpload: boolean;
 }
 
@@ -56,6 +59,7 @@ export function Toolbar({
   onSpacer,
   onVideo,
   onBox,
+  onSocial,
   canUpload,
 }: ToolbarProps) {
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -533,6 +537,18 @@ export function Toolbar({
           title={editor.isActive('box') ? 'Box settings' : 'Put in a box with a background'}
         >
           <PaintBucket className="h-4 w-4" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onMouseDown={e => e.preventDefault()}
+          onClick={onSocial}
+          data-active={editor.isActive('social')}
+          className="h-8 w-8 data-[active=true]:bg-neutral-200"
+          title={editor.isActive('social') ? 'Edit social links' : 'Insert social links'}
+        >
+          <Share2 className="h-4 w-4" />
         </Button>
         <Button
           type="button"

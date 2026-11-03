@@ -1,6 +1,7 @@
 import {BRAND_DEFAULTS, type EmailBrand, isFramedBrand} from './brand.js';
 import {contrastRatio} from './color.js';
 import {EDITOR_BLOCK_CLASSES} from './emailBlocks.js';
+import {hasForeignSocial} from './emailSocial.js';
 import {isSafeVideoHrefAttribute} from './emailVideo.js';
 
 /**
@@ -89,7 +90,7 @@ function hasForeignDiv(html: string): boolean {
  * The TipTap editor loads StarterKit + TextAlign + Color + TextStyle + Link +
  * ResizableImage (an <img>, alone or in a link) + EmailButton + EmailDivider (styled <hr>) +
  * EmailSpacer + EmailVideo + EmailBox (a <div class="email-box">, the only div it writes) +
- * VariableMention.
+ * EmailSocial (a <p class="email-social"> of linked icons) + VariableMention.
  * TextStyle/Color/Link round-trip <span style="..."> and <a style="..."> markup. This detection
  * therefore PERMITS span + inline styles and only REJECTS markup TipTap cannot represent (tables,
  * other divs, forms, embeds, custom attrs, <style> blocks, etc).
@@ -146,6 +147,7 @@ export function detectCustomHtmlPatterns(html: string): boolean {
     hasStyleTags ||
     hasRichButton(html) ||
     hasForeignVideo(html) ||
+    hasForeignSocial(html) ||
     hasForeignDiv(html)
   );
 }
