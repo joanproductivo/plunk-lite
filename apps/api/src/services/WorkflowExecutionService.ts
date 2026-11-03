@@ -30,6 +30,7 @@ import {DASHBOARD_URI} from '../app/constants.js';
 import {POOL_WAIT_TRANSACTION} from '../utils/database.js';
 import {readCapped} from '../utils/readCapped.js';
 import {signWebhook, WEBHOOK_SIGNATURE_HEADER} from '../utils/webhookSignature.js';
+import {pickTransition} from '../utils/workflowTransitions.js';
 
 import {RECIPIENT_OVERRIDE_HEADER} from './EmailHeaderService.js';
 import {EmailService} from './EmailService.js';
@@ -79,6 +80,27 @@ type WorkflowStepWithTransitions = WorkflowStep & {
   }>;
 };
 
+/** What running a run's steps reads with it: its contact, and its workflow's steps, transitions and project */
+const RUN_INCLUDE = {
+  workflow: {
+    include: {
+      steps: {
+        include: {
+          template: true,
+          outgoingTransitions: {
+            orderBy: {priority: 'asc'},
+            include: {toStep: true},
+          },
+        },
+      },
+      project: {
+        select: {disabled: true, id: true, name: true},
+      },
+    },
+  },
+  contact: true,
+} satisfies Prisma.WorkflowExecutionInclude;
+
 /**
  * Core Workflow Execution Engine
  * Handles the execution of workflows step by step
@@ -91,28 +113,7 @@ export class WorkflowExecutionService {
   public static async processStepExecution(executionId: string, stepId: string): Promise<void> {
     signale.info(`[WORKFLOW] Processing step execution: ${executionId} -> ${stepId}`);
 
-    const execution = await prisma.workflowExecution.findUnique({
-      where: {id: executionId},
-      include: {
-        workflow: {
-          include: {
-            steps: {
-              include: {
-                template: true,
-                outgoingTransitions: {
-                  orderBy: {priority: 'asc'},
-                  include: {toStep: true},
-                },
-              },
-            },
-            project: {
-              select: {disabled: true, id: true, name: true},
-            },
-          },
-        },
-        contact: true,
-      },
-    });
+    const execution = await prisma.workflowExecution.findUnique({where: {id: executionId}, include: RUN_INCLUDE});
 
     if (!execution) {
       // Plunk Lite: its contact or workflow was deleted; retrying the job would not bring it back
@@ -1661,37 +1662,7 @@ export class WorkflowExecutionService {
     }
 
     // Find the appropriate transition based on conditions
-    let nextStep = null;
-
-    for (const transition of transitions) {
-      const condition = transition.condition;
-
-      // If no condition, always follow
-      if (!condition) {
-        nextStep = transition.toStep;
-        break;
-      }
-
-      // If condition exists, evaluate it
-      // For CONDITION steps, check the branch
-      if (
-        stepResult.branch &&
-        typeof condition === 'object' &&
-        condition !== null &&
-        !Array.isArray(condition) &&
-        'branch' in condition &&
-        condition.branch === stepResult.branch
-      ) {
-        nextStep = transition.toStep;
-        break;
-      }
-
-      // For other conditional logic
-      if (this.evaluateTransitionCondition(condition, stepResult, execution)) {
-        nextStep = transition.toStep;
-        break;
-      }
-    }
+    const nextStep = pickTransition(transitions, stepResult)?.toStep;
 
     if (!nextStep) {
       // No valid transition found, complete workflow
@@ -1929,18 +1900,5 @@ export class WorkflowExecutionService {
       default:
         throw new Error(`Unknown operator: ${operator}`);
     }
-  }
-
-  /**
-   * Helper: Evaluate transition condition
-   */
-  private static evaluateTransitionCondition(
-    _condition: Prisma.JsonValue,
-    _stepResult: StepResult,
-    _execution: WorkflowExecutionWithRelations,
-  ): boolean {
-    // Implement custom transition condition logic here
-    // For now, return false as default
-    return false;
   }
 }
