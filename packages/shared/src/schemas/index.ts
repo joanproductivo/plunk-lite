@@ -330,6 +330,8 @@ export const WorkflowSchemas = {
     triggerConfig: jsonSchema.optional(),
     enabled: z.boolean().optional(),
     allowReentry: z.boolean().optional(),
+    // Plunk Lite: contacts who reach the end without an Exit step wait there for new steps
+    keepUntilExit: z.boolean().optional(),
   }),
   addStep: z.object({
     type: z.nativeEnum(WorkflowStepType),

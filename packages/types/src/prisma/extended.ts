@@ -37,6 +37,25 @@ export interface WorkflowExecutionWithDetails extends WorkflowExecution {
   contact: {id: string; email: string};
   currentStep?: WorkflowStep | null;
   stepExecutions: WorkflowStepExecution[];
+  /** Plunk Lite: a finished run waiting at the end of a workflow that keeps its contacts until an Exit step */
+  parked?: boolean;
+}
+
+/**
+ * Plunk Lite: contacts waiting at one step (and branch) at the end of a workflow that keeps its
+ * contacts until an Exit step
+ */
+export interface ParkedGroup {
+  stepId: string;
+  stepName: string | null;
+  branch: string | null;
+  /** False when the branch is no longer one of the condition's: nothing can be connected to it */
+  branchExists: boolean;
+  count: number;
+  /** Of them, unsubscribed: a marketing email skips them */
+  unsubscribed: number;
+  /** Whether a step now follows where they wait, so that they can continue */
+  canContinue: boolean;
 }
 
 /**

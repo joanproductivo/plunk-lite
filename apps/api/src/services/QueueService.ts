@@ -13,6 +13,7 @@ import type {
   CardVerificationSweepJobData,
   ContactImportJobData,
   ContactSubscriptionEventsJobData,
+  ContinueParkedRoundJobData,
   DlqDrainJobData,
   DomainVerificationJobData,
   CampaignCancelCleanupJobData,
@@ -29,7 +30,7 @@ import type {
   SegmentMembershipEventsJobData,
   SendEmailJobData,
   SnoozeSweepJobData,
-  WorkflowStepJobData,
+  WorkflowQueueJobData,
 } from '@plunk/types';
 
 import {REDIS_URL} from '../app/constants.js';
@@ -106,7 +107,7 @@ const webhookRetryJobId = (stepExecutionId: string, attempt: number) =>
 // Plunk Lite: 8 attempts over about 4 minutes, like emails, so a delay's end or a wait's timeout
 // that comes due while the database restarts is not lost. Both claim the run before moving it, so a
 // retry never moves it twice.
-export const workflowQueue = new Queue<WorkflowStepJobData>('workflow', {
+export const workflowQueue = new Queue<WorkflowQueueJobData>('workflow', {
   connection: redisConnection,
   defaultJobOptions: {
     attempts: 8,
@@ -464,7 +465,7 @@ export class QueueService {
     stepId: string,
     stepExecutionId: string,
     delayMs: number,
-  ): Promise<Job<WorkflowStepJobData>> {
+  ): Promise<Job<WorkflowQueueJobData>> {
     return workflowQueue.add(
       'delay-end',
       {executionId, stepId, stepExecutionId, type: 'delay-end'},
@@ -483,7 +484,7 @@ export class QueueService {
     stepId: string,
     stepExecutionId: string,
     timeoutMs: number,
-  ): Promise<Job<WorkflowStepJobData>> {
+  ): Promise<Job<WorkflowQueueJobData>> {
     return workflowQueue.add(
       'timeout',
       {executionId, stepId, stepExecutionId, type: 'timeout'},
@@ -534,7 +535,7 @@ export class QueueService {
     stepExecutionId: string,
     attempt: number,
     delayMs: number,
-  ): Promise<Job<WorkflowStepJobData>> {
+  ): Promise<Job<WorkflowQueueJobData>> {
     return workflowQueue.add(
       'webhook-retry',
       {executionId, stepId, stepExecutionId, type: 'webhook-retry'},
@@ -572,8 +573,35 @@ export class QueueService {
    * Plunk Lite: carry on a failed run someone chose to retry, from the step it is on. It was claimed
    * as running first, so a retry of this job finds it finished and does nothing.
    */
-  public static async queueRetriedRun(executionId: string, stepId: string): Promise<Job<WorkflowStepJobData>> {
+  public static async queueRetriedRun(executionId: string, stepId: string): Promise<Job<WorkflowQueueJobData>> {
     return workflowQueue.add('resume-step', {executionId, stepId, type: 'resume-step'});
+  }
+
+  /**
+   * Plunk Lite: a round of letting the contacts waiting at the end of a workflow continue (see
+   * ParkedRuns). One ID per round of each press, so that pressing again queues afresh.
+   */
+  public static async queueContinueParkedRound(data: ContinueParkedRoundJobData, delayMs = 0): Promise<Job> {
+    return workflowQueue.add('continue-parked-round', data, {
+      delay: delayMs,
+      jobId: `workflow-continue-parked-round-${data.workflowId}-${data.pressId}-${data.round}`,
+    });
+  }
+
+  /**
+   * Plunk Lite: let these parked runs continue, a job each that claims its run. Prioritised, so that
+   * they wait behind the steps of runs already in progress rather than hold them up. One ID per
+   * press: claiming makes a repeated job harmless, and a job of an earlier press that failed and is
+   * kept would otherwise make BullMQ drop the new one.
+   */
+  public static async queueContinueParked(executionIds: string[], pressId: string): Promise<void> {
+    await workflowQueue.addBulk(
+      executionIds.map(executionId => ({
+        name: 'continue-parked',
+        data: {executionId, stepId: '', type: 'continue-parked' as const},
+        opts: {priority: 10, jobId: `workflow-continue-parked-${executionId}-${pressId}`},
+      })),
+    );
   }
 
   /**

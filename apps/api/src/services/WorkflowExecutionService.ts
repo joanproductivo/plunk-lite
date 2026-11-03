@@ -35,6 +35,7 @@ import {pickTransition} from '../utils/workflowTransitions.js';
 import {RECIPIENT_OVERRIDE_HEADER} from './EmailHeaderService.js';
 import {EmailService} from './EmailService.js';
 import {NtfyService} from './NtfyService.js';
+import {ParkedRuns} from './ParkedRuns.js';
 import {QueueService} from './QueueService.js';
 import {SuppressionService} from './SuppressionService.js';
 import {
@@ -100,6 +101,7 @@ const RUN_INCLUDE = {
   },
   contact: true,
 } satisfies Prisma.WorkflowExecutionInclude;
+type RunWithSteps = Prisma.WorkflowExecutionGetPayload<{include: typeof RUN_INCLUDE}>;
 
 /**
  * Core Workflow Execution Engine
@@ -399,13 +401,13 @@ export class WorkflowExecutionService {
     } else {
       // No transitions, complete workflow (Plunk Lite: a cancelled or failed run keeps its status,
       // and a waiting one is left to what ends its wait)
-      await prisma.workflowExecution.updateMany({
-        where: {id: stepExecution.executionId, status: {notIn: UNMOVABLE_STATUSES}},
-        data: {
-          status: WorkflowExecutionStatus.COMPLETED,
-          completedAt: new Date(),
-        },
-      });
+      await this.completeRun(
+        stepExecution.execution,
+        stepExecution.step,
+        null,
+        {status: {notIn: UNMOVABLE_STATUSES}},
+        {status: WorkflowExecutionStatus.COMPLETED, completedAt: new Date()},
+      );
     }
   }
 
@@ -451,13 +453,10 @@ export class WorkflowExecutionService {
     }
 
     // Nothing is connected after the delay now, so the workflow is done (claimed like the move above)
-    await prisma.workflowExecution.updateMany({
-      where: waitingHere,
-      data: {
-        status: WorkflowExecutionStatus.COMPLETED,
-        completedAt: new Date(),
-        currentStepId: null,
-      },
+    await this.completeRun(execution, {id: stepId, type: 'DELAY'}, null, waitingHere, {
+      status: WorkflowExecutionStatus.COMPLETED,
+      completedAt: new Date(),
+      currentStepId: null,
     });
   }
 
@@ -1646,36 +1645,20 @@ export class WorkflowExecutionService {
   ): Promise<void> {
     const transitions = currentStep.outgoingTransitions || [];
 
-    if (transitions.length === 0) {
-      // No more steps, complete the workflow
-      // Plunk Lite: a cancelled or failed run keeps its status, and a waiting one is left to what
-      // ends its wait (a late copy of a job must not complete it)
-      await prisma.workflowExecution.updateMany({
-        where: {id: execution.id, status: {notIn: UNMOVABLE_STATUSES}},
-        data: {
-          status: WorkflowExecutionStatus.COMPLETED,
-          completedAt: new Date(),
-          currentStepId: null,
-        },
-      });
-      return;
-    }
-
     // Find the appropriate transition based on conditions
     const nextStep = pickTransition(transitions, stepResult)?.toStep;
 
     if (!nextStep) {
-      // No valid transition found, complete workflow
-      // Plunk Lite: a cancelled or failed run keeps its status, and a waiting one is left to what
-      // ends its wait
-      await prisma.workflowExecution.updateMany({
-        where: {id: execution.id, status: {notIn: UNMOVABLE_STATUSES}},
-        data: {
-          status: WorkflowExecutionStatus.COMPLETED,
-          completedAt: new Date(),
-          currentStepId: null,
-        },
-      });
+      // No more steps, or no valid transition (a condition's branch with nothing connected):
+      // complete the workflow. Plunk Lite: a cancelled or failed run keeps its status, and a waiting
+      // one is left to what ends its wait (a late copy of a job must not complete it)
+      await this.completeRun(
+        execution,
+        currentStep,
+        typeof stepResult.branch === 'string' ? stepResult.branch : null,
+        {status: {notIn: UNMOVABLE_STATUSES}},
+        {status: WorkflowExecutionStatus.COMPLETED, completedAt: new Date(), currentStepId: null},
+      );
       return;
     }
 
@@ -1690,19 +1673,99 @@ export class WorkflowExecutionService {
   }
 
   /**
-   * Plunk Lite: a run resumed by an event failed. A step that failed has already failed its run and
+   * Complete a run that has nowhere to go from `step` (`where` narrows which run may be completed).
+   * Plunk Lite: in a workflow that keeps its contacts until an Exit step, the run is parked there
+   * too, with the branch the step took, unless that step is the Exit itself (a run that went
+   * through one is completed here as well). If parking fails, the run is completed as it would be
+   * without it: the contact then simply finishes the workflow.
+   */
+  private static async completeRun(
+    run: {id: string; workflowId: string; contactId: string},
+    step: Pick<WorkflowStep, 'id' | 'type'>,
+    branch: string | null,
+    where: Prisma.WorkflowExecutionWhereInput,
+    data: Prisma.WorkflowExecutionUncheckedUpdateManyInput,
+  ): Promise<void> {
+    if (step.type !== 'EXIT') {
+      try {
+        if (await ParkedRuns.keepsUntilExit(run.workflowId)) {
+          await ParkedRuns.completeAndPark(run, step.id, branch, where, data);
+          return;
+        }
+      } catch (error) {
+        signale.warn(
+          `[WORKFLOW] Could not park execution ${run.id} at the end of its workflow: ${errorMessage(error)}`,
+        );
+      }
+    }
+
+    await prisma.workflowExecution.updateMany({where: {...where, id: run.id}, data});
+  }
+
+  /**
+   * Plunk Lite: let a run that waited at the end of its workflow continue into the steps connected
+   * after where it waited, from that step and on the branch it took then (see ParkedRuns). A job
+   * per run; claiming it makes a repeated job, or one for a run that left meanwhile, do nothing.
+   */
+  public static async continueParked(executionId: string): Promise<void> {
+    const claimed = await ParkedRuns.claim(executionId);
+    if (!claimed) {
+      return;
+    }
+
+    let execution: RunWithSteps | null;
+    try {
+      execution = await prisma.workflowExecution.findUnique({where: {id: executionId}, include: RUN_INCLUDE});
+    } catch (error) {
+      // Claimed but not read: back to waiting where it was, so that it is not left running until
+      // the recovery sweep fails it. If that fails too, the sweep does.
+      await ParkedRuns.unclaim(executionId, claimed).catch(() => false);
+      throw error;
+    }
+    if (!execution) {
+      return;
+    }
+
+    try {
+      const step = execution.workflow.steps.find(s => s.id === claimed.stepId);
+      if (!step) {
+        // Deleted after the run was let continue: it waits where it can again
+        await prisma.$transaction(async tx => {
+          await tx.workflowExecution.updateMany({
+            where: {id: executionId, status: WorkflowExecutionStatus.RUNNING},
+            data: {status: WorkflowExecutionStatus.COMPLETED, completedAt: new Date(), currentStepId: null},
+          });
+          await ParkedRuns.parkAtLastStep(tx, [executionId], [claimed.stepId]);
+        });
+        return;
+      }
+
+      signale.info(`[WORKFLOW] Execution ${executionId} continues from ${step.name}, where it waited`);
+      await this.processNextSteps(execution, step, claimed.branch ? {branch: claimed.branch} : {});
+    } catch (error) {
+      await this.failResumedRun(execution, error, 'Continuing from the end of the workflow failed');
+    }
+  }
+
+  /**
+   * Plunk Lite: a run resumed by an event, or let continue from the end of its workflow, failed
+   * (`reason` says which). A step that failed has already failed its run and
    * alerted; anything else (moving on, before any step ran) fails it here, with the reason, so it
    * is not left RUNNING, its wait claimed, until the sweep fails it as interrupted.
    */
-  private static async failResumedRun(execution: WorkflowExecutionWithRelations, error: unknown): Promise<void> {
+  private static async failResumedRun(
+    execution: WorkflowExecutionWithRelations,
+    error: unknown,
+    reason = 'Resuming after the event failed',
+  ): Promise<void> {
     if (typeof error === 'object' && error !== null && handledFailures.has(error)) {
       return;
     }
-    signale.error(`[WORKFLOW] Resuming execution ${execution.id} after its event failed:`, error);
+    signale.error(`[WORKFLOW] Execution ${execution.id}: ${reason}:`, error);
     try {
       await WorkflowRecoveryService.failRun(execution, {
-        error: error instanceof Error ? error.message : 'Resuming after the event failed',
-        exitReason: 'Resuming after the event failed',
+        error: error instanceof Error ? error.message : reason,
+        exitReason: reason,
       });
     } catch (failError) {
       // The database is out too: the run stays as it was, and the alert of the failure is lost
