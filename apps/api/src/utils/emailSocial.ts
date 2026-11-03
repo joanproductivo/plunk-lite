@@ -28,7 +28,12 @@ export function convertSocial($: CheerioAPI): void {
           /^https?:\/\//i.test(node.children().first().attr('src') ?? '')
         );
       });
-    if (!canonical || links.length === 0) return;
+    if (!canonical) return;
+    // An empty block (written by the API, as the editor never saves one) would be a blank gap
+    if (links.length === 0) {
+      paragraph.remove();
+      return;
+    }
 
     // The paragraph's own space above and below, as inlined (none as the first or last block)
     const style = declarations(paragraph.attr('style'));
@@ -51,7 +56,8 @@ export function convertSocial($: CheerioAPI): void {
         .attr('height', String(px))
         .attr('style', `display: block; border: 0; width: ${px}px; height: ${px}px; margin: 0;`)
         .removeAttr('class');
-      anchor.attr('style', 'text-decoration: none;');
+      // Marked so the plain-text part names the network (see htmlToPlainText)
+      anchor.attr('style', 'text-decoration: none;').attr('data-plunk-social', '');
 
       const cell = $(`<td style="padding: 0 ${SOCIAL_GAP / 2}px; line-height: 0; font-size: 0;"></td>`);
       cell.append(anchor);

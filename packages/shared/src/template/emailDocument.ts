@@ -136,7 +136,9 @@ export function detectCustomHtmlPatterns(html: string): boolean {
       html,
     );
 
-  const hasMediaQueries = /@media/i.test(html);
+  // Only where CSS can be (a <style> tag is custom HTML anyway): a link to a profile such as
+  // tiktok.com/@mediamarkt is text, not a media query
+  const hasMediaQueries = /\sstyle\s*=\s*(?:"[^"]*@media|'[^']*@media)/i.test(html);
   const hasStyleTags = /<style[^>]*>/i.test(html);
 
   return (
@@ -156,7 +158,8 @@ export function detectCustomHtmlPatterns(html: string): boolean {
  * Text for an attribute of visual editor content, such as an image's alt text, that never makes
  * it read as custom HTML: without < or >, which would read as markup, and with what
  * detectCustomHtmlPatterns looks for anywhere in the HTML (`data-`, `aria-`, `role=`, `id=`,
- * `class=`, `@media`) broken by a non-breaking hyphen or an invisible space, so it reads the same.
+ * `class=`) broken by a non-breaking hyphen or an invisible space, so it reads the same. `@media`
+ * too, which older images and Plunk read as custom HTML anywhere.
  */
 export function visualAttributeText(text: string): string {
   return text
@@ -171,8 +174,9 @@ export function visualAttributeText(text: string): string {
 /**
  * Escaped data for visual editor content, with what detectCustomHtmlPatterns looks for in
  * text (`data-`, `aria-`, `role=`, `id=` after a space or at the start, `class=` and
- * `@media`) written as entities: it reads the same, but a contact's data never turns an
- * editor email into custom HTML, which goes out unchecked and without its brand.
+ * `@media`, which older images and Plunk read as custom HTML anywhere) written as entities: it
+ * reads the same, but a contact's data never turns an editor email into custom HTML, which goes
+ * out unchecked and without its brand.
  */
 export function withoutCustomHtmlPatterns(escaped: string): string {
   return escaped

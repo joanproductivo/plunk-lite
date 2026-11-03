@@ -88,7 +88,7 @@ function SocialForm(props: {
       <div className="space-y-4">
         <p className="text-sm text-neutral-600">
           Add your networks in{' '}
-          <Link href="/settings?tab=brand" className="underline">
+          <Link href="/settings?tab=brand" target="_blank" rel="noopener noreferrer" className="underline">
             Settings → Brand
           </Link>{' '}
           and save, then place them here.

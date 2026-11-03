@@ -21,6 +21,15 @@ export function htmlToPlainText(html: string): string {
     // break anywhere without changing how the text renders. Wrapping here instead
     // would bake hard newlines into the content and re-flow the recipient's message.
     wordwrap: false,
+    formatters: {
+      // A social link is an icon: its network's name (the image's alt text) and where it goes
+      socialLink: (elem, _walk, builder) => {
+        const icon = elem.children?.find(child => 'name' in child && child.name === 'img');
+        const name = icon && 'attribs' in icon ? icon.attribs.alt : '';
+        const href = (elem.attribs?.href ?? '').replace(/^mailto:/i, '');
+        builder.addInline(name ? `${name}: ${href}` : href);
+      },
+    },
     selectors: [
       // Tracking pixels and spacer images carry no meaning, and their alt text (when
       // they have any) is noise in a reading order.
@@ -39,6 +48,7 @@ export function htmlToPlainText(html: string): string {
       // `text [url]` beats a bare URL: it keeps the anchor text that tells the reader
       // where the link goes, which is what keeps the two parts semantically equal.
       {selector: 'a', options: {hideLinkHrefIfSameAsText: true}},
+      {selector: 'a[data-plunk-social]', format: 'socialLink'},
       // html-to-text upper-cases headings by default. Left on, a normal email subject
       // line becomes SHOUTING in the text part and feeds the caps-ratio heuristics
       // this whole change exists to stay clear of.

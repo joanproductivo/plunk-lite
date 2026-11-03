@@ -3,6 +3,7 @@ import signale from 'signale';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {renderBody} from '../emailBody.js';
+import {htmlToPlainText} from '../mime.js';
 
 vi.mock('@plunk/shared', async importOriginal => {
   const actual = await importOriginal<typeof import('@plunk/shared')>();
@@ -29,9 +30,9 @@ describe('editor social links (Plunk Lite)', () => {
     );
     expect(html.match(/<td style="padding: 0 6px; line-height: 0; font-size: 0;">/g)).toHaveLength(2);
     expect(html).toContain(
-      `<a href="https://instagram.com/plunk" style="text-decoration: none;"><img src="${ICON}" alt="Instagram" width="40" height="40" style="display: block; border: 0; width: 40px; height: 40px; margin: 0;"></a>`,
+      `<a href="https://instagram.com/plunk" style="text-decoration: none;" data-plunk-social><img src="${ICON}" alt="Instagram" width="40" height="40" style="display: block; border: 0; width: 40px; height: 40px; margin: 0;"></a>`,
     );
-    expect(html).toContain('<a href="mailto:hi@example.com" style="text-decoration: none;">');
+    expect(html).toContain('<a href="mailto:hi@example.com" style="text-decoration: none;" data-plunk-social>');
   });
 
   it('aligns and spaces them as the paragraph was', () => {
@@ -57,7 +58,19 @@ describe('editor social links (Plunk Lite)', () => {
       markVisualContent(template, template.replace('https://instagram.com/plunk', 'javascript:x')),
     );
 
-    expect(html).toContain('<a style="text-decoration: none;"><img src');
+    expect(html).toContain('<a style="text-decoration: none;" data-plunk-social><img src');
+  });
+
+  it('drops an empty block rather than send a blank gap', () => {
+    expect(renderBody('<p>Hi</p><p class="email-social"></p><p>Bye</p>')).not.toContain('email-social');
+  });
+
+  it('names each network in the plain-text part', () => {
+    const text = htmlToPlainText(renderBody(`<p>Hi</p>${socialBlockHtml(items, 'medium', null)}`));
+
+    expect(text).toContain('Instagram: https://instagram.com/plunk');
+    expect(text).toContain('Email: hi@example.com');
+    expect(text).not.toContain(ICON);
   });
 
   it('leaves anything else with the class as a paragraph, laid out in a row by its inlined styles', () => {

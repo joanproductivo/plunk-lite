@@ -62,6 +62,18 @@ describe('BrandService', () => {
     expect((await BrandService.get(projectId)).social).toEqual(saved.social);
   });
 
+  it('keeps the saved social links when a brand comes without them (Plunk Lite)', async () => {
+    const social = {links: [{network: 'youtube', url: 'https://youtube.com/@plunk'}]};
+    await BrandService.save(projectId, {social});
+
+    const saved = await BrandService.save(projectId, {textColor: '#111111'});
+
+    expect(saved.textColor).toBe('#111111');
+    expect(saved.social.links).toEqual(social.links);
+    expect((await BrandService.get(projectId)).social.links).toEqual(social.links);
+    expect((await BrandService.save(projectId, {social: {links: []}})).social.links).toEqual([]);
+  });
+
   it('only stores known values', async () => {
     await BrandService.save(projectId, {textColor: 'red; x', font: 'comic-sans', evil: '<script>'});
 
