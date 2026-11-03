@@ -93,6 +93,8 @@ export default function WorkflowEditorPage() {
 
   // Check for active executions
   const activeExecutionsCount = (activeExecutionsData?.total || 0) + (waitingExecutionsData?.total || 0);
+  // The banner speaks of executions, so one of them is "it", not "they"
+  const oneActive = activeExecutionsCount === 1;
 
   // Validate workflow configuration
   const validateWorkflow = (workflow: WorkflowWithDetails): {valid: boolean; errors: string[]} => {
@@ -396,9 +398,10 @@ export default function WorkflowEditorPage() {
             </AlertTitle>
             <AlertDescription>
               <p>
-                <strong>{activeExecutionsCount}</strong> execution{activeExecutionsCount !== 1 ? 's are' : ' is'} part
-                way through this workflow
-                {!workflow.enabled && ', and disabling it does not stop them'}. Until they finish, you can&apos;t:
+                <strong>{activeExecutionsCount}</strong> {oneActive ? 'execution is' : 'executions are'} part way
+                through this workflow
+                {!workflow.enabled && `, and disabling it does not stop ${oneActive ? 'it' : 'them'}`}. Until{' '}
+                {oneActive ? 'it finishes' : 'they finish'}, you can&apos;t:
               </p>
               <ul className="list-disc list-inside space-y-1 mt-2">
                 <li>Delete steps or transitions</li>
@@ -406,8 +409,8 @@ export default function WorkflowEditorPage() {
                 <li>Change the trigger</li>
               </ul>
               <p className="mt-2">
-                Renaming and repositioning steps still works. To change anything else, wait them out or cancel them from
-                the Executions tab.
+                Renaming and repositioning steps still works. To change anything else, wait{' '}
+                {oneActive ? 'it out or cancel it' : 'them out or cancel them'} from the Executions tab.
               </p>
             </AlertDescription>
           </Alert>

@@ -106,7 +106,7 @@ describe('WorkflowsPage', () => {
     const inProgress = (card: Element) =>
       [...card.querySelectorAll('strong')].find(s => s.nextElementSibling?.textContent === 'in progress')!;
     expect(inProgress(busy!).className).toContain('text-neutral-900');
-    expect(inProgress(quiet!).className).toContain('text-neutral-400');
+    expect(inProgress(quiet!).className).toContain('text-neutral-500');
   });
 
   it('shows the same figures in their own columns in the table', async () => {

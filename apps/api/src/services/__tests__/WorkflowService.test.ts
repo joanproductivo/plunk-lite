@@ -262,7 +262,8 @@ describe('WorkflowService', () => {
       await factories.createWorkflowExecution(a.id, c6.id, {status: WorkflowExecutionStatus.EXITED});
       await factories.createWorkflowExecution(b.id, c1.id, {status: WorkflowExecutionStatus.RUNNING});
 
-      // Another project's workflow stays out of the page, and so out of the counts query
+      // Another project's workflow stays out of the page. The counts are only read for the page's
+      // ids, so its runs cannot reach them either way
       const other = await factories.createProject();
       const otherWorkflow = await factories.createWorkflow({projectId: other.id});
       const otherContact = await factories.createContact({projectId: other.id});

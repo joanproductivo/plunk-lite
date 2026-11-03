@@ -138,10 +138,11 @@ function EditedAt({date, className = ''}: {date: Date | string; className?: stri
   );
 }
 
-// Greyed out at zero, so the workflows with contacts still in them stand out
+// Greyed out at zero, so the workflows with contacts still in them stand out. neutral-500 is the
+// lightest grey that keeps 4.5:1 contrast on white
 function InProgressCount({count}: {count: number}) {
   return (
-    <strong className={'text-sm font-semibold tabular-nums ' + (count > 0 ? 'text-neutral-900' : 'text-neutral-400')}>
+    <strong className={'text-sm font-semibold tabular-nums ' + (count > 0 ? 'text-neutral-900' : 'text-neutral-500')}>
       {count.toLocaleString()}
     </strong>
   );
@@ -612,21 +613,20 @@ export default function WorkflowsPage() {
                           <div className="mt-3">
                             <Trigger workflow={workflow} />
                           </div>
-                          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                          {/* Spaced, not divided: a divider would hang at the end of a line when they wrap */}
+                          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
                             <span>
                               <strong className="font-semibold text-neutral-900 tabular-nums">
                                 {workflow._count?.steps ?? 0}
                               </strong>
                               <span className="text-neutral-400 ml-1 text-xs">steps</span>
                             </span>
-                            <span className="h-3 w-px bg-neutral-200" aria-hidden="true" />
                             <span>
                               <strong className="font-semibold text-neutral-900 tabular-nums">
                                 {(workflow.contactCounts?.entered ?? 0).toLocaleString()}
                               </strong>
                               <span className="text-neutral-400 ml-1 text-xs">entered</span>
                             </span>
-                            <span className="h-3 w-px bg-neutral-200" aria-hidden="true" />
                             <span>
                               <InProgressCount count={workflow.contactCounts?.inProgress ?? 0} />
                               <span className="text-neutral-400 ml-1 text-xs">in progress</span>
