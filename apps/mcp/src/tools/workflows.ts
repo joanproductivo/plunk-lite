@@ -1540,6 +1540,8 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
         '',
         '**NOT for:** Stopping new contacts from entering — disable the workflow for that.',
         '',
+        '**Confirms** with the user first when `all` would also let contacts waiting at the end go.',
+        '',
         '**Returns:** The cancelled execution, or how many were cancelled and how many waiting at the',
         'end were let go (`released`).',
       ].join('\n'),
@@ -1550,7 +1552,7 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
       }),
       annotations: {readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true},
     },
-    async ({id, executionId, all}) =>
+    async ({id, executionId, all}, context) =>
       runTool(async () => {
         if (!executionId === !all) {
           return errorResult('Pass either executionId or all=true.');
@@ -1570,6 +1572,23 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
           });
 
           return jsonResult(`Cancelled execution ${executionId}.`, execution);
+        }
+
+        // Plunk Lite: cancel-all also lets the contacts waiting at the end leave, for good
+        const workflow = await getWorkflow(client, id);
+        const waiting = (workflow.parked ?? []).reduce((sum, group) => sum + group.count, 0);
+
+        if (waiting > 0) {
+          const pending = requireConfirmation(
+            context as {mcpReq?: {inputResponses?: unknown}},
+            'confirm_cancel_all_waiting',
+            `Cancel every active execution of "${workflow.name ?? id}"? The ${waiting} contact(s) waiting at its ` +
+              'end leave it too and will not get the steps added after the end.',
+          );
+
+          if (pending) {
+            return pending;
+          }
         }
 
         const result = await client.request<{cancelled: number; released?: number}>({

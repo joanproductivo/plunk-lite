@@ -19,6 +19,7 @@ const group = (overrides: Partial<ParkedGroup>): ParkedGroup => ({
   branch: null,
   branchName: null,
   branchExists: true,
+  fallbackBranchName: null,
   count: 3,
   unsubscribed: 0,
   canContinue: true,
@@ -81,7 +82,7 @@ describe('ParkedContactsBanner', () => {
     expect(text).toContain('3 contacts after "Welcome email": can continue now');
     expect(text).toContain('1 contact after "Plan?", "No" branch: add a step after it to continue');
     expect(text).toContain('2 contacts after "Tier", "Gold" branch: that branch no longer exists');
-    expect(text).toContain('1 contact after a deleted step: they move to the step before it the next time');
+    expect(text).toContain('1 contact after a deleted step: its step was deleted');
     expect(continueButton()?.textContent).toBe('Continue 3 contacts');
   });
 
@@ -123,5 +124,27 @@ describe('ParkedContactsBanner', () => {
     await vi.waitFor(() => expect(onContinued).toHaveBeenCalled());
     expect(network.fetch).toHaveBeenCalledWith('POST', '/workflows/wf/parked/continue');
     expect(toast.success).toHaveBeenCalledWith('3 contacts are continuing');
+    // One press at a time: no button until the rounds have moved them
+    expect(continueButton()).toBeUndefined();
+    expect(container.textContent).toContain('Continuing, 200 every 2 minutes');
+  });
+
+  it('says by which branch those on a removed branch go on', async () => {
+    await render({
+      parked: [
+        group({
+          stepName: 'Tier',
+          branch: 'a1b2c3d4',
+          branchName: 'a1b2c3d4',
+          branchExists: false,
+          fallbackBranchName: 'Default',
+          canContinue: false,
+        }),
+      ],
+    });
+
+    expect(container.textContent).toContain(
+      'that branch no longer exists, so they go by "Default"; connect it to continue',
+    );
   });
 });

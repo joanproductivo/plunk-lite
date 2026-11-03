@@ -46,7 +46,11 @@ export function createWorkflowWorker() {
         await WorkflowExecutionService.processStepExecution(executionId, stepId);
       } else if (type === 'continue-parked') {
         // Plunk Lite: a run waiting at the end of a workflow, let continue (it claims itself)
-        await WorkflowExecutionService.continueParked(executionId, {stepId, branch: job.data.branch ?? null});
+        await WorkflowExecutionService.continueParked(executionId, {
+          stepId,
+          branch: job.data.branch ?? null,
+          toStepId: job.data.toStepId ?? '',
+        });
       } else {
         // A step queued for after a delay, by jobs from before delays ended through delay-end:
         // ended through the delay the run waits on, if it still does

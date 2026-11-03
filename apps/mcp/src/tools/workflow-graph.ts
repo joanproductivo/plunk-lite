@@ -80,6 +80,7 @@ export interface ParkedGroup {
   branch: string | null;
   branchName: string | null;
   branchExists: boolean;
+  fallbackBranchName?: string | null;
   count: number;
   unsubscribed: number;
   canContinue: boolean;

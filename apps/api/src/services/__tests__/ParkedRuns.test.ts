@@ -2,6 +2,7 @@ import {StepExecutionStatus, WorkflowExecutionStatus, WorkflowStepType} from '@p
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {factories, getPrismaClient} from '../../../../../test/helpers';
+import {redis} from '../../database/redis';
 import {CONTINUE_PER_ROUND, CONTINUE_ROUND_INTERVAL_MS, ParkedRuns} from '../ParkedRuns';
 import {QueueService} from '../QueueService';
 import {WorkflowEntryService} from '../WorkflowEntryService';
@@ -76,10 +77,21 @@ async function createWorkflow({keep = true, enabled = true, allowReentry = false
 }
 
 const parkedRow = (executionId: string) => prisma.plunkLiteParkedRun.findUnique({where: {executionId}});
-/** Where a run waits now, as a round would pick it */
+/** Where a run waits now, and where that leads now, as a round would pick it */
 const parkedAt = async (executionId: string) => {
   const row = await parkedRow(executionId);
-  return {stepId: row?.stepId ?? 'none', branch: row?.branch ?? null};
+  const step =
+    row && (await prisma.workflowStep.findUnique({where: {id: row.stepId}, include: {outgoingTransitions: true}}));
+  return {
+    stepId: row?.stepId ?? 'none',
+    branch: row?.branch ?? null,
+    toStepId: (step && ParkedRuns.routeFrom(step, row.branch).toStepId) ?? 'none',
+  };
+};
+/** A round of a press, its press marked as the one under way (as pressing does) */
+const pressed = async <T extends {workflowId: string; pressId: string}>(data: T) => {
+  await redis.set(`plunk-lite:continue-parked:${data.workflowId}`, data.pressId);
+  return data;
 };
 /** The job a round queues for a run, picked where it waits now */
 const continueRun = async (executionId: string) =>
@@ -202,7 +214,7 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
       expect(round.targets).toEqual([{stepId: first, branch: null, toStepId: second}]);
       await ParkedRuns.continueRound(round);
       expect(QueueService.queueContinueParked).toHaveBeenCalledWith(
-        [{executionId, stepId: first, branch: null}],
+        [{executionId, stepId: first, branch: null, toStepId: second}],
         round.pressId,
       );
 
@@ -213,7 +225,7 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
       expect(await parkedRow(executionId)).toMatchObject({stepId: second, branch: null});
     });
 
-    it('follows the branch the condition took, and an unconditional transition from it', async () => {
+    it('follows the branch the condition took', async () => {
       const workflow = await createWorkflow();
       const condition = await workflow.add(workflow.triggerId, WorkflowStepType.CONDITION, {config: CONDITION});
       const executionId = await workflow.start();
@@ -363,15 +375,15 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
       await prisma.plunkLiteParkedRun.createMany({
         data: ids.map(executionId => ({executionId, workflowId: workflow.id, projectId, contactId, stepId: email})),
       });
-      const data = {
+      const data = await pressed({
         type: 'continue-parked-round' as const,
         projectId,
         workflowId: workflow.id,
         targets: [{stepId: email, branch: null, toStepId: next}],
         pressId: 'p',
         round: 0,
-      };
-      const picked = (executionId: string) => ({executionId, stepId: email, branch: null});
+      });
+      const picked = (executionId: string) => ({executionId, stepId: email, branch: null, toStepId: next});
 
       await ParkedRuns.continueRound(data);
 
@@ -386,7 +398,7 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
       expect(QueueService.queueContinueParkedRound).toHaveBeenCalledTimes(1);
 
       await prisma.workflow.update({where: {id: workflow.id}, data: {enabled: false}});
-      await ParkedRuns.continueRound(data);
+      await ParkedRuns.continueRound(await pressed(data));
       expect(QueueService.queueContinueParked).toHaveBeenCalledTimes(2);
     });
 
@@ -400,14 +412,16 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
       expect(await ParkedRuns.summary(workflow.id, (await WorkflowService.get(projectId, workflow.id)).steps)).toEqual(
         [],
       );
-      await ParkedRuns.continueRound({
-        type: 'continue-parked-round',
-        projectId,
-        workflowId: workflow.id,
-        targets: [{stepId: first, branch: null, toStepId: second}],
-        pressId: 'p',
-        round: 0,
-      });
+      await ParkedRuns.continueRound(
+        await pressed({
+          type: 'continue-parked-round',
+          projectId,
+          workflowId: workflow.id,
+          targets: [{stepId: first, branch: null, toStepId: second}],
+          pressId: 'p',
+          round: 0,
+        }),
+      );
 
       expect(await parkedRow(executionId)).toBeNull();
       expect(QueueService.queueContinueParked).not.toHaveBeenCalled();
@@ -431,7 +445,7 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
 
       // A step on their way that is not ready stops the press
       await workflow.add(after, SEND, {noTemplate: true});
-      await ParkedRuns.continueRound(round);
+      await ParkedRuns.continueRound(await pressed(round));
       expect(QueueService.queueContinueParked).not.toHaveBeenCalled();
       expect(await parkedRow(executionId)).toMatchObject({stepId: no});
     });
@@ -480,17 +494,147 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
       });
 
       const third = await workflow.add(first, SEND);
-      await ParkedRuns.continueRound({
-        type: 'continue-parked-round',
-        projectId,
-        workflowId: workflow.id,
-        targets: [{stepId: first, branch: null, toStepId: third}],
-        pressId: 'p',
-        round: 0,
-      });
+      await ParkedRuns.continueRound(
+        await pressed({
+          type: 'continue-parked-round',
+          projectId,
+          workflowId: workflow.id,
+          targets: [{stepId: first, branch: null, toStepId: third}],
+          pressId: 'p',
+          round: 0,
+        }),
+      );
 
       expect(await parkedRow(executionId)).toMatchObject({stepId: first});
-      expect(QueueService.queueContinueParked).toHaveBeenCalledWith([{executionId, stepId: first, branch: null}], 'p');
+      expect(QueueService.queueContinueParked).toHaveBeenCalledWith(
+        [{executionId, stepId: first, branch: null, toStepId: third}],
+        'p',
+      );
+    });
+
+    it('keeps waiting, instead of failing, when where it waits leads elsewhere by the time its job runs', async () => {
+      const workflow = await createWorkflow();
+      const first = await workflow.add(workflow.triggerId, SEND);
+      const executionId = await workflow.start();
+      const second = await workflow.add(first, SEND);
+      const at = await parkedAt(executionId);
+      expect(at.toStepId).toBe(second);
+
+      // Re-routed after the round picked it: to a step not ready yet
+      await prisma.workflowTransition.deleteMany({where: {fromStepId: first}});
+      await workflow.add(first, SEND, {noTemplate: true});
+      await WorkflowExecutionService.continueParked(executionId, at);
+
+      expect(await runStatus(executionId)).toBe(WorkflowExecutionStatus.COMPLETED);
+      expect(await parkedRow(executionId)).toMatchObject({stepId: first});
+      expect(await emails(executionId)).toBe(1);
+    });
+
+    it('pins each branch of a condition to where it went when pressed', async () => {
+      const workflow = await createWorkflow();
+      const condition = await workflow.add(workflow.triggerId, WorkflowStepType.CONDITION, {config: CONDITION});
+      const pro = await workflow.start(
+        (await factories.createContact({projectId, subscribed: true, data: {plan: 'pro'}})).id,
+      );
+      const free = await workflow.start();
+      expect(await parkedRow(pro)).toMatchObject({stepId: condition, branch: 'yes'});
+      expect(await parkedRow(free)).toMatchObject({stepId: condition, branch: 'no'});
+      // A transition anyone follows out of the condition (only through the API)
+      const anyone = await factories.createWorkflowStep({workflowId: workflow.id, type: SEND, templateId});
+      await prisma.workflowTransition.create({data: {fromStepId: condition, toStepId: anyone.id, priority: 1}});
+
+      await ParkedRuns.queueContinue(projectId, workflow.id);
+      const round = pressedRound();
+      expect(round.targets).toEqual(
+        expect.arrayContaining([
+          {stepId: condition, branch: 'yes', toStepId: anyone.id},
+          {stepId: condition, branch: 'no', toStepId: anyone.id},
+        ]),
+      );
+
+      // After the press, the yes branch gets a step of its own, ahead of the one anyone follows
+      const yes = await factories.createWorkflowStep({workflowId: workflow.id, type: SEND, templateId});
+      await prisma.workflowTransition.create({
+        data: {fromStepId: condition, toStepId: yes.id, condition: {branch: 'yes'}, priority: 0},
+      });
+      await prisma.workflowTransition.updateMany({where: {toStepId: anyone.id}, data: {priority: 2}});
+      await ParkedRuns.continueRound(round);
+
+      expect(QueueService.queueContinueParked).toHaveBeenCalledWith(
+        [{executionId: free, stepId: condition, branch: 'no', toStepId: anyone.id}],
+        round.pressId,
+      );
+    });
+
+    it('lets those on a branch the condition no longer has go on by its default', async () => {
+      const workflow = await createWorkflow();
+      const multi = (branches: {id: string; name: string; value: string}[]) => ({
+        mode: 'multi',
+        field: 'data.plan',
+        branches: branches.map(b => ({...b, operator: 'equals'})),
+      });
+      const condition = await workflow.add(workflow.triggerId, WorkflowStepType.CONDITION, {
+        config: multi([{id: 'b1', name: 'Pro', value: 'pro'}]),
+      });
+      const executionId = await workflow.start(
+        (await factories.createContact({projectId, subscribed: true, data: {plan: 'pro'}})).id,
+      );
+      expect(await parkedRow(executionId)).toMatchObject({stepId: condition, branch: 'b1'});
+
+      await prisma.workflowStep.update({
+        where: {id: condition},
+        data: {config: multi([{id: 'b2', name: 'Gold', value: 'gold'}])},
+      });
+      const fallback = await workflow.add(condition, SEND, {branch: 'default'});
+      const [group] = await ParkedRuns.summary(workflow.id, (await WorkflowService.get(projectId, workflow.id)).steps);
+      expect(group).toMatchObject({
+        branch: 'b1',
+        branchExists: false,
+        fallbackBranchName: 'Default',
+        canContinue: true,
+      });
+
+      await continueRun(executionId);
+
+      expect(await emails(executionId)).toBe(1);
+      expect(await parkedRow(executionId)).toMatchObject({stepId: fallback});
+    });
+
+    it('lets one press run at a time', async () => {
+      const workflow = await createWorkflow();
+      const first = await workflow.add(workflow.triggerId, SEND);
+      await workflow.start();
+      await workflow.add(first, SEND);
+
+      await ParkedRuns.queueContinue(projectId, workflow.id);
+      await expect(ParkedRuns.queueContinue(projectId, workflow.id)).rejects.toMatchObject({code: 409});
+
+      // Once its rounds are done, pressing works again
+      await ParkedRuns.continueRound(pressedRound());
+      await expect(ParkedRuns.queueContinue(projectId, workflow.id)).resolves.toMatchObject({continuable: 1});
+    });
+
+    it('never leaves a contact running twice when it enters again as it is let continue', async () => {
+      const workflow = await createWorkflow({allowReentry: true});
+      const first = await workflow.add(workflow.triggerId, SEND);
+      const executionId = await workflow.start();
+      await workflow.add(first, SEND);
+      const at = await parkedAt(executionId);
+
+      const [, entry] = await Promise.all([
+        WorkflowExecutionService.continueParked(executionId, at),
+        WorkflowEntryService.enter({id: workflow.id, allowReentry: true}, contactId, workflow.triggerId, undefined),
+      ]);
+
+      if (entry.entered) {
+        // The entry came first: the waiting run was let go, and did not continue
+        expect(await emails(executionId)).toBe(1);
+        expect(await parkedRow(executionId)).toBeNull();
+      } else {
+        // The continuing run came first, so the entry found it running
+        expect(entry.refusal).toEqual({reason: 'in-progress'});
+        expect(await emails(executionId)).toBe(2);
+      }
     });
 
     it('does not park a run whose contact entered the workflow again since', async () => {
@@ -604,6 +748,18 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
       const {executions} = await WorkflowService.listExecutions(projectId, workflow.id);
       expect(executions).toEqual([expect.objectContaining({id: executionId, parked: true})]);
       expect(await WorkflowService.getExecution(projectId, workflow.id, executionId)).toMatchObject({parked: true});
+
+      // With re-entry, an earlier run still waiting on a delay and this one waiting at the end: once
+      await prisma.workflowExecution.create({
+        data: {
+          workflowId: workflow.id,
+          contactId,
+          status: WorkflowExecutionStatus.WAITING,
+          startedAt: new Date(Date.now() - 60_000),
+        },
+      });
+      const again = await WorkflowService.list(projectId, 1, 20, undefined, {field: 'createdAt', direction: 'desc'});
+      expect(again.data.find(w => w.id === workflow.id)).toMatchObject({contactCounts: {entered: 1, inProgress: 1}});
     });
 
     it('copies the switch with the workflow', async () => {

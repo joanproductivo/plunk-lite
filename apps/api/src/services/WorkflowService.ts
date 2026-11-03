@@ -825,8 +825,11 @@ export class WorkflowService {
         },
       });
     }, LONG_TRANSACTION);
-    // Plunk Lite: a run parked at a step that went while the delete ran waits before it too
-    await ParkedRuns.parkBeforeMissingSteps(workflowId);
+    // Plunk Lite: a run parked at a step that went while the delete ran waits before it too. The
+    // steps are gone already: failing here must not fail the delete
+    await ParkedRuns.parkBeforeMissingSteps(workflowId).catch(error =>
+      signale.warn(`[WORKFLOW] Could not park again the runs waiting at deleted steps of ${workflowId}:`, error),
+    );
   }
 
   /**
@@ -894,8 +897,11 @@ export class WorkflowService {
       await ParkedRuns.parkBeforeDeletedSteps(tx, workflowId, [stepId]);
       await tx.workflowStep.delete({where: {id: stepId}});
     }, LONG_TRANSACTION);
-    // Plunk Lite: a run parked at a step that went while the delete ran waits before it too
-    await ParkedRuns.parkBeforeMissingSteps(workflowId);
+    // Plunk Lite: a run parked at a step that went while the delete ran waits before it too. The
+    // steps are gone already: failing here must not fail the delete
+    await ParkedRuns.parkBeforeMissingSteps(workflowId).catch(error =>
+      signale.warn(`[WORKFLOW] Could not park again the runs waiting at deleted steps of ${workflowId}:`, error),
+    );
   }
 
   /**

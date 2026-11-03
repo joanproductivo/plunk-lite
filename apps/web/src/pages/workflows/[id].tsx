@@ -86,6 +86,8 @@ export default function WorkflowEditorPage() {
 
   const {data: workflow, mutate} = useSWR<WorkflowWithDetails>(id ? `/workflows/${id}` : null, {
     revalidateOnFocus: false,
+    // Plunk Lite: while contacts that can continue wait at the end, so the banner follows the rounds
+    refreshInterval: latest => (latest?.parked?.some(group => group.canContinue) ? 15_000 : 0),
   });
 
   // Always fetch a summary of active executions to show warnings (regardless of enabled status)

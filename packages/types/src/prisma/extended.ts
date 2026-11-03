@@ -53,6 +53,11 @@ export interface ParkedGroup {
   branchName: string | null;
   /** False when the step or the branch is gone: nothing can be connected to it */
   branchExists: boolean;
+  /**
+   * When their branch is gone from the condition: the one they continue by instead, as a contact
+   * matching none of its branches would ("Default", or "No" for a yes/no condition)
+   */
+  fallbackBranchName: string | null;
   count: number;
   /** Of them, unsubscribed: a marketing email skips them */
   unsubscribed: number;

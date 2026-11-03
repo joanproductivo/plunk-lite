@@ -117,10 +117,16 @@ export class Workflows {
 
     const workflow = await WorkflowService.get(auth.projectId!, workflowId);
     // Plunk Lite: whether it keeps its contacts until an Exit step, and who waits at its end
-    const [keepUntilExit, parked] = await Promise.all([
+    const [keepUntilExit, summary] = await Promise.all([
       ParkedRuns.keepsUntilExit(workflowId),
       ParkedRuns.summary(workflowId, workflow.steps),
     ]);
+    // Contacts left at a step deleted as they were parked wait before it: rare, and fixed here once
+    let parked = summary;
+    if (summary.some(group => group.stepName === null)) {
+      await ParkedRuns.parkBeforeMissingSteps(workflowId);
+      parked = await ParkedRuns.summary(workflowId, workflow.steps);
+    }
 
     return res.status(200).json({...workflow, keepUntilExit, parked, continuePace: ParkedRuns.pace()});
   }

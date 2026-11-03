@@ -24,7 +24,7 @@ export function pickTransition<T extends {condition: Prisma.JsonValue}>(
 }
 
 /** The branch a transition belongs to (one out of a CONDITION step), if any */
-export function transitionBranch(condition: Prisma.JsonValue): string | null {
+function transitionBranch(condition: Prisma.JsonValue): string | null {
   return condition && typeof condition === 'object' && !Array.isArray(condition) && typeof condition.branch === 'string'
     ? condition.branch
     : null;

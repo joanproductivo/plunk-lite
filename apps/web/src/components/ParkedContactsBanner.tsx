@@ -31,7 +31,10 @@ function outlook(group: ParkedGroup): string {
     return ': can continue now';
   }
   if (!group.stepName) {
-    return ': they move to the step before it the next time contacts continue';
+    return ': its step was deleted';
+  }
+  if (!group.branchExists && group.fallbackBranchName) {
+    return `: that branch no longer exists, so they go by "${group.fallbackBranchName}"; connect it to continue`;
   }
   return group.branchExists ? ': add a step after it to continue' : ': that branch no longer exists';
 }
@@ -49,11 +52,15 @@ export function ParkedContactsBanner({
   onContinued,
 }: ParkedContactsBannerProps) {
   const [confirming, setConfirming] = useState(false);
+  // How many could continue when it was pressed: until that changes (the rounds took them), the
+  // press is under way, and one press runs at a time
+  const [pressedAt, setPressedAt] = useState<number | null>(null);
 
   const total = parked.reduce((sum, group) => sum + group.count, 0);
   const ready = parked.filter(group => group.canContinue);
   const continuable = ready.reduce((sum, group) => sum + group.count, 0);
   const unsubscribed = ready.reduce((sum, group) => sum + group.unsubscribed, 0);
+  const continuing = pressedAt === continuable;
 
   if (total === 0) {
     return null;
@@ -89,6 +96,7 @@ export function ParkedContactsBanner({
           : `${contacts(result.continuable)} ${result.continuable === 1 ? 'is' : 'are'} continuing`,
       );
       setConfirming(false);
+      setPressedAt(continuable);
       onContinued();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Couldn’t let them continue. Try again.');
@@ -111,7 +119,12 @@ export function ParkedContactsBanner({
           ))}
         </ul>
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          {continuable > 0 && (
+          {continuable > 0 && continuing && (
+            <span className="text-sm text-neutral-500">
+              Continuing, {pace.perRound} every {pace.everyMinutes} minutes…
+            </span>
+          )}
+          {continuable > 0 && !continuing && (
             <Button size="sm" onClick={handleContinueClick} disabled={!enabled}>
               <Play className="h-3.5 w-3.5" />
               Continue {contacts(continuable)}
@@ -133,8 +146,8 @@ export function ParkedContactsBanner({
         title={`Continue ${contacts(continuable)}?`}
         description={
           <>
-            They go through the new steps now, {pace.perRound} every {pace.everyMinutes} minutes. Emails go out right
-            away.
+            They go through the new steps now, {pace.perRound} every {pace.everyMinutes} minutes, and any email among
+            them goes out as they reach it.
             {unsubscribed > 0 &&
               ` ${unsubscribed} of them ${unsubscribed === 1 ? 'is' : 'are'} unsubscribed: marketing emails skip them.`}
           </>

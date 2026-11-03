@@ -15,6 +15,8 @@ export interface WorkflowStepJobData {
   stepExecutionId?: string; // For timeout and webhook-retry jobs, reference to the step execution
   /** Plunk Lite: for continue-parked, the branch the run waited on at `stepId` when it was picked */
   branch?: string | null;
+  /** Plunk Lite: for continue-parked, the step it was let continue to: it only goes there */
+  toStepId?: string;
 }
 
 /**
@@ -23,7 +25,7 @@ export interface WorkflowStepJobData {
  */
 export interface ContinueParkedTarget {
   stepId: string;
-  /** The branch they wait on, or null for every branch (the step has a transition anyone follows) */
+  /** The branch they wait on (a condition's), or null */
   branch: string | null;
   toStepId: string;
 }

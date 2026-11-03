@@ -1707,10 +1707,14 @@ export class WorkflowExecutionService {
   /**
    * Plunk Lite: let a run that waited at the end of its workflow continue into the steps connected
    * after where it waited, from that step and on the branch it took then (see ParkedRuns), if it
-   * still waits where it was picked (`at`). A job per run; claiming it makes a repeated job, or one
-   * for a run that moved or left meanwhile, do nothing.
+   * still waits where it was picked (`at`) and that still leads to the step it was let continue to.
+   * A job per run; claiming it makes a repeated job, or one for a run that moved or left meanwhile,
+   * do nothing, and a route changed since it was picked leaves it waiting.
    */
-  public static async continueParked(executionId: string, at: {stepId: string; branch: string | null}): Promise<void> {
+  public static async continueParked(
+    executionId: string,
+    at: {stepId: string; branch: string | null; toStepId: string},
+  ): Promise<void> {
     const claimed = await ParkedRuns.claim(executionId, at);
     if (!claimed) {
       return;
@@ -1739,8 +1743,16 @@ export class WorkflowExecutionService {
         return;
       }
 
+      // Only to the step whoever let it continue saw: a route changed since leaves it waiting
+      const route = ParkedRuns.routeFrom(step, claimed.branch);
+      if (route.toStepId !== at.toStepId) {
+        signale.info(`[WORKFLOW] Execution ${executionId} keeps waiting: ${step.name} leads elsewhere now`);
+        await ParkedRuns.unclaim(executionId, claimed);
+        return;
+      }
+
       signale.info(`[WORKFLOW] Execution ${executionId} continues from ${step.name}, where it waited`);
-      await this.processNextSteps(execution, step, claimed.branch ? {branch: claimed.branch} : {});
+      await this.processNextSteps(execution, step, route.branch ? {branch: route.branch} : {});
     } catch (error) {
       await this.failResumedRun(execution, error, 'Continuing from the end of the workflow failed');
     }

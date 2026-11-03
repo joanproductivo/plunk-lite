@@ -6,10 +6,11 @@ import {randomUUID} from 'node:crypto';
 import signale from 'signale';
 
 import {prisma} from '../database/prisma.js';
+import {redis} from '../database/redis.js';
 import {HttpException} from '../exceptions/index.js';
 import {POOL_WAIT_TRANSACTION} from '../utils/database.js';
 import {lockEntry} from '../utils/workflowEntryLock.js';
-import {pickTransition, transitionBranch} from '../utils/workflowTransitions.js';
+import {pickTransition} from '../utils/workflowTransitions.js';
 
 import {QueueService} from './QueueService.js';
 
@@ -34,10 +35,17 @@ export const CONTINUE_ROUND_INTERVAL_MS = 2 * 60_000;
 
 const COMPLETED = Prisma.sql`${WorkflowExecutionStatus.COMPLETED}::"WorkflowExecutionStatus"`;
 
+/**
+ * The press of "Continue" whose rounds are running for a workflow: one at a time, so that pressing
+ * again does not double the pace (each round renews it; it lapses if the rounds stop unseen)
+ */
+const PRESS_KEY = (workflowId: string) => `plunk-lite:continue-parked:${workflowId}`;
+const PRESS_TTL_SECONDS = (3 * CONTINUE_ROUND_INTERVAL_MS) / 1000;
+
 /** Rows `p` whose workflow still keeps its contacts until an Exit step */
 const KEPT = Prisma.sql`JOIN "plunk_lite_workflow_settings" ks ON ks."workflowId" = p."workflowId" AND ks."keepUntilExit"`;
 
-type StepWithTransitions = Pick<WorkflowStep, 'id' | 'name' | 'type' | 'config' | 'templateId'> & {
+export type StepWithTransitions = Pick<WorkflowStep, 'id' | 'name' | 'type' | 'config' | 'templateId'> & {
   outgoingTransitions: Array<{id: string; condition: Prisma.JsonValue; priority: number; toStepId: string}>;
 };
 
@@ -54,16 +62,38 @@ interface ParkedAt {
   branch: string | null;
 }
 
-/** The branches a condition step has now, with the names the builder shows */
-function conditionBranches(config: Prisma.JsonValue): Map<string, string> {
+/** The branches of a condition step now, with their names, and the one a contact matching none takes */
+function conditionBranches(config: Prisma.JsonValue): {names: Map<string, string>; fallback: string} {
   const parsed = WorkflowStepConfigSchemas.condition.safeParse(config);
   if (parsed.success && 'mode' in parsed.data && parsed.data.mode === 'multi') {
-    return new Map([...parsed.data.branches.map(branch => [branch.id, branch.name] as const), ['default', 'Default']]);
+    return {
+      names: new Map([
+        ...parsed.data.branches.map(branch => [branch.id, branch.name] as const),
+        ['default', 'Default'],
+      ]),
+      fallback: 'default',
+    };
   }
-  return new Map([
-    ['yes', 'Yes'],
-    ['no', 'No'],
-  ]);
+  return {
+    names: new Map([
+      ['yes', 'Yes'],
+      ['no', 'No'],
+    ]),
+    fallback: 'no',
+  };
+}
+
+/**
+ * The branch a run parked at `step` on `branch` goes on by: its own, or -- when the condition no
+ * longer has it (removed, or the condition changed between yes/no and multi-branch) -- the one a
+ * contact matching none of its branches takes now
+ */
+function effectiveBranch(step: Pick<WorkflowStep, 'type' | 'config'>, branch: string | null): string | null {
+  if (branch === null || step.type !== 'CONDITION') {
+    return branch;
+  }
+  const {names, fallback} = conditionBranches(step.config);
+  return names.has(branch) ? branch : fallback;
 }
 
 /**
@@ -72,7 +102,8 @@ function conditionBranches(config: Prisma.JsonValue): Map<string, string> {
  */
 function nextStepId(step: StepWithTransitions, branch: string | null): string | undefined {
   const ordered = [...step.outgoingTransitions].sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
-  return pickTransition(ordered, branch ? {branch} : {})?.toStepId;
+  const goesBy = effectiveBranch(step, branch);
+  return pickTransition(ordered, goesBy ? {branch: goesBy} : {})?.toStepId;
 }
 
 /** What the engine would reject in a step's configuration, if anything */
@@ -96,33 +127,10 @@ function stepProblem(step: StepWithTransitions): string | null {
   return null;
 }
 
-/** Where the runs parked in a workflow can continue now, and the step each goes to */
-function continuableTargets(steps: StepWithTransitions[]): ContinueParkedTarget[] {
-  const targets: ContinueParkedTarget[] = [];
-
-  for (const step of steps) {
-    const anyBranch = nextStepId(step, null);
-    if (anyBranch) {
-      targets.push({stepId: step.id, branch: null, toStepId: anyBranch});
-      continue;
-    }
-    for (const {condition} of step.outgoingTransitions) {
-      const branch = transitionBranch(condition);
-      const toStepId = branch ? nextStepId(step, branch) : undefined;
-      if (branch && toStepId) {
-        targets.push({stepId: step.id, branch, toStepId});
-      }
-    }
-  }
-
-  return targets;
-}
-
 /** What is wrong with any step a contact let continue to `targets` could run, up to the end */
 function routeProblems(steps: StepWithTransitions[], targets: ContinueParkedTarget[]): string[] {
   const byId = new Map(steps.map(step => [step.id, step]));
-  // From the step they wait at, every step after it: whichever branch each waits on
-  const queue = targets.flatMap(target => byId.get(target.stepId)?.outgoingTransitions.map(t => t.toStepId) ?? []);
+  const queue = targets.map(target => target.toStepId);
   const seen = new Set<string>();
   const problems = new Set<string>();
 
@@ -144,18 +152,11 @@ function routeProblems(steps: StepWithTransitions[], targets: ContinueParkedTarg
 
 /** A SQL condition on parked rows `p`: waiting at one of `targets` */
 function targetsWhere(targets: ContinueParkedTarget[]): Prisma.Sql {
-  const anyBranch = targets.filter(t => t.branch === null).map(t => t.stepId);
-  const byBranch = targets.filter(t => t.branch !== null);
-  const conditions: Prisma.Sql[] = [];
-  if (anyBranch.length > 0) {
-    conditions.push(Prisma.sql`p."stepId" IN (${Prisma.join(anyBranch)})`);
+  if (targets.length === 0) {
+    return Prisma.sql`FALSE`;
   }
-  if (byBranch.length > 0) {
-    conditions.push(
-      Prisma.sql`(p."stepId", p."branch") IN (${Prisma.join(byBranch.map(t => Prisma.sql`(${t.stepId}, ${t.branch})`))})`,
-    );
-  }
-  return conditions.length > 0 ? Prisma.sql`(${Prisma.join(conditions, ' OR ')})` : Prisma.sql`FALSE`;
+  const each = targets.map(t => Prisma.sql`(p."stepId" = ${t.stepId} AND p."branch" IS NOT DISTINCT FROM ${t.branch})`);
+  return Prisma.sql`(${Prisma.join(each, ' OR ')})`;
 }
 
 /**
@@ -214,6 +215,11 @@ function loadWorkflow(projectId: string, workflowId: string) {
 }
 
 export const ParkedRuns = {
+  /** The step a run parked at `step` on `branch` goes to now, and the branch it goes by */
+  routeFrom(step: StepWithTransitions, branch: string | null): {toStepId: string | undefined; branch: string | null} {
+    return {toStepId: nextStepId(step, branch), branch: effectiveBranch(step, branch)};
+  },
+
   /** Contacts let continue per round, and minutes between rounds, for whoever presses "Continue" */
   pace(): {perRound: number; everyMinutes: number} {
     return {perRound: CONTINUE_PER_ROUND, everyMinutes: CONTINUE_ROUND_INTERVAL_MS / 60_000};
@@ -423,13 +429,16 @@ export const ParkedRuns = {
 
     return groups.map(group => {
       const step = steps.find(s => s.id === group.stepId);
-      const branches = step?.type === 'CONDITION' ? conditionBranches(step.config) : undefined;
+      const branches = step?.type === 'CONDITION' ? conditionBranches(step.config).names : undefined;
+      const branchExists =
+        step !== undefined && (group.branch === null || branches === undefined || branches.has(group.branch));
+      const goesBy = step && !branchExists ? effectiveBranch(step, group.branch) : null;
       return {
         ...group,
         stepName: step?.name ?? null,
         branchName: group.branch === null ? null : (branches?.get(group.branch) ?? group.branch),
-        branchExists:
-          step !== undefined && (group.branch === null || branches === undefined || branches.has(group.branch)),
+        branchExists,
+        fallbackBranchName: goesBy ? (branches?.get(goesBy) ?? goesBy) : null,
         canContinue: step !== undefined && nextStepId(step, group.branch) !== undefined,
       };
     });
@@ -457,9 +466,12 @@ export const ParkedRuns = {
     }
 
     const groups = (await this.summary(workflowId, workflow.steps)).filter(group => group.canContinue);
-    const targets = continuableTargets(workflow.steps).filter(target =>
-      groups.some(g => g.stepId === target.stepId && (target.branch === null || g.branch === target.branch)),
-    );
+    // Each group where it waits, on its own branch, to the step it goes to now
+    const targets = groups.flatMap(group => {
+      const step = workflow.steps.find(s => s.id === group.stepId);
+      const toStepId = step && nextStepId(step, group.branch);
+      return toStepId ? [{stepId: group.stepId, branch: group.branch, toStepId}] : [];
+    });
     const problems = routeProblems(workflow.steps, targets);
     if (problems.length > 0) {
       throw new HttpException(422, `Finish the steps they would go through first: ${problems.join('; ')}`);
@@ -467,14 +479,23 @@ export const ParkedRuns = {
 
     const continuable = groups.reduce((sum, group) => sum + group.count, 0);
     if (continuable > 0) {
-      await QueueService.queueContinueParkedRound({
-        type: 'continue-parked-round',
-        projectId,
-        workflowId,
-        targets,
-        pressId: randomUUID(),
-        round: 0,
-      });
+      const pressId = randomUUID();
+      if ((await redis.set(PRESS_KEY(workflowId), pressId, 'EX', PRESS_TTL_SECONDS, 'NX')) !== 'OK') {
+        throw new HttpException(409, 'Its waiting contacts are already continuing');
+      }
+      try {
+        await QueueService.queueContinueParkedRound({
+          type: 'continue-parked-round',
+          projectId,
+          workflowId,
+          targets,
+          pressId,
+          round: 0,
+        });
+      } catch (error) {
+        await redis.del(PRESS_KEY(workflowId)).catch(() => undefined);
+        throw error;
+      }
     }
 
     return {continuable, ...this.pace()};
@@ -488,10 +509,25 @@ export const ParkedRuns = {
    * brake -- or a step on their way is no longer fully configured. The rest keep waiting.
    */
   async continueRound(data: ContinueParkedRoundJobData): Promise<void> {
+    // Another press took over once this one lapsed: its rounds go on, these stop
+    if ((await redis.get(PRESS_KEY(data.workflowId))) !== data.pressId) {
+      signale.info(`[WORKFLOW] A later press lets the contacts of workflow ${data.workflowId} continue`);
+      return;
+    }
+    const more = await this.runRound(data);
+    if (more) {
+      await redis.expire(PRESS_KEY(data.workflowId), PRESS_TTL_SECONDS);
+    } else if ((await redis.get(PRESS_KEY(data.workflowId))) === data.pressId) {
+      await redis.del(PRESS_KEY(data.workflowId));
+    }
+  },
+
+  /** A round of `continueRound`. Returns whether another round follows */
+  async runRound(data: ContinueParkedRoundJobData): Promise<boolean> {
     const workflow = await loadWorkflow(data.projectId, data.workflowId);
     if (!workflow?.enabled || workflow.project.disabled) {
       signale.info(`[WORKFLOW] Not letting the contacts of workflow ${data.workflowId} continue: it is off or gone`);
-      return;
+      return false;
     }
 
     if (data.round === 0) {
@@ -515,7 +551,7 @@ export const ParkedRuns = {
         `[WORKFLOW] Stopped letting the contacts of workflow ${data.workflowId} continue: ` +
           (problems.length > 0 ? problems.join('; ') : 'where they wait leads elsewhere now'),
       );
-      return;
+      return false;
     }
 
     const rows = await prisma.$queryRaw<{executionId: string; stepId: string; branch: string | null}[]>`
@@ -530,18 +566,26 @@ export const ParkedRuns = {
       LIMIT ${CONTINUE_PER_ROUND}
     `;
     if (rows.length === 0) {
-      return;
+      return false;
     }
 
-    await QueueService.queueContinueParked(rows, data.pressId);
+    await QueueService.queueContinueParked(
+      rows.map(row => ({
+        ...row,
+        toStepId: targets.find(t => t.stepId === row.stepId && t.branch === row.branch)!.toStepId,
+      })),
+      data.pressId,
+    );
     signale.info(`[WORKFLOW] Letting ${rows.length} waiting contact(s) of workflow ${data.workflowId} continue`);
 
-    if (rows.length === CONTINUE_PER_ROUND) {
-      await QueueService.queueContinueParkedRound(
-        {...data, targets, after: rows[rows.length - 1]!.executionId, round: data.round + 1},
-        CONTINUE_ROUND_INTERVAL_MS,
-      );
+    if (rows.length < CONTINUE_PER_ROUND) {
+      return false;
     }
+    await QueueService.queueContinueParkedRound(
+      {...data, targets, after: rows[rows.length - 1]!.executionId, round: data.round + 1},
+      CONTINUE_ROUND_INTERVAL_MS,
+    );
+    return true;
   },
 
   /** Which of these runs are parked */
@@ -556,7 +600,10 @@ export const ParkedRuns = {
     return new Set(rows.map(row => row.executionId));
   },
 
-  /** Distinct contacts waiting at the end of each of these workflows */
+  /**
+   * Distinct contacts waiting at the end of each of these workflows, but for those also in progress
+   * there (with re-entry, an earlier run can still wait on a delay): counted once, with the active
+   */
   async contactCounts(workflowIds: string[]): Promise<Map<string, number>> {
     if (workflowIds.length === 0) {
       return new Map();
@@ -567,6 +614,15 @@ export const ParkedRuns = {
       ${KEPT}
       JOIN "workflow_executions" e ON e."id" = p."executionId" AND e."status" = ${COMPLETED}
       WHERE p."workflowId" IN (${Prisma.join(workflowIds)})
+        AND NOT EXISTS (
+          SELECT 1 FROM "workflow_executions" a
+          WHERE a."workflowId" = p."workflowId" AND a."contactId" = p."contactId"
+            AND a."status" IN (${Prisma.join(
+              [WorkflowExecutionStatus.RUNNING, WorkflowExecutionStatus.WAITING].map(
+                status => Prisma.sql`${status}::"WorkflowExecutionStatus"`,
+              ),
+            )})
+        )
       GROUP BY p."workflowId"
     `;
     return new Map(rows.map(row => [row.workflowId, row.parked]));
