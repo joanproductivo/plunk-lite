@@ -73,11 +73,26 @@ export interface WorkflowStep {
   incomingTransitions?: WorkflowTransition[];
 }
 
+/** Plunk Lite: contacts waiting at one step (and branch) at the end of a workflow */
+export interface ParkedGroup {
+  stepId: string;
+  stepName: string | null;
+  branch: string | null;
+  branchExists: boolean;
+  count: number;
+  unsubscribed: number;
+  canContinue: boolean;
+}
+
 export interface Workflow {
   id: string;
   name?: string;
   enabled?: boolean;
   allowReentry?: boolean;
+  /** Plunk Lite: contacts who reach the end without an Exit step wait there for new steps */
+  keepUntilExit?: boolean;
+  /** Plunk Lite: who waits where at the end of the workflow */
+  parked?: ParkedGroup[];
   triggerConfig?: {eventName?: string} | null;
   steps?: WorkflowStep[];
 }
