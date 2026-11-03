@@ -232,6 +232,18 @@ describe('S3Service', () => {
       expect(truncated).toBe(false);
     });
 
+    it('leaves out the social icons drawn for the brand', async () => {
+      const S3Service = await loadS3Service('plunk');
+      listReplies.push({
+        Contents: [object(1000, 'plunk-social-instagram-circle-111827'), object(2000, 'photo'), object(3000)],
+        IsTruncated: false,
+      });
+
+      const {uploads} = await S3Service.listUploads('image', 'project-1');
+
+      expect(uploads.map(image => image.name)).toEqual([null, 'photo']);
+    });
+
     it("lists files from their own folder, apart from the project's images", async () => {
       const S3Service = await loadS3Service('plunk');
       listReplies.push({Contents: [{Key: 'plunk/files/project-1/1000-0123456789abcdef-guide.pdf', Size: 5}]});

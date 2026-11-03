@@ -6,6 +6,7 @@
 
 import {type ButtonStyle, normalizeHexColor, toButtonStyle} from './emailButton.js';
 import {EMAIL_FONTS, type EmailFont} from './emailFonts.js';
+import {type SocialSettings, toSocialSettings} from './emailSocial.js';
 
 export interface EmailBrand {
   /** null keeps the email's own font (EMAIL_FONT_FAMILY). */
@@ -26,6 +27,8 @@ export interface EmailBrand {
 /** The project's brand: what new emails are written in, and what new buttons look like. */
 export interface ProjectBrand extends EmailBrand {
   button: ButtonStyle;
+  /** The project's networks, which the social links block places in an email. */
+  social: SocialSettings;
 }
 
 /** The look of emails before brands: an email without one is sent exactly as it always was. */
@@ -73,7 +76,7 @@ export function toEmailBrand(value: unknown): EmailBrand {
 
 export function toProjectBrand(value: unknown): ProjectBrand {
   const data = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
-  return {...toEmailBrand(data), button: toButtonStyle(data.button)};
+  return {...toEmailBrand(data), button: toButtonStyle(data.button), social: toSocialSettings(data.social)};
 }
 
 /** Whether an email in `brand` is framed: drawn on a background, or in a column of its own width. */

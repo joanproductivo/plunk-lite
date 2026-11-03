@@ -135,6 +135,12 @@ const SLASH_ITEMS: SlashItem[] = [
     run: block('horizontalRule'),
   },
   {label: 'Spacer', aliases: ['space', 'gap'], offered: takesBlocks, run: block('spacer')},
+  {
+    label: 'Social links',
+    aliases: ['social', 'networks', 'instagram', 'follow'],
+    offered: takesBlocks,
+    run: requestsBlock('social'),
+  },
   // Writing a trigger opens its own menu, as if typed
   {
     label: 'Variable',

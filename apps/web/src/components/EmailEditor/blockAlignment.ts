@@ -1,5 +1,6 @@
 /**
- * Alignment for blocks that sit alone in a paragraph: images and buttons. An aligned block is
+ * Alignment for blocks that sit alone in a paragraph, images and buttons, or are one, social links
+ * (see EmailSocial). An aligned block is
  * wrapped in <p style="text-align: …">, which is what every email client, classic Outlook for
  * Windows included, honours. Left is how such a block renders anyway, so it is stored as no
  * alignment (see EmailTextAlign).

@@ -97,6 +97,7 @@ describe('slashItems', () => {
       'Box',
       'Divider',
       'Spacer',
+      'Social links',
       'Variable',
       'Show or hide content',
     ]);
@@ -217,8 +218,9 @@ describe('SlashCommand', () => {
 
     await pick('button');
     await pick('image');
+    await pick('social');
 
-    expect(asked.mock.calls.map(([event]) => event.type)).toEqual(['button', 'image']);
+    expect(asked.mock.calls.map(([event]) => event.type)).toEqual(['button', 'image', 'social']);
     expect(editor.getHTML()).toBe('<p></p>');
   });
 

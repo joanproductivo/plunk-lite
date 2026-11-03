@@ -2,12 +2,13 @@ import {TextAlign} from '@tiptap/extension-text-align';
 
 import {parseBlockAlignment} from './blockAlignment';
 
-// Blocks aligned through the paragraph that wraps them (see blockAlignment), not their own style.
-const BLOCK_TYPES = ['image', 'button'];
+// Blocks aligned through the paragraph that wraps them (see blockAlignment), not their own style;
+// social links are that paragraph themselves.
+const BLOCK_TYPES = ['image', 'button', 'social'];
 
 /**
- * TextAlign as the email editor uses it. Images and buttons take part too (see ResizableImage
- * and EmailButton), so the alignment buttons and shortcuts align a selected block, or every
+ * TextAlign as the email editor uses it. Images, buttons and social links take part too (see
+ * ResizableImage, EmailButton and EmailSocial), so the alignment buttons and shortcuts align a selected block, or every
  * block in a selection. A block only keeps centre or right: left is how it renders anyway, so it
  * is stored as no alignment, and justify is not applied to it at all — otherwise justifying a
  * selection would silently pull every centred block in it back to the left.

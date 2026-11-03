@@ -78,7 +78,17 @@ describe('detectCustomHtmlPatterns', () => {
     });
 
     it('returns true for @media query inside a style block', () => {
-      expect(detectCustomHtmlPatterns('@media (max-width: 600px) { ... }')).toBe(true);
+      expect(detectCustomHtmlPatterns('<style>@media (max-width: 600px) { p { margin: 0; } }</style>')).toBe(true);
+    });
+
+    it('returns true for @media in a style attribute (Plunk Lite)', () => {
+      expect(detectCustomHtmlPatterns('<p style="color: red; @media (x) {}">x</p>')).toBe(true);
+      expect(detectCustomHtmlPatterns("<p style='@media x'>x</p>")).toBe(true);
+    });
+
+    it('returns false for @media in a link or the text (Plunk Lite)', () => {
+      expect(detectCustomHtmlPatterns('<p><a href="https://www.tiktok.com/@mediamarkt">TikTok</a></p>')).toBe(false);
+      expect(detectCustomHtmlPatterns('<p><a href="mailto:hola@mediaplus.es">Write</a> to @media</p>')).toBe(false);
     });
 
     it('returns true for custom data-* attribute', () => {
@@ -233,7 +243,6 @@ describe('visualAttributeText', () => {
     'Uso de aria-label',
     'Using role=button correctly',
     'Set id = 3 and class="big" or class=\'big\'',
-    'Social @Media tips',
   ])('keeps an image with the alt text %s as visual editor content', alt => {
     expect(detectCustomHtmlPatterns(imageWithAlt(alt))).toBe(true);
     expect(detectCustomHtmlPatterns(imageWithAlt(visualAttributeText(alt)))).toBe(false);

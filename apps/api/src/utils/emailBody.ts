@@ -23,6 +23,7 @@ import makeJuiceClient from 'juice/lib/inline.js';
 import signale from 'signale';
 
 import {convertBoxes, recolourBoxes, spanFullWidthBoxes} from './emailBoxes.js';
+import {convertSocial} from './emailSocial.js';
 
 // juice's main entry pulls in full cheerio (parse5, undici) and web-resource-inliner, ~28 MB of
 // resident memory per process. Its inliner core on cheerio's htmlparser2 build costs ~2 MB.
@@ -300,6 +301,16 @@ function wrapWithEmailStyles(htmlBody: string, brand: EmailBrand, emailId?: stri
     } catch (error) {
       // An unconverted box is a div with its background and padding inlined, unpadded only in Outlook
       warnAtMostEveryMinute('box', `[EMAIL] Failed to convert boxes${emailId ? ` of email ${emailId}` : ''}:`, error);
+    }
+    try {
+      convertSocial($);
+    } catch (error) {
+      // Unconverted social links stay a paragraph of icons in a row, unspaced only in Outlook for Windows
+      warnAtMostEveryMinute(
+        'social',
+        `[EMAIL] Failed to convert social links${emailId ? ` of email ${emailId}` : ''}:`,
+        error,
+      );
     }
     return $.html();
   } catch (error) {

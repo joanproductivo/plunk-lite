@@ -16,9 +16,14 @@ export class BrandService {
     return toProjectBrand(row?.brand);
   }
 
-  /** Saves the project's brand from untrusted data, keeping only known values. */
+  /**
+   * Saves the project's brand from untrusted data, keeping only known values. Without `social`
+   * (a panel from before the social links), the saved networks stay as they are.
+   */
   public static async save(projectId: string, value: unknown): Promise<ProjectBrand> {
+    const lacksSocial = typeof value === 'object' && value !== null && !('social' in value);
     const brand = toProjectBrand(value);
+    if (lacksSocial) brand.social = (await BrandService.get(projectId)).social;
     await prisma.plunkLiteProjectBrand.upsert({
       where: {projectId},
       create: {projectId, brand: toPrismaJson(brand)},

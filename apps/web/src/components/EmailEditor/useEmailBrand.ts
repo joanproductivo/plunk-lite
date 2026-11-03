@@ -78,6 +78,7 @@ export function useEmailBrand(projectId: string | undefined, brand: EmailBrand |
     look: brand ?? (empty && project ? project : BRAND_DEFAULTS),
     project,
     button: data?.button,
+    social: data?.social,
     differs: project !== null && !empty && !sameEmailBrand(brand ?? BRAND_DEFAULTS, project),
   };
 }

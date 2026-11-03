@@ -6,7 +6,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
-import {LINKED_FILE_TYPES, type LinkedFileExtension, slugify} from '@plunk/shared';
+import {LINKED_FILE_TYPES, type LinkedFileExtension, slugify, SOCIAL_ICON_PREFIX} from '@plunk/shared';
 import type {UploadedObject, UploadKind} from '@plunk/types';
 import crypto from 'crypto';
 import signale from 'signale';
@@ -331,7 +331,9 @@ export async function listUploads(
     );
 
     for (const object of result.Contents ?? []) {
-      if (object.Key && !object.Key.endsWith('/')) {
+      // Social icons are drawn for the brand (Plunk Lite), not chosen from the gallery
+      const socialIcon = kind === 'image' && uploadNameFromKey(object.Key ?? '')?.startsWith(SOCIAL_ICON_PREFIX);
+      if (object.Key && !object.Key.endsWith('/') && !socialIcon) {
         latest.push({key: object.Key, uploadedAt: object.LastModified, size: object.Size ?? 0});
       }
     }
