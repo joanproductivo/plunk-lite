@@ -76,6 +76,16 @@ async function createWorkflow({keep = true, enabled = true, allowReentry = false
 }
 
 const parkedRow = (executionId: string) => prisma.plunkLiteParkedRun.findUnique({where: {executionId}});
+/** Where a run waits now, as a round would pick it */
+const parkedAt = async (executionId: string) => {
+  const row = await parkedRow(executionId);
+  return {stepId: row?.stepId ?? 'none', branch: row?.branch ?? null};
+};
+/** The job a round queues for a run, picked where it waits now */
+const continueRun = async (executionId: string) =>
+  WorkflowExecutionService.continueParked(executionId, await parkedAt(executionId));
+/** The round a press queued */
+const pressedRound = () => vi.mocked(QueueService.queueContinueParkedRound).mock.calls[0]![0];
 const runStatus = async (executionId: string) =>
   (await prisma.workflowExecution.findUniqueOrThrow({where: {id: executionId}})).status;
 const emails = (executionId: string) => prisma.email.count({where: {workflowExecutionId: executionId}});
@@ -189,10 +199,14 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
       const round = vi.mocked(QueueService.queueContinueParkedRound).mock.calls[0]![0];
       expect(round).toMatchObject({type: 'continue-parked-round', workflowId: workflow.id, round: 0});
 
+      expect(round.targets).toEqual([{stepId: first, branch: null, toStepId: second}]);
       await ParkedRuns.continueRound(round);
-      expect(QueueService.queueContinueParked).toHaveBeenCalledWith([executionId], round.pressId);
+      expect(QueueService.queueContinueParked).toHaveBeenCalledWith(
+        [{executionId, stepId: first, branch: null}],
+        round.pressId,
+      );
 
-      await WorkflowExecutionService.continueParked(executionId);
+      await continueRun(executionId);
 
       expect(await emails(executionId)).toBe(2);
       expect(await runStatus(executionId)).toBe(WorkflowExecutionStatus.COMPLETED);
@@ -207,13 +221,20 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
       // Only the other branch: nothing for it to continue into
       await workflow.add(condition, SEND, {branch: 'yes'});
       let [group] = await ParkedRuns.summary(workflow.id, (await WorkflowService.get(projectId, workflow.id)).steps);
-      expect(group).toMatchObject({stepId: condition, branch: 'no', count: 1, canContinue: false, branchExists: true});
+      expect(group).toMatchObject({
+        stepId: condition,
+        branch: 'no',
+        branchName: 'No',
+        count: 1,
+        canContinue: false,
+        branchExists: true,
+      });
 
       const no = await workflow.add(condition, SEND, {branch: 'no'});
       [group] = await ParkedRuns.summary(workflow.id, (await WorkflowService.get(projectId, workflow.id)).steps);
       expect(group).toMatchObject({canContinue: true});
 
-      await WorkflowExecutionService.continueParked(executionId);
+      await continueRun(executionId);
 
       expect(await emails(executionId)).toBe(1);
       expect(await parkedRow(executionId)).toMatchObject({stepId: no});
@@ -228,7 +249,7 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
       await WorkflowExecutionService.processDelayEnd(executionId, delay);
       await workflow.add(delay, SEND);
 
-      await WorkflowExecutionService.continueParked(executionId);
+      await continueRun(executionId);
 
       expect(await emails(executionId)).toBe(1);
     });
@@ -238,7 +259,7 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
       const email = await workflow.add(workflow.triggerId, SEND);
       const executionId = await workflow.start();
 
-      await WorkflowExecutionService.continueParked(executionId);
+      await continueRun(executionId);
 
       expect(await runStatus(executionId)).toBe(WorkflowExecutionStatus.COMPLETED);
       expect(await parkedRow(executionId)).toMatchObject({stepId: email});
@@ -252,11 +273,13 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
       const second = await workflow.add(first, SEND);
       await workflow.add(second, WorkflowStepType.EXIT);
 
+      const at = await parkedAt(executionId);
       await Promise.all([
-        WorkflowExecutionService.continueParked(executionId),
-        WorkflowExecutionService.continueParked(executionId),
+        WorkflowExecutionService.continueParked(executionId, at),
+        WorkflowExecutionService.continueParked(executionId, at),
       ]);
-      await WorkflowExecutionService.continueParked(executionId);
+      // A job for a press made before it moved on: it waits elsewhere now
+      await WorkflowExecutionService.continueParked(executionId, at);
 
       expect(await emails(executionId)).toBe(2);
       expect(await parkedRow(executionId)).toBeNull();
@@ -270,12 +293,12 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
 
       await prisma.workflow.update({where: {id: workflow.id}, data: {enabled: false}});
       await expect(ParkedRuns.queueContinue(projectId, workflow.id)).rejects.toMatchObject({code: 409});
-      await WorkflowExecutionService.continueParked(executionId);
+      await continueRun(executionId);
       expect(await parkedRow(executionId)).toMatchObject({stepId: first});
 
       await prisma.workflow.update({where: {id: workflow.id}, data: {enabled: true}});
       await prisma.project.update({where: {id: projectId}, data: {disabled: true}});
-      await WorkflowExecutionService.continueParked(executionId);
+      await continueRun(executionId);
       expect(await parkedRow(executionId)).toMatchObject({stepId: first});
       expect(await emails(executionId)).toBe(1);
     });
@@ -305,7 +328,7 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
         },
       });
 
-      await WorkflowExecutionService.continueParked(executionId);
+      await continueRun(executionId);
 
       expect(await parkedRow(executionId)).toBeNull();
       expect(await emails(executionId)).toBe(1);
@@ -321,7 +344,7 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
       const [group] = await ParkedRuns.summary(workflow.id, (await WorkflowService.get(projectId, workflow.id)).steps);
       expect(group).toMatchObject({count: 1, unsubscribed: 1});
 
-      await WorkflowExecutionService.continueParked(executionId);
+      await continueRun(executionId);
 
       expect(QueueService.queueEmail).toHaveBeenCalledTimes(1);
       expect(await parkedRow(executionId)).toMatchObject({stepId: second});
@@ -331,7 +354,7 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
     it('goes in rounds, and stops once the workflow is off', async () => {
       const workflow = await createWorkflow();
       const email = await workflow.add(workflow.triggerId, SEND);
-      await workflow.add(email, SEND);
+      const next = await workflow.add(email, SEND);
       const count = CONTINUE_PER_ROUND + 1;
       const ids = Array.from({length: count}, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
       await prisma.workflowExecution.createMany({
@@ -340,16 +363,26 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
       await prisma.plunkLiteParkedRun.createMany({
         data: ids.map(executionId => ({executionId, workflowId: workflow.id, projectId, contactId, stepId: email})),
       });
-      const data = {type: 'continue-parked-round' as const, projectId, workflowId: workflow.id, pressId: 'p', round: 0};
+      const data = {
+        type: 'continue-parked-round' as const,
+        projectId,
+        workflowId: workflow.id,
+        targets: [{stepId: email, branch: null, toStepId: next}],
+        pressId: 'p',
+        round: 0,
+      };
+      const picked = (executionId: string) => ({executionId, stepId: email, branch: null});
 
       await ParkedRuns.continueRound(data);
 
-      expect(vi.mocked(QueueService.queueContinueParked).mock.calls[0]![0]).toEqual(ids.slice(0, CONTINUE_PER_ROUND));
-      const next = vi.mocked(QueueService.queueContinueParkedRound).mock.calls[0]!;
-      expect(next).toEqual([{...data, round: 1, after: ids[CONTINUE_PER_ROUND - 1]}, CONTINUE_ROUND_INTERVAL_MS]);
+      expect(vi.mocked(QueueService.queueContinueParked).mock.calls[0]![0]).toEqual(
+        ids.slice(0, CONTINUE_PER_ROUND).map(picked),
+      );
+      const queued = vi.mocked(QueueService.queueContinueParkedRound).mock.calls[0]!;
+      expect(queued).toEqual([{...data, round: 1, after: ids[CONTINUE_PER_ROUND - 1]}, CONTINUE_ROUND_INTERVAL_MS]);
 
-      await ParkedRuns.continueRound(next[0]);
-      expect(vi.mocked(QueueService.queueContinueParked).mock.calls[1]![0]).toEqual([ids[CONTINUE_PER_ROUND]]);
+      await ParkedRuns.continueRound(queued[0]);
+      expect(vi.mocked(QueueService.queueContinueParked).mock.calls[1]![0]).toEqual([picked(ids[CONTINUE_PER_ROUND]!)]);
       expect(QueueService.queueContinueParkedRound).toHaveBeenCalledTimes(1);
 
       await prisma.workflow.update({where: {id: workflow.id}, data: {enabled: false}});
@@ -361,7 +394,7 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
       const workflow = await createWorkflow();
       const first = await workflow.add(workflow.triggerId, SEND);
       const executionId = await workflow.start();
-      await workflow.add(first, SEND);
+      const second = await workflow.add(first, SEND);
       await prisma.contact.delete({where: {id: contactId}});
 
       expect(await ParkedRuns.summary(workflow.id, (await WorkflowService.get(projectId, workflow.id)).steps)).toEqual(
@@ -371,12 +404,114 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
         type: 'continue-parked-round',
         projectId,
         workflowId: workflow.id,
+        targets: [{stepId: first, branch: null, toStepId: second}],
         pressId: 'p',
         round: 0,
       });
 
       expect(await parkedRow(executionId)).toBeNull();
       expect(QueueService.queueContinueParked).not.toHaveBeenCalled();
+    });
+
+    it('only takes them where the press found they could go', async () => {
+      const workflow = await createWorkflow();
+      const condition = await workflow.add(workflow.triggerId, WorkflowStepType.CONDITION, {config: CONDITION});
+      const yes = await workflow.add(condition, SEND, {branch: 'yes'});
+      const no = await workflow.add(condition, SEND, {branch: 'no'});
+      const executionId = await workflow.start();
+      expect(await parkedRow(executionId)).toMatchObject({stepId: no});
+      const after = await workflow.add(no, SEND);
+      await ParkedRuns.queueContinue(projectId, workflow.id);
+      const round = pressedRound();
+      expect(round.targets).toEqual([{stepId: no, branch: null, toStepId: after}]);
+
+      // A target that leads elsewhere now is dropped
+      await ParkedRuns.continueRound({...round, targets: [{stepId: yes, branch: null, toStepId: after}]});
+      expect(QueueService.queueContinueParked).not.toHaveBeenCalled();
+
+      // A step on their way that is not ready stops the press
+      await workflow.add(after, SEND, {noTemplate: true});
+      await ParkedRuns.continueRound(round);
+      expect(QueueService.queueContinueParked).not.toHaveBeenCalled();
+      expect(await parkedRow(executionId)).toMatchObject({stepId: no});
+    });
+
+    it('refuses to continue into a step further on that is not configured yet', async () => {
+      const workflow = await createWorkflow();
+      const first = await workflow.add(workflow.triggerId, SEND);
+      await workflow.start();
+      const delay = await workflow.add(first, WorkflowStepType.DELAY, {config: {amount: 1, unit: 'hours'}});
+      await workflow.add(delay, SEND, {noTemplate: true});
+
+      await expect(ParkedRuns.queueContinue(projectId, workflow.id)).rejects.toMatchObject({code: 422});
+    });
+
+    it('continues from a wait for an event that timed out', async () => {
+      const workflow = await createWorkflow();
+      const wait = await workflow.add(workflow.triggerId, WorkflowStepType.WAIT_FOR_EVENT, {
+        config: {eventName: 'test.event', timeout: 3600},
+      });
+      const executionId = await workflow.start();
+      const stepExecution = await prisma.workflowStepExecution.findFirstOrThrow({
+        where: {executionId, stepId: wait, status: StepExecutionStatus.WAITING},
+      });
+      await WorkflowExecutionService.processTimeout(executionId, wait, stepExecution.id);
+      const email = await workflow.add(wait, SEND);
+
+      await continueRun(executionId);
+
+      expect(await emails(executionId)).toBe(1);
+      expect(await parkedRow(executionId)).toMatchObject({stepId: email});
+    });
+
+    it('waits at the step before one deleted while it was being parked', async () => {
+      const workflow = await createWorkflow();
+      const first = await workflow.add(workflow.triggerId, SEND);
+      const second = await workflow.add(first, SEND);
+      const executionId = await workflow.start();
+      expect(await parkedRow(executionId)).toMatchObject({stepId: second});
+      // Deleted without the service, as a delete that ran while the run was being parked
+      await prisma.workflowStep.delete({where: {id: second}});
+      const steps = async () => (await WorkflowService.get(projectId, workflow.id)).steps;
+      expect((await ParkedRuns.summary(workflow.id, await steps()))[0]).toMatchObject({
+        stepName: null,
+        branchExists: false,
+        canContinue: false,
+      });
+
+      const third = await workflow.add(first, SEND);
+      await ParkedRuns.continueRound({
+        type: 'continue-parked-round',
+        projectId,
+        workflowId: workflow.id,
+        targets: [{stepId: first, branch: null, toStepId: third}],
+        pressId: 'p',
+        round: 0,
+      });
+
+      expect(await parkedRow(executionId)).toMatchObject({stepId: first});
+      expect(QueueService.queueContinueParked).toHaveBeenCalledWith([{executionId, stepId: first, branch: null}], 'p');
+    });
+
+    it('does not park a run whose contact entered the workflow again since', async () => {
+      const workflow = await createWorkflow({allowReentry: true});
+      const delay = await workflow.add(workflow.triggerId, WorkflowStepType.DELAY, {
+        config: {amount: 1, unit: 'hours'},
+      });
+      const older = await workflow.start();
+      await prisma.workflowExecution.create({
+        data: {
+          workflowId: workflow.id,
+          contactId,
+          status: WorkflowExecutionStatus.WAITING,
+          startedAt: new Date(Date.now() + 1000),
+        },
+      });
+
+      await WorkflowExecutionService.processDelayEnd(older, delay);
+
+      expect(await runStatus(older)).toBe(WorkflowExecutionStatus.COMPLETED);
+      expect(await parkedRow(older)).toBeNull();
     });
   });
 
@@ -406,7 +541,7 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
 
       await WorkflowService.cancelExecution(projectId, workflow.id, one);
       expect(await parkedRow(one)).toBeNull();
-      expect(await runStatus(one)).toBe(WorkflowExecutionStatus.CANCELLED);
+      expect(await runStatus(one)).toBe(WorkflowExecutionStatus.COMPLETED);
 
       expect(await WorkflowService.cancelAllExecutions(projectId, workflow.id)).toEqual({cancelled: 0, released: 2});
       expect(await parkedRow(other)).toBeNull();
@@ -439,7 +574,7 @@ describe('ParkedRuns - keeping contacts until an Exit step', () => {
 
       expect(await parkedRow(executionId)).toMatchObject({stepId: condition, branch: 'no'});
       const added = await workflow.add(condition, SEND, {branch: 'no'});
-      await WorkflowExecutionService.continueParked(executionId);
+      await continueRun(executionId);
       expect(await parkedRow(executionId)).toMatchObject({stepId: added});
       expect(await emails(executionId)).toBe(3);
     });

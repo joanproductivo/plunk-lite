@@ -700,7 +700,8 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
         '',
         '**keepUntilExit:** with it on, a contact who reaches the end without an EXIT step waits',
         'there; once steps are added after that point, `plunk_continue_waiting_contacts` lets them go',
-        'on. Turning it off lets the contacts waiting at the end leave the workflow.',
+        'on. Turning it off lets the contacts waiting at the end leave the workflow, so it asks the user',
+        'to confirm first when any are waiting.',
         '',
         '**Returns:** The updated workflow.',
       ].join('\n'),
@@ -721,6 +722,24 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
       runTool(async () => {
         if ([name, description, eventName, allowReentry, keepUntilExit].every((value) => value === undefined)) {
           return errorResult('Nothing to update: pass name, description, eventName, allowReentry or keepUntilExit.');
+        }
+
+        if (keepUntilExit === false) {
+          const workflow = await getWorkflow(client, id);
+          const waiting = (workflow.parked ?? []).reduce((sum, group) => sum + group.count, 0);
+
+          if (waiting > 0) {
+            const pending = requireConfirmation(
+              context as {mcpReq?: {inputResponses?: unknown}},
+              'confirm_keep_until_exit_off',
+              `Stop keeping contacts in "${workflow.name ?? id}" until an EXIT step? The ${waiting} contact(s) ` +
+                'waiting at its end leave it and will not get the steps added after the end.',
+            );
+
+            if (pending) {
+              return pending;
+            }
+          }
         }
 
         if (eventName !== undefined || allowReentry === true) {
@@ -1437,20 +1456,21 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
       description: [
         '**Purpose:** In a workflow with `keepUntilExit`, let the contacts waiting at its end continue',
         'into the steps added after where they wait. Asks the user to confirm when the workflow sends',
-        'email: they go through the new steps now, 200 every 2 minutes, and emails go out right away.',
+        'email: they go through the new steps now, in rounds, and emails go out right away.',
         '',
         '**Before:** add and configure the new steps; this refuses while `plunk_check_workflow` reports',
         'errors, while the workflow is disabled, or while nobody can continue (see `parked[]` in',
         '`plunk_get_workflow`). A contact with nothing after where it waits keeps waiting.',
         '',
-        '**Returns:** How many can continue now, and the pace.',
+        '**Returns:** How many can continue now, and the pace (`perRound` contacts every',
+        '`everyMinutes` minutes).',
         '',
         '**Key trigger phrases:** "send the new step to those who finished", "continue the waiting contacts"',
       ].join('\n'),
       inputSchema: z.object({
         id: z.string().describe('The workflow ID.'),
       }),
-      annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true},
+      annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true},
     },
     async ({id}, context) =>
       runTool(async () => {
@@ -1477,11 +1497,14 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
         }
 
         if (countEmailSteps(workflow) > 0) {
+          const pace = workflow.continuePace
+            ? `, ${workflow.continuePace.perRound} every ${workflow.continuePace.everyMinutes} minutes`
+            : '';
           const pending = requireConfirmation(
             context as {mcpReq?: {inputResponses?: unknown}},
             'confirm_continue_waiting',
             `Let ${continuable} contact(s) waiting at the end of "${workflow.name ?? id}" continue into the new ` +
-              'steps now, 200 every 2 minutes? Sent emails cannot be recalled.',
+              `steps now${pace}? Sent emails cannot be recalled.`,
           );
 
           if (pending) {

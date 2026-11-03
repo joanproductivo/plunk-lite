@@ -78,6 +78,7 @@ export interface ParkedGroup {
   stepId: string;
   stepName: string | null;
   branch: string | null;
+  branchName: string | null;
   branchExists: boolean;
   count: number;
   unsubscribed: number;
@@ -93,6 +94,8 @@ export interface Workflow {
   keepUntilExit?: boolean;
   /** Plunk Lite: who waits where at the end of the workflow */
   parked?: ParkedGroup[];
+  /** Plunk Lite: how fast they continue */
+  continuePace?: {perRound: number; everyMinutes: number};
   triggerConfig?: {eventName?: string} | null;
   steps?: WorkflowStep[];
 }

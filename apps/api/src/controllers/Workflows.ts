@@ -122,7 +122,7 @@ export class Workflows {
       ParkedRuns.summary(workflowId, workflow.steps),
     ]);
 
-    return res.status(200).json({...workflow, keepUntilExit, parked});
+    return res.status(200).json({...workflow, keepUntilExit, parked, continuePace: ParkedRuns.pace()});
   }
 
   /**
@@ -205,7 +205,8 @@ export class Workflows {
       keepUntilExit,
     });
 
-    return res.status(200).json(workflow);
+    // Plunk Lite: the switch lives in a table of its own
+    return res.status(200).json({...workflow, keepUntilExit: await ParkedRuns.keepsUntilExit(workflow.id)});
   }
 
   /**

@@ -589,16 +589,19 @@ export class QueueService {
   }
 
   /**
-   * Plunk Lite: let these parked runs continue, a job each that claims its run. Prioritised, so that
-   * they wait behind the steps of runs already in progress rather than hold them up. One ID per
-   * press: claiming makes a repeated job harmless, and a job of an earlier press that failed and is
-   * kept would otherwise make BullMQ drop the new one.
+   * Plunk Lite: let these parked runs continue from where each was picked waiting, a job each that
+   * claims its run. Prioritised, so that they wait behind the steps of runs already in progress
+   * rather than hold them up. One ID per press: claiming makes a repeated job harmless, and a job of
+   * an earlier press that failed and is kept would otherwise make BullMQ drop the new one.
    */
-  public static async queueContinueParked(executionIds: string[], pressId: string): Promise<void> {
+  public static async queueContinueParked(
+    runs: {executionId: string; stepId: string; branch: string | null}[],
+    pressId: string,
+  ): Promise<void> {
     await workflowQueue.addBulk(
-      executionIds.map(executionId => ({
+      runs.map(({executionId, stepId, branch}) => ({
         name: 'continue-parked',
-        data: {executionId, stepId: '', type: 'continue-parked' as const},
+        data: {executionId, stepId, branch, type: 'continue-parked' as const},
         opts: {priority: 10, jobId: `workflow-continue-parked-${executionId}-${pressId}`},
       })),
     );

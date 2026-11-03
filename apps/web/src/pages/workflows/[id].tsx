@@ -61,6 +61,8 @@ interface WorkflowWithDetails extends Workflow {
   keepUntilExit?: boolean;
   /** Plunk Lite: who waits where at the end of the workflow */
   parked?: ParkedGroup[];
+  /** Plunk Lite: how fast they continue */
+  continuePace?: {perRound: number; everyMinutes: number};
 }
 
 export default function WorkflowEditorPage() {
@@ -427,11 +429,12 @@ export default function WorkflowEditorPage() {
         )}
 
         {/* Plunk Lite: contacts waiting at the end of the workflow */}
-        {workflow.parked && workflow.parked.length > 0 && (
+        {workflow.parked && workflow.parked.length > 0 && workflow.continuePace && (
           <ParkedContactsBanner
             workflowId={id as string}
             enabled={workflow.enabled}
             parked={workflow.parked}
+            pace={workflow.continuePace}
             validation={validateWorkflow(workflow)}
             onContinued={() => void mutate()}
           />
@@ -525,6 +528,7 @@ export default function WorkflowEditorPage() {
           <WorkflowExecutionsTable
             workflowId={id as string}
             activeExecutionsCount={activeExecutionsCount}
+            parkedCount={parkedTotal}
             onChange={() => {
               void mutate();
               void mutateRunning();
@@ -733,8 +737,8 @@ function SettingsDialog({workflow, parkedTotal, open, onOpenChange, onSave}: Set
                 Keep contacts until an Exit step
               </Label>
               <p className="text-xs text-neutral-500 mt-1">
-                Contacts who reach the end without an Exit step wait there. When you add steps after it, you choose
-                when they continue.
+                Contacts who reach the end without an Exit step wait there. When you add steps after it, you choose when
+                they continue.
               </p>
               {!keepUntilExit && workflow.keepUntilExit && parkedTotal > 0 && (
                 <p className="text-xs text-amber-700 mt-2">

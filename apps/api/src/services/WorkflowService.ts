@@ -817,7 +817,7 @@ export class WorkflowService {
       await WorkflowEmailLinks.detachSteps(tx, Array.from(stepsToDelete));
       await WebhookSigningSecrets.forgetSteps(tx, Array.from(stepsToDelete));
       // Plunk Lite: contacts waiting at the end of the workflow, at a step that goes, wait before it
-      await ParkedRuns.parkBeforeDeletedSteps(tx, Array.from(stepsToDelete));
+      await ParkedRuns.parkBeforeDeletedSteps(tx, workflowId, Array.from(stepsToDelete));
       await tx.workflowStep.deleteMany({
         where: {
           id: {in: Array.from(stepsToDelete)},
@@ -825,6 +825,8 @@ export class WorkflowService {
         },
       });
     }, LONG_TRANSACTION);
+    // Plunk Lite: a run parked at a step that went while the delete ran waits before it too
+    await ParkedRuns.parkBeforeMissingSteps(workflowId);
   }
 
   /**
@@ -889,9 +891,11 @@ export class WorkflowService {
       await WorkflowEmailLinks.detachSteps(tx, [stepId]);
       await WebhookSigningSecrets.forgetSteps(tx, [stepId]);
       // Plunk Lite: contacts waiting at it (the end of the workflow) wait before it
-      await ParkedRuns.parkBeforeDeletedSteps(tx, [stepId]);
+      await ParkedRuns.parkBeforeDeletedSteps(tx, workflowId, [stepId]);
       await tx.workflowStep.delete({where: {id: stepId}});
     }, LONG_TRANSACTION);
+    // Plunk Lite: a run parked at a step that went while the delete ran waits before it too
+    await ParkedRuns.parkBeforeMissingSteps(workflowId);
   }
 
   /**
@@ -1384,9 +1388,11 @@ export class WorkflowService {
     // Verify execution exists
     await this.getExecution(projectId, workflowId, executionId);
 
-    // Plunk Lite: one waiting at the end of the workflow no longer waits
+    // Plunk Lite: one waiting at the end of the workflow leaves it, and stays finished
     return prisma.$transaction(async tx => {
-      await ParkedRuns.release(tx, {executionId});
+      if ((await ParkedRuns.release(tx, {executionId})) > 0) {
+        return tx.workflowExecution.findUniqueOrThrow({where: {id: executionId}});
+      }
       return tx.workflowExecution.update({
         where: {id: executionId},
         data: {
@@ -1479,7 +1485,8 @@ export class WorkflowService {
   }
 
   /**
-   * Cancel all active executions for a workflow
+   * Cancel all active executions for a workflow. Plunk Lite: and let the contacts waiting at its end
+   * leave it
    */
   public static async cancelAllExecutions(
     projectId: string,

@@ -10,6 +10,8 @@ interface ParkedContactsBannerProps {
   workflowId: string;
   enabled: boolean;
   parked: ParkedGroup[];
+  /** How fast they continue, as the API lets them */
+  pace: {perRound: number; everyMinutes: number};
   /** The page's own check of the workflow, as enabling it runs it */
   validation: {valid: boolean; errors: string[]};
   onContinued: () => void;
@@ -20,7 +22,18 @@ const contacts = (count: number) => `${count} ${count === 1 ? 'contact' : 'conta
 /** Where a group waits: the step, and the condition's branch it took */
 function place(group: ParkedGroup): string {
   const step = group.stepName ? `"${group.stepName}"` : 'a deleted step';
-  return group.branch ? `${step}, ${group.branch === 'default' ? 'default' : `"${group.branch}"`} branch` : step;
+  return group.branchName ? `${step}, "${group.branchName}" branch` : step;
+}
+
+/** What it takes for a group to continue */
+function outlook(group: ParkedGroup): string {
+  if (group.canContinue) {
+    return ': can continue now';
+  }
+  if (!group.stepName) {
+    return ': they move to the step before it the next time contacts continue';
+  }
+  return group.branchExists ? ': add a step after it to continue' : ': that branch no longer exists';
 }
 
 /**
@@ -31,6 +44,7 @@ export function ParkedContactsBanner({
   workflowId,
   enabled,
   parked,
+  pace,
   validation,
   onContinued,
 }: ParkedContactsBannerProps) {
@@ -92,11 +106,7 @@ export function ParkedContactsBanner({
           {parked.map(group => (
             <li key={`${group.stepId}:${group.branch ?? ''}`}>
               {contacts(group.count)} after {place(group)}
-              {group.canContinue
-                ? ': can continue now'
-                : group.branchExists
-                  ? ': add a step after it to continue'
-                  : ': that branch no longer exists'}
+              {outlook(group)}
             </li>
           ))}
         </ul>
@@ -123,7 +133,8 @@ export function ParkedContactsBanner({
         title={`Continue ${contacts(continuable)}?`}
         description={
           <>
-            They go through the new steps now, 200 every 2 minutes. Emails go out right away.
+            They go through the new steps now, {pace.perRound} every {pace.everyMinutes} minutes. Emails go out right
+            away.
             {unsubscribed > 0 &&
               ` ${unsubscribed} of them ${unsubscribed === 1 ? 'is' : 'are'} unsubscribed: marketing emails skip them.`}
           </>

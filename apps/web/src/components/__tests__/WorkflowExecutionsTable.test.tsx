@@ -97,3 +97,33 @@ describe('WorkflowExecutionsTable', () => {
     expect([...container.querySelectorAll('button')].some(b => b.textContent === 'Cancel')).toBe(true);
   });
 });
+
+describe('WorkflowExecutionsTable with contacts waiting at the end', () => {
+  it('lets them leave with cancel-all, and says so', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        <SWRConfig
+          value={{
+            provider: () => new Map(),
+            fetcher: async () => ({executions: [], total: 0, page: 1, pageSize: 20, totalPages: 0}),
+            dedupingInterval: 0,
+          }}
+        >
+          <WorkflowExecutionsTable workflowId="wf" activeExecutionsCount={0} parkedCount={3} onChange={() => {}} />
+        </SWRConfig>,
+      ),
+    );
+    const button = [...container.querySelectorAll('button')].find(b => b.textContent?.startsWith('Cancel All Active'))!;
+    expect(button.textContent).toBe('Cancel All Active (3)');
+    await act(async () => button.click());
+    await vi.waitFor(() =>
+      expect(document.body.textContent).toContain('The 3 contacts waiting at its end leave it too.'),
+    );
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+});

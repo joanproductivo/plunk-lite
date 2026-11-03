@@ -89,7 +89,9 @@ const RUN_INCLUDE = {
         include: {
           template: true,
           outgoingTransitions: {
-            orderBy: {priority: 'asc'},
+            // Plunk Lite: then by ID, so that transitions of equal priority are taken in one order,
+            // the one ParkedRuns reads too
+            orderBy: [{priority: 'asc'}, {id: 'asc'}],
             include: {toStep: true},
           },
         },
@@ -1704,11 +1706,12 @@ export class WorkflowExecutionService {
 
   /**
    * Plunk Lite: let a run that waited at the end of its workflow continue into the steps connected
-   * after where it waited, from that step and on the branch it took then (see ParkedRuns). A job
-   * per run; claiming it makes a repeated job, or one for a run that left meanwhile, do nothing.
+   * after where it waited, from that step and on the branch it took then (see ParkedRuns), if it
+   * still waits where it was picked (`at`). A job per run; claiming it makes a repeated job, or one
+   * for a run that moved or left meanwhile, do nothing.
    */
-  public static async continueParked(executionId: string): Promise<void> {
-    const claimed = await ParkedRuns.claim(executionId);
+  public static async continueParked(executionId: string, at: {stepId: string; branch: string | null}): Promise<void> {
+    const claimed = await ParkedRuns.claim(executionId, at);
     if (!claimed) {
       return;
     }
@@ -1729,14 +1732,10 @@ export class WorkflowExecutionService {
     try {
       const step = execution.workflow.steps.find(s => s.id === claimed.stepId);
       if (!step) {
-        // Deleted after the run was let continue: it waits where it can again
-        await prisma.$transaction(async tx => {
-          await tx.workflowExecution.updateMany({
-            where: {id: executionId, status: WorkflowExecutionStatus.RUNNING},
-            data: {status: WorkflowExecutionStatus.COMPLETED, completedAt: new Date(), currentStepId: null},
-          });
-          await ParkedRuns.parkAtLastStep(tx, [executionId], [claimed.stepId]);
-        });
+        // Deleted after the run was let continue: it waits at the last step it did that is still there
+        if (await ParkedRuns.unclaim(executionId, claimed)) {
+          await ParkedRuns.parkBeforeMissingSteps(execution.workflowId);
+        }
         return;
       }
 

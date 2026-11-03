@@ -49,7 +49,9 @@ export interface ParkedGroup {
   stepId: string;
   stepName: string | null;
   branch: string | null;
-  /** False when the branch is no longer one of the condition's: nothing can be connected to it */
+  /** The branch as the condition names it ("Yes", or a multi-branch condition's own name) */
+  branchName: string | null;
+  /** False when the step or the branch is gone: nothing can be connected to it */
   branchExists: boolean;
   count: number;
   /** Of them, unsubscribed: a marketing email skips them */

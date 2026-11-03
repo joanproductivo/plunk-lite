@@ -17,6 +17,7 @@ const group = (overrides: Partial<ParkedGroup>): ParkedGroup => ({
   stepId: 's1',
   stepName: 'Welcome email',
   branch: null,
+  branchName: null,
   branchExists: true,
   count: 3,
   unsubscribed: 0,
@@ -39,6 +40,7 @@ describe('ParkedContactsBanner', () => {
           workflowId="wf"
           enabled
           parked={[group({})]}
+          pace={{perRound: 200, everyMinutes: 2}}
           validation={{valid: true, errors: []}}
           onContinued={onContinued}
           {...props}
@@ -60,16 +62,26 @@ describe('ParkedContactsBanner', () => {
     await render({
       parked: [
         group({count: 3}),
-        group({stepId: 's2', stepName: 'Plan?', branch: 'no', count: 1, canContinue: false}),
-        group({stepId: 's3', stepName: 'Tier', branch: 'gold', count: 2, canContinue: false, branchExists: false}),
+        group({stepId: 's2', stepName: 'Plan?', branch: 'no', branchName: 'No', count: 1, canContinue: false}),
+        group({
+          stepId: 's3',
+          stepName: 'Tier',
+          branch: 'a1b2c3d4',
+          branchName: 'Gold',
+          count: 2,
+          canContinue: false,
+          branchExists: false,
+        }),
+        group({stepId: 's4', stepName: null, count: 1, canContinue: false, branchExists: false}),
       ],
     });
 
     const text = container.textContent ?? '';
-    expect(text).toContain('6 contacts reached the end and are waiting for new steps');
+    expect(text).toContain('7 contacts reached the end and are waiting for new steps');
     expect(text).toContain('3 contacts after "Welcome email": can continue now');
-    expect(text).toContain('1 contact after "Plan?", "no" branch: add a step after it to continue');
-    expect(text).toContain('2 contacts after "Tier", "gold" branch: that branch no longer exists');
+    expect(text).toContain('1 contact after "Plan?", "No" branch: add a step after it to continue');
+    expect(text).toContain('2 contacts after "Tier", "Gold" branch: that branch no longer exists');
+    expect(text).toContain('1 contact after a deleted step: they move to the step before it the next time');
     expect(continueButton()?.textContent).toBe('Continue 3 contacts');
   });
 
@@ -102,6 +114,7 @@ describe('ParkedContactsBanner', () => {
 
     await act(async () => continueButton()!.click());
     await vi.waitFor(() => expect(document.body.textContent).toContain('Continue 3 contacts?'));
+    expect(document.body.textContent).toContain('200 every 2 minutes');
     expect(document.body.textContent).toContain('1 of them is unsubscribed: marketing emails skip them.');
 
     const confirm = [...document.querySelectorAll('button')].find(b => b.textContent === 'Continue')!;

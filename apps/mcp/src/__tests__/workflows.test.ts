@@ -437,11 +437,13 @@ describe('plunk_continue_waiting_contacts', () => {
     ...workflowWithEmail,
     enabled: true,
     keepUntilExit: true,
+    continuePace: {perRound: 200, everyMinutes: 2},
     parked: [
       {
         stepId: 'step-email-2',
         stepName: 'Send email',
         branch: null,
+        branchName: null,
         branchExists: true,
         count: 3,
         unsubscribed: 0,
@@ -533,6 +535,54 @@ describe('plunk_cancel_workflow_executions with contacts waiting at the end', ()
     expect(one.isError).toBeFalsy();
     expect(calls.some((c) => c.method === 'DELETE')).toBe(true);
     expect(JSON.stringify(all.content)).toContain('Cancelled 1 execution(s), and let 2 waiting at the end leave.');
+
+    await close();
+  });
+});
+
+describe('plunk_update_workflow turning keepUntilExit off', () => {
+  it('does not let the waiting contacts go before confirmation', async () => {
+    const calls = mockApi(() =>
+      json({
+        ...workflowWithEmail,
+        keepUntilExit: true,
+        parked: [
+          {
+            stepId: 'step-email-2',
+            stepName: 'Send email',
+            branch: null,
+            branchName: null,
+            branchExists: true,
+            count: 2,
+            unsubscribed: 0,
+            canContinue: false,
+          },
+        ],
+      }),
+    );
+    const {client, close} = await connect();
+
+    await client
+      .callTool({name: 'plunk_update_workflow', arguments: {id: 'wf-1', keepUntilExit: false}})
+      .catch(() => undefined);
+
+    expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(0);
+
+    await close();
+  });
+
+  it('turns it off at once when nobody waits', async () => {
+    const calls = mockApi((call) =>
+      call.method === 'PATCH' ? json({id: 'wf-1', keepUntilExit: false}) : json({...workflowWithEmail, parked: []}),
+    );
+    const {client, close} = await connect();
+
+    const result = await client.callTool({name: 'plunk_update_workflow', arguments: {id: 'wf-1', keepUntilExit: false}});
+
+    expect(result.isError).toBeFalsy();
+    expect(calls.filter((c) => c.method === 'PATCH')).toEqual([
+      {url: 'https://api.example.com/workflows/wf-1', method: 'PATCH', body: {keepUntilExit: false}},
+    ]);
 
     await close();
   });

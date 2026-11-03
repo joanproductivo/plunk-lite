@@ -2,6 +2,7 @@ import type {Workflow, WorkflowExecution} from '@plunk/db';
 import {Prisma, WorkflowExecutionStatus} from '@plunk/db';
 
 import {prisma} from '../database/prisma.js';
+import {lockEntry} from '../utils/workflowEntryLock.js';
 
 import {ParkedRuns} from './ParkedRuns.js';
 
@@ -30,15 +31,6 @@ export type WorkflowEntryResult =
  * bursts) both found no execution and both created one -- two runs, and two emails, even in a
  * workflow that allows no re-entry.
  */
-
-/**
- * The lock deciding whether a contact enters a workflow, for this transaction. Plunk Lite: also
- * taken where a run is parked at the end of a workflow, or let continue from there (ParkedRuns).
- */
-export async function lockEntry(tx: Prisma.TransactionClient, workflowId: string, contactId: string): Promise<void> {
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`workflow-entry:${workflowId}:${contactId}`}))`;
-}
-
 export class WorkflowEntryService {
   public static async enter(
     workflow: Pick<Workflow, 'id' | 'allowReentry'>,
