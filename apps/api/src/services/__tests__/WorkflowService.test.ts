@@ -111,6 +111,24 @@ describe('WorkflowService', () => {
       expect(workflow.allowReentry).toBe(false);
     });
 
+    it('keeps contacts until an Exit step when asked at creation (Plunk Lite)', async () => {
+      const kept = await WorkflowService.create(projectId, {
+        name: 'Kept',
+        eventName: 'test.event',
+        keepUntilExit: true,
+      });
+      const plain = await WorkflowService.create(projectId, {
+        name: 'Plain',
+        eventName: 'test.event',
+      });
+
+      const settings = await prisma.plunkLiteWorkflowSettings.findMany({
+        where: {workflowId: {in: [kept.id, plain.id]}},
+      });
+
+      expect(settings).toEqual([expect.objectContaining({workflowId: kept.id, projectId, keepUntilExit: true})]);
+    });
+
     it('should trim event name', async () => {
       const workflow = await WorkflowService.create(projectId, {
         name: 'Test',

@@ -628,6 +628,11 @@ export const ParkedRuns = {
     return new Map(rows.map(row => [row.workflowId, row.parked]));
   },
 
+  /** The switch turned on for a workflow being created, in the transaction that creates it */
+  async keepFromStart(tx: Prisma.TransactionClient, projectId: string, workflowId: string): Promise<void> {
+    await tx.plunkLiteWorkflowSettings.create({data: {workflowId, projectId, keepUntilExit: true}});
+  },
+
   /** A workflow's switch, for a copy of it */
   async copySettings(
     tx: Prisma.TransactionClient,
@@ -637,7 +642,7 @@ export const ParkedRuns = {
   ): Promise<void> {
     const source = await tx.plunkLiteWorkflowSettings.findUnique({where: {workflowId: fromWorkflowId}});
     if (source?.keepUntilExit) {
-      await tx.plunkLiteWorkflowSettings.create({data: {workflowId: toWorkflowId, projectId, keepUntilExit: true}});
+      await this.keepFromStart(tx, projectId, toWorkflowId);
     }
   },
 

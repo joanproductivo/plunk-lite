@@ -161,7 +161,7 @@ export class Workflows {
   @CatchAsync
   public async create(req: Request, res: Response, _next: NextFunction) {
     const auth = res.locals.auth;
-    const {name, description, eventName, enabled, allowReentry} = req.body;
+    const {name, description, eventName, enabled, allowReentry, keepUntilExit} = req.body;
 
     if (!name) {
       return res.status(400).json({error: 'Name is required'});
@@ -171,15 +171,20 @@ export class Workflows {
       return res.status(400).json({error: 'Event name is required'});
     }
 
+    if (keepUntilExit !== undefined && typeof keepUntilExit !== 'boolean') {
+      return res.status(400).json({error: 'keepUntilExit must be true or false'});
+    }
+
     const workflow = await WorkflowService.create(auth.projectId!, {
       name,
       description,
       eventName,
       enabled,
       allowReentry,
+      keepUntilExit,
     });
 
-    return res.status(201).json(workflow);
+    return res.status(201).json({...workflow, keepUntilExit: keepUntilExit === true});
   }
 
   /**

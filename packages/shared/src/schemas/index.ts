@@ -321,6 +321,8 @@ export const WorkflowSchemas = {
     description: z.string().max(500).optional(),
     eventName: z.string().min(1),
     allowReentry: z.boolean().optional(),
+    // Plunk Lite: contacts who reach the end without an Exit step wait there for new steps
+    keepUntilExit: z.boolean().optional(),
     enabled: z.boolean().default(false),
   }),
   update: z.object({

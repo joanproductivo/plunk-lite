@@ -175,6 +175,7 @@ export class WorkflowService {
       eventName: string;
       enabled?: boolean;
       allowReentry?: boolean;
+      keepUntilExit?: boolean;
     },
   ): Promise<Workflow> {
     if (!data.eventName?.trim()) {
@@ -203,6 +204,10 @@ export class WorkflowService {
           config: {eventName: data.eventName.trim()},
         },
       });
+
+      if (data.keepUntilExit) {
+        await ParkedRuns.keepFromStart(tx, projectId, newWorkflow.id);
+      }
 
       return newWorkflow;
     });

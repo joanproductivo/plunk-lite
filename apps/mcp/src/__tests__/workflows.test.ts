@@ -239,6 +239,25 @@ describe('plunk_create_workflow', () => {
     await close();
   });
 
+  it('passes keepUntilExit on to the API', async () => {
+    const calls = mockApi((call) =>
+      call.method === 'POST'
+        ? json({id: 'wf-1', name: 'Welcome', enabled: false, keepUntilExit: true}, 201)
+        : json({...workflowWithEmail, steps: [workflowWithEmail.steps[0]]}),
+    );
+    const {client, close} = await connect();
+
+    const result = await client.callTool({
+      name: 'plunk_create_workflow',
+      arguments: {name: 'Welcome', eventName: 'user.signup', keepUntilExit: true},
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(calls[0]?.body).toEqual({name: 'Welcome', eventName: 'user.signup', keepUntilExit: true, enabled: false});
+
+    await close();
+  });
+
   it('does not accept an enabled flag that would skip the enable confirmation', async () => {
     const {client, close} = await connect();
 
