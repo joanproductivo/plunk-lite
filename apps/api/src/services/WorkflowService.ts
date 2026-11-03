@@ -13,6 +13,7 @@ import type {ListSort} from '../utils/listSort.js';
 import {ContactService} from './ContactService.js';
 import {EventService} from './EventService.js';
 import {NtfyService} from './NtfyService.js';
+import {ParkedRuns} from './ParkedRuns.js';
 import {QueueService} from './QueueService.js';
 import {WebhookSigningSecrets} from './WebhookSigningSecrets.js';
 import {WorkflowEmailLinks} from './WorkflowEmailLinks.js';
@@ -107,9 +108,15 @@ export class WorkflowService {
           GROUP BY "workflowId"
         `
       : [];
+    // Plunk Lite: contacts waiting at the end of a workflow that keeps them until an Exit step are
+    // in it too. Never also in progress there: entering again lets the waiting run go
+    const parked = await ParkedRuns.contactCounts(ids);
     // COUNT comes back as bigint, which res.json cannot serialise
     const byWorkflow = new Map(
-      counts.map(c => [c.workflowId, {entered: Number(c.entered), inProgress: Number(c.inProgress)}]),
+      counts.map(c => [
+        c.workflowId,
+        {entered: Number(c.entered), inProgress: Number(c.inProgress) + (parked.get(c.workflowId) ?? 0)},
+      ]),
     );
 
     return {
@@ -231,6 +238,7 @@ export class WorkflowService {
       triggerConfig?: Prisma.JsonValue;
       enabled?: boolean;
       allowReentry?: boolean;
+      keepUntilExit?: boolean;
     },
   ): Promise<Workflow> {
     // Verify workflow exists and belongs to project
@@ -308,6 +316,11 @@ export class WorkflowService {
       return updatedWorkflow;
     });
 
+    // Plunk Lite: keep contacts until an Exit step, or not (off lets those waiting at the end go)
+    if (data.keepUntilExit !== undefined) {
+      await ParkedRuns.setKeepUntilExit(projectId, workflowId, data.keepUntilExit);
+    }
+
     // Plunk Lite: a workflow enabled again has its brake count from now on
     if (data.enabled === true && !workflow.enabled) {
       await WorkflowEnabledAt.note(workflowId);
@@ -366,6 +379,7 @@ export class WorkflowService {
     await prisma.$transaction(async tx => {
       await WorkflowEmailLinks.detachWorkflows(tx, projectId, [workflowId]);
       await WebhookSigningSecrets.forgetWorkflows(tx, projectId, [workflowId]);
+      await ParkedRuns.forgetWorkflows(tx, projectId, [workflowId]);
       await tx.workflow.delete({where: {id: workflowId}});
     }, LONG_TRANSACTION);
 
@@ -449,6 +463,7 @@ export class WorkflowService {
 
         await WorkflowEmailLinks.detachWorkflows(tx, projectId, uniqueIds);
         await WebhookSigningSecrets.forgetWorkflows(tx, projectId, uniqueIds);
+        await ParkedRuns.forgetWorkflows(tx, projectId, uniqueIds);
         const result = await tx.workflow.deleteMany({
           where: {id: {in: uniqueIds}, projectId},
         });
@@ -496,6 +511,7 @@ export class WorkflowService {
           allowReentry: source.allowReentry,
         },
       });
+      await ParkedRuns.copySettings(tx, projectId, workflowId, newWorkflow.id);
 
       const stepIdMap = new Map<string, string>();
 
@@ -800,6 +816,8 @@ export class WorkflowService {
     await prisma.$transaction(async tx => {
       await WorkflowEmailLinks.detachSteps(tx, Array.from(stepsToDelete));
       await WebhookSigningSecrets.forgetSteps(tx, Array.from(stepsToDelete));
+      // Plunk Lite: contacts waiting at the end of the workflow, at a step that goes, wait before it
+      await ParkedRuns.parkBeforeDeletedSteps(tx, workflowId, Array.from(stepsToDelete));
       await tx.workflowStep.deleteMany({
         where: {
           id: {in: Array.from(stepsToDelete)},
@@ -807,6 +825,11 @@ export class WorkflowService {
         },
       });
     }, LONG_TRANSACTION);
+    // Plunk Lite: a run parked at a step that went while the delete ran waits before it too. The
+    // steps are gone already: failing here must not fail the delete
+    await ParkedRuns.parkBeforeMissingSteps(workflowId).catch(error =>
+      signale.warn(`[WORKFLOW] Could not park again the runs waiting at deleted steps of ${workflowId}:`, error),
+    );
   }
 
   /**
@@ -856,21 +879,29 @@ export class WorkflowService {
     // Re-wire: for each incoming transition, point it to our child (if we have one)
     const child = step.outgoingTransitions[0];
 
-    if (child) {
-      for (const incoming of step.incomingTransitions) {
-        await prisma.workflowTransition.update({
-          where: {id: incoming.id},
-          data: {toStepId: child.toStepId},
-        });
-      }
-    }
-
-    // Delete the step — cascades and removes its own transitions
+    // Plunk Lite: re-wired in the same transaction as the delete, so that nothing is left half done
     await prisma.$transaction(async tx => {
+      if (child) {
+        for (const incoming of step.incomingTransitions) {
+          await tx.workflowTransition.update({
+            where: {id: incoming.id},
+            data: {toStepId: child.toStepId},
+          });
+        }
+      }
+
+      // Delete the step — cascades and removes its own transitions
       await WorkflowEmailLinks.detachSteps(tx, [stepId]);
       await WebhookSigningSecrets.forgetSteps(tx, [stepId]);
+      // Plunk Lite: contacts waiting at it (the end of the workflow) wait before it
+      await ParkedRuns.parkBeforeDeletedSteps(tx, workflowId, [stepId]);
       await tx.workflowStep.delete({where: {id: stepId}});
     }, LONG_TRANSACTION);
+    // Plunk Lite: a run parked at a step that went while the delete ran waits before it too. The
+    // steps are gone already: failing here must not fail the delete
+    await ParkedRuns.parkBeforeMissingSteps(workflowId).catch(error =>
+      signale.warn(`[WORKFLOW] Could not park again the runs waiting at deleted steps of ${workflowId}:`, error),
+    );
   }
 
   /**
@@ -1290,8 +1321,13 @@ export class WorkflowService {
       prisma.workflowExecution.count({where}),
     ]);
 
+    // Plunk Lite: which of the finished ones wait at the end of the workflow
+    const parked = await ParkedRuns.parkedIds(
+      executions.filter(e => e.status === WorkflowExecutionStatus.COMPLETED).map(e => e.id),
+    );
+
     return {
-      executions,
+      executions: executions.map(e => ({...e, parked: parked.has(e.id)})),
       total,
       page,
       pageSize,
@@ -1341,7 +1377,10 @@ export class WorkflowService {
       throw new HttpException(404, 'Workflow execution not found');
     }
 
-    return execution;
+    // Plunk Lite: whether it waits at the end of the workflow
+    const parked =
+      execution.status === WorkflowExecutionStatus.COMPLETED && (await ParkedRuns.parkedIds([execution.id])).size > 0;
+    return {...execution, parked};
   }
 
   /**
@@ -1355,13 +1394,19 @@ export class WorkflowService {
     // Verify execution exists
     await this.getExecution(projectId, workflowId, executionId);
 
-    return prisma.workflowExecution.update({
-      where: {id: executionId},
-      data: {
-        status: WorkflowExecutionStatus.CANCELLED,
-        completedAt: new Date(),
-        exitReason: 'Cancelled by user',
-      },
+    // Plunk Lite: one waiting at the end of the workflow leaves it, and stays finished
+    return prisma.$transaction(async tx => {
+      if ((await ParkedRuns.release(tx, {executionId})) > 0) {
+        return tx.workflowExecution.findUniqueOrThrow({where: {id: executionId}});
+      }
+      return tx.workflowExecution.update({
+        where: {id: executionId},
+        data: {
+          status: WorkflowExecutionStatus.CANCELLED,
+          completedAt: new Date(),
+          exitReason: 'Cancelled by user',
+        },
+      });
     });
   }
 
@@ -1446,11 +1491,18 @@ export class WorkflowService {
   }
 
   /**
-   * Cancel all active executions for a workflow
+   * Cancel all active executions for a workflow. Plunk Lite: and let the contacts waiting at its end
+   * leave it
    */
-  public static async cancelAllExecutions(projectId: string, workflowId: string): Promise<{cancelled: number}> {
+  public static async cancelAllExecutions(
+    projectId: string,
+    workflowId: string,
+  ): Promise<{cancelled: number; released: number}> {
     // Verify workflow exists and belongs to project
     await this.get(projectId, workflowId);
+
+    // Plunk Lite: the contacts waiting at the end of the workflow leave it too (they stay finished)
+    const released = await ParkedRuns.release(prisma, {workflowId});
 
     // Cancel all running and waiting executions
     const result = await prisma.workflowExecution.updateMany({
@@ -1467,7 +1519,7 @@ export class WorkflowService {
       },
     });
 
-    return {cancelled: result.count};
+    return {cancelled: result.count, released};
   }
 
   /**

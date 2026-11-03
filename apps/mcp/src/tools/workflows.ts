@@ -56,6 +56,8 @@ interface ExecutionList {
 interface Execution {
   id: string;
   status?: string;
+  /** Plunk Lite: finished, and waiting at the end of the workflow for new steps */
+  parked?: boolean;
   contact?: {id: string; email?: string};
   currentStep?: {id: string; name?: string; type?: string} | null;
 }
@@ -454,7 +456,9 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
         '**Returns:** A numbered outline of the flow, then the workflow with `steps[]`. Each step has',
         '`type` (TRIGGER, SEND_EMAIL, DELAY, WAIT_FOR_EVENT, CONDITION, EXIT, WEBHOOK, UPDATE_CONTACT),',
         '`config`, the linked `template`, and its `outgoingTransitions` / `incomingTransitions`. A',
-        'transition out of a CONDITION carries `condition.branch`.',
+        'transition out of a CONDITION carries `condition.branch`. `keepUntilExit` says whether',
+        'contacts who reach the end without an EXIT step wait there for new steps, and `parked[]` who',
+        'waits where (`stepId`, `branch`, `count`, `canContinue`: a step now follows where they wait).',
         '',
         '**Key trigger phrases:** "show me the workflow", "what does this automation do"',
       ].join('\n'),
@@ -470,7 +474,7 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
 
         return jsonResult(
           `Workflow "${workflow.name ?? id}" is ${workflow.enabled ? 'enabled' : 'disabled'} and has ` +
-            `${workflow.steps?.length ?? 0} step(s).\n\n${outline}`,
+            `${workflow.steps?.length ?? 0} step(s).${parkedNote(workflow)}\n\n${outline}`,
           workflow,
         );
       }),
@@ -684,8 +688,8 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
     {
       title: 'Update workflow',
       description: [
-        '**Purpose:** Rename a workflow, edit its description, change the event that starts it, or',
-        'allow / forbid re-entry.',
+        '**Purpose:** Rename a workflow, edit its description, change the event that starts it,',
+        'allow / forbid re-entry, or keep contacts in it until an EXIT step.',
         '',
         '**NOT for:** Turning it on or off (use `plunk_set_workflow_enabled`) or editing steps (use',
         '`plunk_update_workflow_step`).',
@@ -693,6 +697,11 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
         '**Note:** on an enabled workflow that sends email, changing the trigger event or allowing',
         're-entry changes who receives it, so it asks the user to confirm first. The trigger event',
         'cannot change while runs are in progress; disable the workflow first.',
+        '',
+        '**keepUntilExit:** with it on, a contact who reaches the end without an EXIT step waits',
+        'there; once steps are added after that point, `plunk_continue_waiting_contacts` lets them go',
+        'on. Turning it off lets the contacts waiting at the end leave the workflow, so it asks the user',
+        'to confirm first when any are waiting.',
         '',
         '**Returns:** The updated workflow.',
       ].join('\n'),
@@ -702,13 +711,35 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
         description: z.string().max(500).optional().describe('New internal note.'),
         eventName: z.string().min(1).optional().describe('New trigger event.'),
         allowReentry: z.boolean().optional().describe('Let a contact enter again after a previous run.'),
+        keepUntilExit: z
+          .boolean()
+          .optional()
+          .describe('Keep contacts who reach the end without an EXIT step until steps are added after it.'),
       }),
       annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true},
     },
-    async ({id, name, description, eventName, allowReentry}, context) =>
+    async ({id, name, description, eventName, allowReentry, keepUntilExit}, context) =>
       runTool(async () => {
-        if ([name, description, eventName, allowReentry].every((value) => value === undefined)) {
-          return errorResult('Nothing to update: pass name, description, eventName or allowReentry.');
+        if ([name, description, eventName, allowReentry, keepUntilExit].every((value) => value === undefined)) {
+          return errorResult('Nothing to update: pass name, description, eventName, allowReentry or keepUntilExit.');
+        }
+
+        if (keepUntilExit === false) {
+          const workflow = await getWorkflow(client, id);
+          const waiting = (workflow.parked ?? []).reduce((sum, group) => sum + group.count, 0);
+
+          if (waiting > 0) {
+            const pending = requireConfirmation(
+              context as {mcpReq?: {inputResponses?: unknown}},
+              'confirm_keep_until_exit_off',
+              `Stop keeping contacts in "${workflow.name ?? id}" until an EXIT step? The ${waiting} contact(s) ` +
+                'waiting at its end leave it and will not get the steps added after the end.',
+            );
+
+            if (pending) {
+              return pending;
+            }
+          }
         }
 
         if (eventName !== undefined || allowReentry === true) {
@@ -736,7 +767,7 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
         const result = await client.request<Workflow>({
           method: 'PATCH',
           path: workflowPath(id),
-          body: {name, description, allowReentry, triggerConfig: eventName ? {eventName} : undefined},
+          body: {name, description, allowReentry, keepUntilExit, triggerConfig: eventName ? {eventName} : undefined},
         });
 
         return jsonResult('Workflow updated.', result);
@@ -1419,12 +1450,89 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
 
   register(
     ctx,
+    'plunk_continue_waiting_contacts',
+    {
+      title: 'Continue waiting contacts',
+      description: [
+        '**Purpose:** In a workflow with `keepUntilExit`, let the contacts waiting at its end continue',
+        'into the steps added after where they wait. Asks the user to confirm when the workflow sends',
+        'email: they go through the new steps now, in rounds, and emails go out right away.',
+        '',
+        '**Before:** add and configure the new steps; this refuses while `plunk_check_workflow` reports',
+        'errors, while the workflow is disabled, or while nobody can continue (see `parked[]` in',
+        '`plunk_get_workflow`). A contact with nothing after where it waits keeps waiting.',
+        '',
+        '**Returns:** How many can continue now, and the pace (`perRound` contacts every',
+        '`everyMinutes` minutes).',
+        '',
+        '**Key trigger phrases:** "send the new step to those who finished", "continue the waiting contacts"',
+      ].join('\n'),
+      inputSchema: z.object({
+        id: z.string().describe('The workflow ID.'),
+      }),
+      annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true},
+    },
+    async ({id}, context) =>
+      runTool(async () => {
+        const workflow = await getWorkflow(client, id);
+        const continuable = (workflow.parked ?? [])
+          .filter((group) => group.canContinue)
+          .reduce((sum, group) => sum + group.count, 0);
+
+        if (!workflow.enabled) {
+          return errorResult(`Workflow "${workflow.name ?? id}" is disabled; enable it first.`);
+        }
+        if (continuable === 0) {
+          return errorResult(
+            `Nobody waiting in "${workflow.name ?? id}" can continue: connect a step after where they wait first.`,
+          );
+        }
+
+        const errors = reviewWorkflow(workflow).issues.filter((issue) => issue.severity === 'error');
+        if (errors.length > 0) {
+          return errorResult(
+            `Not letting them continue in "${workflow.name ?? id}": fix these first.\n` +
+              errors.map((issue) => `- ${issue.message}`).join('\n'),
+          );
+        }
+
+        if (countEmailSteps(workflow) > 0) {
+          const pace = workflow.continuePace
+            ? `, ${workflow.continuePace.perRound} every ${workflow.continuePace.everyMinutes} minutes`
+            : '';
+          const pending = requireConfirmation(
+            context as {mcpReq?: {inputResponses?: unknown}},
+            'confirm_continue_waiting',
+            `Let ${continuable} contact(s) waiting at the end of "${workflow.name ?? id}" continue into the new ` +
+              `steps now${pace}? Sent emails cannot be recalled.`,
+          );
+
+          if (pending) {
+            return pending;
+          }
+        }
+
+        const result = await client.request<{continuable: number; perRound: number; everyMinutes: number}>({
+          method: 'POST',
+          path: workflowPath(id, 'parked', 'continue'),
+        });
+
+        return jsonResult(
+          `${result.continuable} contact(s) continuing, ${result.perRound} every ${result.everyMinutes} minutes.`,
+          result,
+        );
+      }),
+  );
+
+  register(
+    ctx,
     'plunk_cancel_workflow_executions',
     {
       title: 'Cancel workflow executions',
       description: [
         '**Purpose:** Stop runs in progress: one execution, or every running and waiting execution of',
-        'the workflow. Only RUNNING and WAITING executions can be cancelled.',
+        'the workflow. Only RUNNING and WAITING executions can be cancelled, and (Plunk Lite) runs',
+        'waiting at the end of a `keepUntilExit` workflow, which then leave it.',
         '',
         '**Caveat:** on self-hosted servers running an older Plunk version, a run parked on a',
         'WAIT_FOR_EVENT step can still resume when that event arrives or its timeout passes, so check it',
@@ -1432,7 +1540,10 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
         '',
         '**NOT for:** Stopping new contacts from entering — disable the workflow for that.',
         '',
-        '**Returns:** The cancelled execution, or how many were cancelled.',
+        '**Confirms** with the user first when `all` would also let contacts waiting at the end go.',
+        '',
+        '**Returns:** The cancelled execution, or how many were cancelled and how many waiting at the',
+        'end were let go (`released`).',
       ].join('\n'),
       inputSchema: z.object({
         id: z.string().describe('The workflow ID.'),
@@ -1441,7 +1552,7 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
       }),
       annotations: {readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true},
     },
-    async ({id, executionId, all}) =>
+    async ({id, executionId, all}, context) =>
       runTool(async () => {
         if (!executionId === !all) {
           return errorResult('Pass either executionId or all=true.');
@@ -1451,7 +1562,7 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
           // The API cancels whatever it is given, which would overwrite the outcome of a finished run.
           const current = await client.request<Execution>({path: workflowPath(id, 'executions', executionId)});
 
-          if (current.status !== 'RUNNING' && current.status !== 'WAITING') {
+          if (current.status !== 'RUNNING' && current.status !== 'WAITING' && !current.parked) {
             return errorResult(`Execution ${executionId} is ${current.status ?? 'not active'}; nothing to cancel.`);
           }
 
@@ -1463,13 +1574,48 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
           return jsonResult(`Cancelled execution ${executionId}.`, execution);
         }
 
-        const result = await client.request<{cancelled: number}>({
+        // Plunk Lite: cancel-all also lets the contacts waiting at the end leave, for good
+        const workflow = await getWorkflow(client, id);
+        const waiting = (workflow.parked ?? []).reduce((sum, group) => sum + group.count, 0);
+
+        if (waiting > 0) {
+          const pending = requireConfirmation(
+            context as {mcpReq?: {inputResponses?: unknown}},
+            'confirm_cancel_all_waiting',
+            `Cancel every active execution of "${workflow.name ?? id}"? The ${waiting} contact(s) waiting at its ` +
+              'end leave it too and will not get the steps added after the end.',
+          );
+
+          if (pending) {
+            return pending;
+          }
+        }
+
+        const result = await client.request<{cancelled: number; released?: number}>({
           method: 'POST',
           path: workflowPath(id, 'executions', 'cancel-all'),
         });
 
-        return jsonResult(`Cancelled ${result.cancelled} execution(s).`, result);
+        return jsonResult(
+          `Cancelled ${result.cancelled} execution(s)` +
+            (result.released ? `, and let ${result.released} waiting at the end leave.` : '.'),
+          result,
+        );
       }),
+  );
+}
+
+/** Plunk Lite: who waits at the end of a workflow that keeps its contacts until an EXIT step */
+function parkedNote(workflow: Workflow): string {
+  if (!workflow.keepUntilExit) {
+    return '';
+  }
+  const groups = workflow.parked ?? [];
+  const waiting = groups.reduce((sum, group) => sum + group.count, 0);
+  const ready = groups.filter((group) => group.canContinue).reduce((sum, group) => sum + group.count, 0);
+  return (
+    ` It keeps contacts until an EXIT step: ${waiting} waiting at the end, ${ready} of them can continue` +
+    (ready > 0 ? ' (plunk_continue_waiting_contacts).' : '.')
   );
 }
 

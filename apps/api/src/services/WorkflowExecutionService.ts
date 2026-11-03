@@ -30,10 +30,12 @@ import {DASHBOARD_URI} from '../app/constants.js';
 import {POOL_WAIT_TRANSACTION} from '../utils/database.js';
 import {readCapped} from '../utils/readCapped.js';
 import {signWebhook, WEBHOOK_SIGNATURE_HEADER} from '../utils/webhookSignature.js';
+import {pickTransition} from '../utils/workflowTransitions.js';
 
 import {RECIPIENT_OVERRIDE_HEADER} from './EmailHeaderService.js';
 import {EmailService} from './EmailService.js';
 import {NtfyService} from './NtfyService.js';
+import {ParkedRuns} from './ParkedRuns.js';
 import {QueueService} from './QueueService.js';
 import {SuppressionService} from './SuppressionService.js';
 import {
@@ -79,6 +81,30 @@ type WorkflowStepWithTransitions = WorkflowStep & {
   }>;
 };
 
+/** What running a run's steps reads with it: its contact, and its workflow's steps, transitions and project */
+const RUN_INCLUDE = {
+  workflow: {
+    include: {
+      steps: {
+        include: {
+          template: true,
+          outgoingTransitions: {
+            // Plunk Lite: then by ID, so that transitions of equal priority are taken in one order,
+            // the one ParkedRuns reads too
+            orderBy: [{priority: 'asc'}, {id: 'asc'}],
+            include: {toStep: true},
+          },
+        },
+      },
+      project: {
+        select: {disabled: true, id: true, name: true},
+      },
+    },
+  },
+  contact: true,
+} satisfies Prisma.WorkflowExecutionInclude;
+type RunWithSteps = Prisma.WorkflowExecutionGetPayload<{include: typeof RUN_INCLUDE}>;
+
 /**
  * Core Workflow Execution Engine
  * Handles the execution of workflows step by step
@@ -91,28 +117,7 @@ export class WorkflowExecutionService {
   public static async processStepExecution(executionId: string, stepId: string): Promise<void> {
     signale.info(`[WORKFLOW] Processing step execution: ${executionId} -> ${stepId}`);
 
-    const execution = await prisma.workflowExecution.findUnique({
-      where: {id: executionId},
-      include: {
-        workflow: {
-          include: {
-            steps: {
-              include: {
-                template: true,
-                outgoingTransitions: {
-                  orderBy: {priority: 'asc'},
-                  include: {toStep: true},
-                },
-              },
-            },
-            project: {
-              select: {disabled: true, id: true, name: true},
-            },
-          },
-        },
-        contact: true,
-      },
-    });
+    const execution = await prisma.workflowExecution.findUnique({where: {id: executionId}, include: RUN_INCLUDE});
 
     if (!execution) {
       // Plunk Lite: its contact or workflow was deleted; retrying the job would not bring it back
@@ -398,13 +403,13 @@ export class WorkflowExecutionService {
     } else {
       // No transitions, complete workflow (Plunk Lite: a cancelled or failed run keeps its status,
       // and a waiting one is left to what ends its wait)
-      await prisma.workflowExecution.updateMany({
-        where: {id: stepExecution.executionId, status: {notIn: UNMOVABLE_STATUSES}},
-        data: {
-          status: WorkflowExecutionStatus.COMPLETED,
-          completedAt: new Date(),
-        },
-      });
+      await this.completeRun(
+        stepExecution.execution,
+        stepExecution.step,
+        null,
+        {status: {notIn: UNMOVABLE_STATUSES}},
+        {status: WorkflowExecutionStatus.COMPLETED, completedAt: new Date()},
+      );
     }
   }
 
@@ -450,13 +455,10 @@ export class WorkflowExecutionService {
     }
 
     // Nothing is connected after the delay now, so the workflow is done (claimed like the move above)
-    await prisma.workflowExecution.updateMany({
-      where: waitingHere,
-      data: {
-        status: WorkflowExecutionStatus.COMPLETED,
-        completedAt: new Date(),
-        currentStepId: null,
-      },
+    await this.completeRun(execution, {id: stepId, type: 'DELAY'}, null, waitingHere, {
+      status: WorkflowExecutionStatus.COMPLETED,
+      completedAt: new Date(),
+      currentStepId: null,
     });
   }
 
@@ -1645,66 +1647,20 @@ export class WorkflowExecutionService {
   ): Promise<void> {
     const transitions = currentStep.outgoingTransitions || [];
 
-    if (transitions.length === 0) {
-      // No more steps, complete the workflow
-      // Plunk Lite: a cancelled or failed run keeps its status, and a waiting one is left to what
-      // ends its wait (a late copy of a job must not complete it)
-      await prisma.workflowExecution.updateMany({
-        where: {id: execution.id, status: {notIn: UNMOVABLE_STATUSES}},
-        data: {
-          status: WorkflowExecutionStatus.COMPLETED,
-          completedAt: new Date(),
-          currentStepId: null,
-        },
-      });
-      return;
-    }
-
     // Find the appropriate transition based on conditions
-    let nextStep = null;
-
-    for (const transition of transitions) {
-      const condition = transition.condition;
-
-      // If no condition, always follow
-      if (!condition) {
-        nextStep = transition.toStep;
-        break;
-      }
-
-      // If condition exists, evaluate it
-      // For CONDITION steps, check the branch
-      if (
-        stepResult.branch &&
-        typeof condition === 'object' &&
-        condition !== null &&
-        !Array.isArray(condition) &&
-        'branch' in condition &&
-        condition.branch === stepResult.branch
-      ) {
-        nextStep = transition.toStep;
-        break;
-      }
-
-      // For other conditional logic
-      if (this.evaluateTransitionCondition(condition, stepResult, execution)) {
-        nextStep = transition.toStep;
-        break;
-      }
-    }
+    const nextStep = pickTransition(transitions, stepResult)?.toStep;
 
     if (!nextStep) {
-      // No valid transition found, complete workflow
-      // Plunk Lite: a cancelled or failed run keeps its status, and a waiting one is left to what
-      // ends its wait
-      await prisma.workflowExecution.updateMany({
-        where: {id: execution.id, status: {notIn: UNMOVABLE_STATUSES}},
-        data: {
-          status: WorkflowExecutionStatus.COMPLETED,
-          completedAt: new Date(),
-          currentStepId: null,
-        },
-      });
+      // No more steps, or no valid transition (a condition's branch with nothing connected):
+      // complete the workflow. Plunk Lite: a cancelled or failed run keeps its status, and a waiting
+      // one is left to what ends its wait (a late copy of a job must not complete it)
+      await this.completeRun(
+        execution,
+        currentStep,
+        typeof stepResult.branch === 'string' ? stepResult.branch : null,
+        {status: {notIn: UNMOVABLE_STATUSES}},
+        {status: WorkflowExecutionStatus.COMPLETED, completedAt: new Date(), currentStepId: null},
+      );
       return;
     }
 
@@ -1719,19 +1675,108 @@ export class WorkflowExecutionService {
   }
 
   /**
-   * Plunk Lite: a run resumed by an event failed. A step that failed has already failed its run and
+   * Complete a run that has nowhere to go from `step` (`where` narrows which run may be completed).
+   * Plunk Lite: in a workflow that keeps its contacts until an Exit step, the run is parked there
+   * too, with the branch the step took, unless that step is the Exit itself (a run that went
+   * through one is completed here as well). If parking fails, the run is completed as it would be
+   * without it: the contact then simply finishes the workflow.
+   */
+  private static async completeRun(
+    run: {id: string; workflowId: string; contactId: string},
+    step: Pick<WorkflowStep, 'id' | 'type'>,
+    branch: string | null,
+    where: Prisma.WorkflowExecutionWhereInput,
+    data: Prisma.WorkflowExecutionUncheckedUpdateManyInput,
+  ): Promise<void> {
+    if (step.type !== 'EXIT') {
+      try {
+        if (await ParkedRuns.keepsUntilExit(run.workflowId)) {
+          await ParkedRuns.completeAndPark(run, step.id, branch, where, data);
+          return;
+        }
+      } catch (error) {
+        signale.warn(
+          `[WORKFLOW] Could not park execution ${run.id} at the end of its workflow: ${errorMessage(error)}`,
+        );
+      }
+    }
+
+    await prisma.workflowExecution.updateMany({where: {...where, id: run.id}, data});
+  }
+
+  /**
+   * Plunk Lite: let a run that waited at the end of its workflow continue into the steps connected
+   * after where it waited, from that step and on the branch it took then (see ParkedRuns), if it
+   * still waits where it was picked (`at`) and that still leads to the step it was let continue to.
+   * A job per run; claiming it makes a repeated job, or one for a run that moved or left meanwhile,
+   * do nothing, and a route changed since it was picked leaves it waiting.
+   */
+  public static async continueParked(
+    executionId: string,
+    at: {stepId: string; branch: string | null; toStepId: string},
+  ): Promise<void> {
+    const claimed = await ParkedRuns.claim(executionId, at);
+    if (!claimed) {
+      return;
+    }
+
+    let execution: RunWithSteps | null;
+    try {
+      execution = await prisma.workflowExecution.findUnique({where: {id: executionId}, include: RUN_INCLUDE});
+    } catch (error) {
+      // Claimed but not read: back to waiting where it was, so that it is not left running until
+      // the recovery sweep fails it. If that fails too, the sweep does.
+      await ParkedRuns.unclaim(executionId, claimed).catch(() => false);
+      throw error;
+    }
+    if (!execution) {
+      return;
+    }
+
+    try {
+      const step = execution.workflow.steps.find(s => s.id === claimed.stepId);
+      if (!step) {
+        // Deleted after the run was let continue: it waits at the last step it did that is still there
+        if (await ParkedRuns.unclaim(executionId, claimed)) {
+          await ParkedRuns.parkBeforeMissingSteps(execution.workflowId);
+        }
+        return;
+      }
+
+      // Only to the step whoever let it continue saw: a route changed since leaves it waiting
+      const route = ParkedRuns.routeFrom(step, claimed.branch);
+      if (route.toStepId !== at.toStepId) {
+        signale.info(`[WORKFLOW] Execution ${executionId} keeps waiting: ${step.name} leads elsewhere now`);
+        await ParkedRuns.unclaim(executionId, claimed);
+        return;
+      }
+
+      signale.info(`[WORKFLOW] Execution ${executionId} continues from ${step.name}, where it waited`);
+      await this.processNextSteps(execution, step, route.branch ? {branch: route.branch} : {});
+    } catch (error) {
+      await this.failResumedRun(execution, error, 'Continuing from the end of the workflow failed');
+    }
+  }
+
+  /**
+   * Plunk Lite: a run resumed by an event, or let continue from the end of its workflow, failed
+   * (`reason` says which). A step that failed has already failed its run and
    * alerted; anything else (moving on, before any step ran) fails it here, with the reason, so it
    * is not left RUNNING, its wait claimed, until the sweep fails it as interrupted.
    */
-  private static async failResumedRun(execution: WorkflowExecutionWithRelations, error: unknown): Promise<void> {
+  private static async failResumedRun(
+    execution: WorkflowExecutionWithRelations,
+    error: unknown,
+    reason = 'Resuming after the event failed',
+  ): Promise<void> {
     if (typeof error === 'object' && error !== null && handledFailures.has(error)) {
       return;
     }
-    signale.error(`[WORKFLOW] Resuming execution ${execution.id} after its event failed:`, error);
+    signale.error(`[WORKFLOW] Execution ${execution.id}: ${reason}:`, error);
     try {
       await WorkflowRecoveryService.failRun(execution, {
-        error: error instanceof Error ? error.message : 'Resuming after the event failed',
-        exitReason: 'Resuming after the event failed',
+        error: error instanceof Error ? error.message : reason,
+        exitReason: reason,
       });
     } catch (failError) {
       // The database is out too: the run stays as it was, and the alert of the failure is lost
@@ -1929,18 +1974,5 @@ export class WorkflowExecutionService {
       default:
         throw new Error(`Unknown operator: ${operator}`);
     }
-  }
-
-  /**
-   * Helper: Evaluate transition condition
-   */
-  private static evaluateTransitionCondition(
-    _condition: Prisma.JsonValue,
-    _stepResult: StepResult,
-    _execution: WorkflowExecutionWithRelations,
-  ): boolean {
-    // Implement custom transition condition logic here
-    // For now, return false as default
-    return false;
   }
 }

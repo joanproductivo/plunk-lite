@@ -3,18 +3,25 @@
  * Processes workflow steps from the queue (for delayed steps)
  */
 
-import type {WorkflowStepJobData} from '@plunk/types';
+import type {WorkflowQueueJobData} from '@plunk/types';
 import {type Job, Worker} from 'bullmq';
 import signale from 'signale';
 
 import {FailureAlertService} from '../services/FailureAlertService.js';
+import {ParkedRuns} from '../services/ParkedRuns.js';
 import {workflowQueue} from '../services/QueueService.js';
 import {WorkflowExecutionService} from '../services/WorkflowExecutionService.js';
 
 export function createWorkflowWorker() {
-  const worker = new Worker<WorkflowStepJobData>(
+  const worker = new Worker<WorkflowQueueJobData>(
     workflowQueue.name,
-    async (job: Job<WorkflowStepJobData>) => {
+    async (job: Job<WorkflowQueueJobData>) => {
+      // Plunk Lite: a round of letting the contacts waiting at the end of a workflow continue
+      if (job.data.type === 'continue-parked-round') {
+        await ParkedRuns.continueRound(job.data);
+        return;
+      }
+
       const {executionId, stepId, type, stepExecutionId} = job.data;
 
       if (type === 'timeout') {
@@ -37,6 +44,13 @@ export function createWorkflowWorker() {
       } else if (type === 'resume-step') {
         // A failed run someone chose to retry, already claimed as running
         await WorkflowExecutionService.processStepExecution(executionId, stepId);
+      } else if (type === 'continue-parked') {
+        // Plunk Lite: a run waiting at the end of a workflow, let continue (it claims itself)
+        await WorkflowExecutionService.continueParked(executionId, {
+          stepId,
+          branch: job.data.branch ?? null,
+          toStepId: job.data.toStepId ?? '',
+        });
       } else {
         // A step queued for after a delay, by jobs from before delays ended through delay-end:
         // ended through the delay the run waits on, if it still does
@@ -55,7 +69,7 @@ export function createWorkflowWorker() {
 
   worker.on('failed', (job, err) => {
     signale.error(`[WORKFLOW-PROCESSOR] Job ${job?.id} failed:`, err.message);
-    if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) {
+    if (job && 'executionId' in job.data && job.attemptsMade >= (job.opts.attempts ?? 1)) {
       void FailureAlertService.recordWorkflowJob(job.data.executionId, err.message);
     }
   });

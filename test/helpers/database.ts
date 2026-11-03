@@ -26,6 +26,8 @@ const TRUNCATE_TABLES = [
   'plunk_lite_webhook_secrets',
   'plunk_lite_optin_settings',
   'plunk_lite_optin_requests',
+  'plunk_lite_workflow_settings',
+  'plunk_lite_parked_runs',
 ];
 
 /**

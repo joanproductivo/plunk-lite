@@ -25,6 +25,7 @@ import {
   Switch,
 } from '@plunk/ui';
 import type {Workflow, WorkflowStep, WorkflowTransition} from '@plunk/db';
+import type {ParkedGroup} from '@plunk/types';
 import {DashboardLayout} from '../../components/DashboardLayout';
 import {network} from '../../lib/network';
 import {
@@ -42,6 +43,7 @@ import {useEffect, useState} from 'react';
 import {toast} from 'sonner';
 import useSWR from 'swr';
 import {NextSeo} from 'next-seo';
+import {ParkedContactsBanner} from '../../components/ParkedContactsBanner';
 import {WorkflowBuilder} from '../../components/WorkflowBuilder';
 import {WorkflowExecutionsTable, type PaginatedExecutions} from '../../components/WorkflowExecutionsTable';
 import {EditStepDialog} from '../../components/workflow-steps';
@@ -55,6 +57,12 @@ interface WorkflowWithDetails extends Workflow {
     outgoingTransitions: WorkflowTransition[];
     incomingTransitions: WorkflowTransition[];
   })[];
+  /** Plunk Lite: contacts who reach the end without an Exit step wait there for new steps */
+  keepUntilExit?: boolean;
+  /** Plunk Lite: who waits where at the end of the workflow */
+  parked?: ParkedGroup[];
+  /** Plunk Lite: how fast they continue */
+  continuePace?: {perRound: number; everyMinutes: number};
 }
 
 export default function WorkflowEditorPage() {
@@ -78,6 +86,8 @@ export default function WorkflowEditorPage() {
 
   const {data: workflow, mutate} = useSWR<WorkflowWithDetails>(id ? `/workflows/${id}` : null, {
     revalidateOnFocus: false,
+    // Plunk Lite: while contacts that can continue wait at the end, so the banner follows the rounds
+    refreshInterval: latest => (latest?.parked?.some(group => group.canContinue) ? 15_000 : 0),
   });
 
   // Always fetch a summary of active executions to show warnings (regardless of enabled status)
@@ -90,6 +100,9 @@ export default function WorkflowEditorPage() {
     id ? `/workflows/${id}/executions?page=1&pageSize=1&status=WAITING` : null,
     {revalidateOnFocus: false, refreshInterval: 10000},
   );
+
+  // Plunk Lite: contacts waiting at the end of the workflow
+  const parkedTotal = workflow?.parked?.reduce((sum, group) => sum + group.count, 0) ?? 0;
 
   // Check for active executions
   const activeExecutionsCount = (activeExecutionsData?.total || 0) + (waitingExecutionsData?.total || 0);
@@ -268,6 +281,7 @@ export default function WorkflowEditorPage() {
     name: string;
     description?: string;
     allowReentry?: boolean;
+    keepUntilExit?: boolean;
     triggerConfig?: {eventName: string};
   }) => {
     try {
@@ -416,6 +430,18 @@ export default function WorkflowEditorPage() {
           </Alert>
         )}
 
+        {/* Plunk Lite: contacts waiting at the end of the workflow */}
+        {workflow.parked && workflow.parked.length > 0 && workflow.continuePace && (
+          <ParkedContactsBanner
+            workflowId={id as string}
+            enabled={workflow.enabled}
+            parked={workflow.parked}
+            pace={workflow.continuePace}
+            validation={validateWorkflow(workflow)}
+            onContinued={() => void mutate()}
+          />
+        )}
+
         {/* Validation Warning Banner / Ready-to-enable Banner */}
         {!workflow.enabled &&
           (() => {
@@ -491,7 +517,12 @@ export default function WorkflowEditorPage() {
             </CardHeader>
             <CardContent className="p-0">
               <ReactFlowProvider>
-                <WorkflowBuilder workflowId={id as string} steps={workflow.steps} onUpdate={() => mutate()} />
+                <WorkflowBuilder
+                  workflowId={id as string}
+                  steps={workflow.steps}
+                  parked={workflow.parked ?? []}
+                  onUpdate={() => mutate()}
+                />
               </ReactFlowProvider>
             </CardContent>
           </Card>
@@ -499,6 +530,7 @@ export default function WorkflowEditorPage() {
           <WorkflowExecutionsTable
             workflowId={id as string}
             activeExecutionsCount={activeExecutionsCount}
+            parkedCount={parkedTotal}
             onChange={() => {
               void mutate();
               void mutateRunning();
@@ -513,6 +545,7 @@ export default function WorkflowEditorPage() {
         <>
           <SettingsDialog
             workflow={workflow}
+            parkedTotal={parkedTotal}
             open={dialog.type === 'settings'}
             onOpenChange={open => !open && setDialog({type: 'none'})}
             onSave={handleUpdateSettings}
@@ -533,7 +566,11 @@ export default function WorkflowEditorPage() {
             onOpenChange={open => !open && setDialog({type: 'none'})}
             onConfirm={handleDelete}
             title={`Delete ${workflow.name}?`}
-            description="Its steps and execution history are deleted too. This can't be undone."
+            description={`Its steps and execution history are deleted too${
+              parkedTotal > 0
+                ? `, and the ${parkedTotal === 1 ? 'contact' : `${parkedTotal} contacts`} waiting at its end leave it`
+                : ''
+            }. This can't be undone.`}
             confirmText="Delete workflow"
             variant="destructive"
           />
@@ -545,22 +582,26 @@ export default function WorkflowEditorPage() {
 
 // Settings Dialog Component
 interface SettingsDialogProps {
-  workflow: Workflow;
+  workflow: WorkflowWithDetails;
+  /** Plunk Lite: contacts waiting at the end of the workflow */
+  parkedTotal: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSave: (data: {
     name: string;
     description?: string;
     allowReentry?: boolean;
+    keepUntilExit?: boolean;
     triggerConfig?: {eventName: string};
   }) => Promise<void>;
 }
 
-function SettingsDialog({workflow, open, onOpenChange, onSave}: SettingsDialogProps) {
+function SettingsDialog({workflow, parkedTotal, open, onOpenChange, onSave}: SettingsDialogProps) {
   const triggerConfig = workflow.triggerConfig as {eventName?: string} | null;
   const [name, setName] = useState(workflow.name);
   const [description, setDescription] = useState(workflow.description ?? '');
   const [allowReentry, setAllowReentry] = useState(workflow.allowReentry ?? false);
+  const [keepUntilExit, setKeepUntilExit] = useState(workflow.keepUntilExit ?? false);
   const [eventName, setEventName] = useState(triggerConfig?.eventName ?? '');
   const [eventPopoverOpen, setEventPopoverOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -571,6 +612,7 @@ function SettingsDialog({workflow, open, onOpenChange, onSave}: SettingsDialogPr
       setName(workflow.name);
       setDescription(workflow.description ?? '');
       setAllowReentry(workflow.allowReentry ?? false);
+      setKeepUntilExit(workflow.keepUntilExit ?? false);
       const config = workflow.triggerConfig as {eventName?: string} | null;
       setEventName(config?.eventName ?? '');
     }
@@ -590,6 +632,8 @@ function SettingsDialog({workflow, open, onOpenChange, onSave}: SettingsDialogPr
         name,
         description: description || undefined,
         allowReentry,
+        // Only when it changes: the switch lives in a table of its own (Plunk Lite)
+        keepUntilExit: keepUntilExit !== (workflow.keepUntilExit ?? false) ? keepUntilExit : undefined,
         triggerConfig: eventName.trim() ? {eventName: eventName.trim()} : undefined,
       });
     } finally {
@@ -685,6 +729,25 @@ function SettingsDialog({workflow, open, onOpenChange, onSave}: SettingsDialogPr
                 When enabled, contacts can enter this workflow multiple times. When disabled, contacts can only enter
                 once, ever.
               </p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3 p-4 bg-neutral-50 rounded-lg border border-neutral-200">
+            <Switch id="keepUntilExit" checked={keepUntilExit} onCheckedChange={setKeepUntilExit} />
+            <div className="flex-1">
+              <Label htmlFor="keepUntilExit" className="font-medium cursor-pointer">
+                Keep contacts until an Exit step
+              </Label>
+              <p className="text-xs text-neutral-500 mt-1">
+                Contacts who reach the end without an Exit step wait there. When you add steps after it, you choose when
+                they continue.
+              </p>
+              {!keepUntilExit && workflow.keepUntilExit && parkedTotal > 0 && (
+                <p className="text-xs text-amber-700 mt-2">
+                  {parkedTotal === 1 ? 'The contact' : `The ${parkedTotal} contacts`} waiting at the end will leave the
+                  workflow when you save.
+                </p>
+              )}
             </div>
           </div>
 

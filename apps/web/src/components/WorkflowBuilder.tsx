@@ -17,6 +17,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type {WorkflowStep} from '@plunk/db';
+import type {ParkedGroup} from '@plunk/types';
 import {
   Clock,
   ExternalLink,
@@ -62,6 +63,8 @@ interface WorkflowBuilderProps {
       priority: number;
     }>;
   })[];
+  /** Plunk Lite: contacts waiting at the end of the workflow, where they wait */
+  parked?: ParkedGroup[];
   onUpdate: () => void;
 }
 
@@ -532,7 +535,7 @@ const STEP_TYPE_OPTIONS = [
   {value: 'EXIT', label: 'Exit', icon: LogOut, color: STEP_TYPE_COLORS.EXIT},
 ];
 
-export function WorkflowBuilder({workflowId, steps, onUpdate}: WorkflowBuilderProps) {
+export function WorkflowBuilder({workflowId, steps, parked = [], onUpdate}: WorkflowBuilderProps) {
   const [pickerContext, setPickerContext] = useState<PickerContext | null>(null);
   const [transitionToDisconnect, setTransitionToDisconnect] = useState<string | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -1329,6 +1332,14 @@ export function WorkflowBuilder({workflowId, steps, onUpdate}: WorkflowBuilderPr
           const canSplice = !isCondition && hasChildren;
           const isSplice = canSplice && deleteMode === 'splice';
           const stepCount = `${downstreamSteps.length} downstream ${downstreamSteps.length === 1 ? 'step' : 'steps'}`;
+          // Plunk Lite: contacts waiting at a step that goes wait at the step before it instead
+          const goingIds = new Set(isSplice ? [stepToDelete] : affectedSteps.map(s => s.id));
+          const waiting = parked.filter(g => goingIds.has(g.stepId)).reduce((sum, g) => sum + g.count, 0);
+          const baseDescription = canSplice
+            ? 'Choose what happens to the steps after it.'
+            : isCondition && hasChildren
+              ? `A condition can't be lifted out of the flow, so its ${stepCount} across every branch are deleted with it. This can't be undone.`
+              : "This step is removed from the workflow. This can't be undone.";
 
           return (
             <ConfirmDialog
@@ -1337,11 +1348,14 @@ export function WorkflowBuilder({workflowId, steps, onUpdate}: WorkflowBuilderPr
               onConfirm={handleDeleteStep}
               title={`Remove ${stepToDeleteData?.name ?? 'this step'}?`}
               description={
-                canSplice
-                  ? 'Choose what happens to the steps after it.'
-                  : isCondition && hasChildren
-                    ? `A condition can't be lifted out of the flow, so its ${stepCount} across every branch are deleted with it. This can't be undone.`
-                    : "This step is removed from the workflow. This can't be undone."
+                waiting > 0 ? (
+                  <>
+                    {baseDescription} {waiting === 1 ? 'The contact' : `The ${waiting} contacts`} waiting after{' '}
+                    {isSplice || !hasChildren ? 'it' : 'these steps'} will wait at the step before it.
+                  </>
+                ) : (
+                  baseDescription
+                )
               }
               details={
                 canSplice ? (

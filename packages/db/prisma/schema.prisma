@@ -1042,3 +1042,37 @@ model PlunkLiteOptInRequest {
   @@index([projectId, confirmedAt])
   @@map("plunk_lite_optin_requests")
 }
+
+/// Plunk Lite: a workflow's own settings. `keepUntilExit`: a contact who reaches the end of the
+/// workflow without an Exit step waits there (PlunkLiteParkedRun) for steps added after it. No
+/// relation to Workflow, like the other tables of Plunk Lite: its row goes with the workflow or the
+/// project explicitly (see ParkedRuns).
+model PlunkLiteWorkflowSettings {
+  workflowId    String   @id
+  projectId     String
+  keepUntilExit Boolean  @default(false)
+  updatedAt     DateTime @updatedAt
+
+  @@index([projectId])
+  @@map("plunk_lite_workflow_settings")
+}
+
+/// Plunk Lite: a run that reached the end of a workflow that keeps its contacts until an Exit step
+/// (see ParkedRuns). The run itself is COMPLETED, as Plunk has it; this row is where it waits, and
+/// the branch its last step took (a condition), until someone lets it continue into the steps added
+/// after it. No relation to WorkflowExecution, like the other tables of Plunk Lite: a deleted run's
+/// row is ignored and cleaned up lazily.
+model PlunkLiteParkedRun {
+  executionId String   @id
+  workflowId  String
+  projectId   String
+  contactId   String
+  stepId      String
+  branch      String?
+  parkedAt    DateTime @default(now())
+
+  @@index([workflowId, stepId])
+  @@index([workflowId, contactId])
+  @@index([projectId])
+  @@map("plunk_lite_parked_runs")
+}

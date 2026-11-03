@@ -149,6 +149,7 @@ Writing tools:
 | `plunk_disconnect_workflow_steps`  | Remove a connection *(destructive)*                       |
 | `plunk_set_workflow_enabled`       | Enable or disable a workflow                              |
 | `plunk_start_workflow_execution`   | Run a workflow for one contact now                        |
+| `plunk_continue_waiting_contacts`  | Let contacts waiting at the end continue into new steps   |
 | `plunk_cancel_workflow_executions` | Cancel one run or all runs in progress *(destructive)*    |
 
 ### Building workflows
@@ -190,7 +191,8 @@ Plunk's secret key is all-or-nothing over its project, so this server adds its o
   one recipient, ask you to confirm before anything goes out, and the prompt tells you how many people
   will receive it. Enabling a workflow that has email steps with `plunk_set_workflow_enabled` asks too,
   and names the trigger event. So do changing the trigger of an enabled workflow that sends email and
-  starting one for a contact with `plunk_start_workflow_execution`, and changing the members of a segment that
+  starting one for a contact with `plunk_start_workflow_execution`, letting the contacts waiting at the end of a
+  workflow continue with `plunk_continue_waiting_contacts` (Plunk Lite), and changing the members of a segment that
   tracks membership with `plunk_add_to_segment` or `plunk_remove_from_segment`, since its entry and exit events
   can start workflows. Confirmation is not a tool argument, so the model cannot grant it to itself.
   Clients that cannot show a prompt cannot send — set `PLUNK_ALLOW_UNCONFIRMED_SENDS=true` if you are

@@ -24,6 +24,7 @@ import {DeletedEmailCounts} from '../services/DeletedEmailCounts.js';
 import {MembershipService} from '../services/MembershipService.js';
 import {NtfyService} from '../services/NtfyService.js';
 import {OutstandingInvoiceService} from '../services/OutstandingInvoiceService.js';
+import {ParkedRuns} from '../services/ParkedRuns.js';
 import {ProjectService} from '../services/ProjectService.js';
 import {ReputationPolicy} from '../services/ReputationPolicy.js';
 import {SecurityService} from '../services/SecurityService.js';
@@ -823,11 +824,14 @@ export class Users {
         where: {projectId: id},
       });
 
-      // Delete all workflows, and their webhook secrets (Plunk Lite), which have no relation to them
+      // Delete all workflows, and their webhook secrets, settings and parked runs (Plunk Lite),
+      // which have no relation to them
       await tx.workflow.deleteMany({
         where: {projectId: id},
       });
       await WebhookSigningSecrets.forgetProject(tx, id);
+      await ParkedRuns.forgetProjectRuns(tx, id);
+      await ParkedRuns.forgetProjectSettings(tx, id);
 
       // Delete all segments
       await tx.segment.deleteMany({
@@ -908,11 +912,14 @@ export class Users {
       }
     }
 
-    // Delete the project (cascading deletes will handle related data). Its deleted-email counts and
-    // its webhook secrets (Plunk Lite) have no relation to it, so they go explicitly.
+    // Delete the project (cascading deletes will handle related data). Its deleted-email counts, its
+    // webhook secrets and its workflows' settings and parked runs (Plunk Lite) have no relation to
+    // it, so they go explicitly.
     await prisma.$transaction([
       prisma.plunkLiteDeletedEmailCount.deleteMany({where: {projectId: id}}),
       WebhookSigningSecrets.forgetProject(prisma, id),
+      ParkedRuns.forgetProjectRuns(prisma, id),
+      ParkedRuns.forgetProjectSettings(prisma, id),
       prisma.project.delete({where: {id}}),
     ]);
     // Plunk Lite: its keys stop authenticating at once

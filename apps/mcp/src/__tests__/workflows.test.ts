@@ -37,6 +37,7 @@ const WRITE_TOOLS = [
   'plunk_disconnect_workflow_steps',
   'plunk_set_workflow_enabled',
   'plunk_start_workflow_execution',
+  'plunk_continue_waiting_contacts',
   'plunk_cancel_workflow_executions',
 ];
 
@@ -426,6 +427,195 @@ describe('plunk_set_workflow_enabled', () => {
 
     expect(result.isError).toBeFalsy();
     expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(1);
+
+    await close();
+  });
+});
+
+describe('plunk_continue_waiting_contacts', () => {
+  const waiting = {
+    ...workflowWithEmail,
+    enabled: true,
+    keepUntilExit: true,
+    continuePace: {perRound: 200, everyMinutes: 2},
+    parked: [
+      {
+        stepId: 'step-email-2',
+        stepName: 'Send email',
+        branch: null,
+        branchName: null,
+        branchExists: true,
+        count: 3,
+        unsubscribed: 0,
+        canContinue: true,
+      },
+    ],
+  };
+
+  it('lets them continue once confirmation is waived, and says how', async () => {
+    process.env.PLUNK_ALLOW_UNCONFIRMED_SENDS = 'true';
+    const calls = mockApi((call) =>
+      call.method === 'POST' ? json({continuable: 3, perRound: 200, everyMinutes: 2}, 202) : json(waiting),
+    );
+    const {client, close} = await connect();
+
+    const result = await client.callTool({name: 'plunk_continue_waiting_contacts', arguments: {id: 'wf-1'}});
+
+    expect(result.isError).toBeFalsy();
+    expect(JSON.stringify(result.content)).toContain('3 contact(s) continuing, 200 every 2 minutes');
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([
+      {url: 'https://api.example.com/workflows/wf-1/parked/continue', method: 'POST', body: undefined},
+    ]);
+
+    await close();
+  });
+
+  it('does not let them continue before confirmation', async () => {
+    const calls = mockApi(() => json(waiting));
+    const {client, close} = await connect();
+
+    await client.callTool({name: 'plunk_continue_waiting_contacts', arguments: {id: 'wf-1'}}).catch(() => undefined);
+
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+
+    await close();
+  });
+
+  it('refuses while nobody can continue, the workflow is off, or its steps would fail', async () => {
+    process.env.PLUNK_ALLOW_UNCONFIRMED_SENDS = 'true';
+    const cases = [
+      {...waiting, parked: [{...waiting.parked[0], canContinue: false}]},
+      {...waiting, enabled: false},
+      {
+        ...waiting,
+        steps: waiting.steps.map((step) => (step.id === 'step-delay' ? {...step, config: {amount: 2}} : step)),
+      },
+    ];
+
+    for (const workflow of cases) {
+      const calls = mockApi(() => json(workflow));
+      const {client, close} = await connect();
+
+      const result = await client.callTool({name: 'plunk_continue_waiting_contacts', arguments: {id: 'wf-1'}});
+
+      expect(result.isError).toBe(true);
+      expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+      await close();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('says who waits in the workflow', async () => {
+    mockApi(() => json(waiting));
+    const {client, close} = await connect();
+
+    const result = await client.callTool({name: 'plunk_get_workflow', arguments: {id: 'wf-1'}});
+
+    expect(JSON.stringify(result.content)).toContain('3 waiting at the end, 3 of them can continue');
+
+    await close();
+  });
+});
+
+describe('plunk_cancel_workflow_executions with contacts waiting at the end', () => {
+  it('lets a waiting execution go, and reports those let go with the rest', async () => {
+    const calls = mockApi((call) => {
+      if (call.method === 'GET' && call.url.endsWith('/workflows/wf-1')) return json({...workflowWithEmail, parked: []});
+      if (call.method === 'GET') return json({id: 'ex-1', status: 'COMPLETED', parked: true});
+      if (call.url.endsWith('cancel-all')) return json({cancelled: 1, released: 2});
+      return json({id: 'ex-1', status: 'CANCELLED'});
+    });
+    const {client, close} = await connect();
+
+    const one = await client.callTool({
+      name: 'plunk_cancel_workflow_executions',
+      arguments: {id: 'wf-1', executionId: 'ex-1'},
+    });
+    const all = await client.callTool({name: 'plunk_cancel_workflow_executions', arguments: {id: 'wf-1', all: true}});
+
+    expect(one.isError).toBeFalsy();
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(true);
+    expect(JSON.stringify(all.content)).toContain('Cancelled 1 execution(s), and let 2 waiting at the end leave.');
+
+    await close();
+  });
+});
+
+describe('plunk_update_workflow turning keepUntilExit off', () => {
+  it('does not let the waiting contacts go before confirmation', async () => {
+    const calls = mockApi(() =>
+      json({
+        ...workflowWithEmail,
+        keepUntilExit: true,
+        parked: [
+          {
+            stepId: 'step-email-2',
+            stepName: 'Send email',
+            branch: null,
+            branchName: null,
+            branchExists: true,
+            count: 2,
+            unsubscribed: 0,
+            canContinue: false,
+          },
+        ],
+      }),
+    );
+    const {client, close} = await connect();
+
+    await client
+      .callTool({name: 'plunk_update_workflow', arguments: {id: 'wf-1', keepUntilExit: false}})
+      .catch(() => undefined);
+
+    expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(0);
+
+    await close();
+  });
+
+  it('turns it off at once when nobody waits', async () => {
+    const calls = mockApi((call) =>
+      call.method === 'PATCH' ? json({id: 'wf-1', keepUntilExit: false}) : json({...workflowWithEmail, parked: []}),
+    );
+    const {client, close} = await connect();
+
+    const result = await client.callTool({name: 'plunk_update_workflow', arguments: {id: 'wf-1', keepUntilExit: false}});
+
+    expect(result.isError).toBeFalsy();
+    expect(calls.filter((c) => c.method === 'PATCH')).toEqual([
+      {url: 'https://api.example.com/workflows/wf-1', method: 'PATCH', body: {keepUntilExit: false}},
+    ]);
+
+    await close();
+  });
+});
+
+describe('plunk_cancel_workflow_executions with all and contacts waiting', () => {
+  it('does not let them go before confirmation', async () => {
+    const calls = mockApi(() =>
+      json({
+        ...workflowWithEmail,
+        keepUntilExit: true,
+        parked: [
+          {
+            stepId: 'step-email-2',
+            stepName: 'Send email',
+            branch: null,
+            branchName: null,
+            branchExists: true,
+            count: 4,
+            unsubscribed: 0,
+            canContinue: false,
+          },
+        ],
+      }),
+    );
+    const {client, close} = await connect();
+
+    await client
+      .callTool({name: 'plunk_cancel_workflow_executions', arguments: {id: 'wf-1', all: true}})
+      .catch(() => undefined);
+
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
 
     await close();
   });

@@ -4,6 +4,7 @@ import {WorkflowSchemas} from '@plunk/shared';
 import type {NextFunction, Request, Response} from 'express';
 import signale from 'signale';
 import {requireAuth, requireEmailVerified} from '../middleware/auth.js';
+import {ParkedRuns} from '../services/ParkedRuns.js';
 import {WebhookSigningSecrets} from '../services/WebhookSigningSecrets.js';
 import {WorkflowService} from '../services/WorkflowService.js';
 import {CatchAsync} from '../utils/asyncHandler.js';
@@ -115,8 +116,40 @@ export class Workflows {
     }
 
     const workflow = await WorkflowService.get(auth.projectId!, workflowId);
+    // Plunk Lite: whether it keeps its contacts until an Exit step, and who waits at its end
+    const [keepUntilExit, summary] = await Promise.all([
+      ParkedRuns.keepsUntilExit(workflowId),
+      ParkedRuns.summary(workflowId, workflow.steps),
+    ]);
+    // Contacts left at a step deleted as they were parked wait before it: rare, and fixed here once
+    let parked = summary;
+    if (summary.some(group => group.stepName === null)) {
+      await ParkedRuns.parkBeforeMissingSteps(workflowId);
+      parked = await ParkedRuns.summary(workflowId, workflow.steps);
+    }
 
-    return res.status(200).json(workflow);
+    return res.status(200).json({...workflow, keepUntilExit, parked, continuePace: ParkedRuns.pace()});
+  }
+
+  /**
+   * POST /workflows/:id/parked/continue
+   * Plunk Lite: let the contacts waiting at the end of the workflow continue into the steps added
+   * after where they wait. Accepted, not done: they go in rounds, through the worker.
+   */
+  @Post(':id/parked/continue')
+  @Middleware([requireAuth, requireEmailVerified])
+  @CatchAsync
+  public async continueParked(req: Request, res: Response, _next: NextFunction) {
+    const auth = res.locals.auth;
+    const workflowId = req.params.id;
+
+    if (!workflowId) {
+      return res.status(400).json({error: 'Workflow ID is required'});
+    }
+
+    const result = await ParkedRuns.queueContinue(auth.projectId!, workflowId);
+
+    return res.status(202).json(result);
   }
 
   /**
@@ -159,10 +192,13 @@ export class Workflows {
   public async update(req: Request, res: Response, _next: NextFunction) {
     const auth = res.locals.auth;
     const workflowId = req.params.id;
-    const {name, description, triggerType, triggerConfig, enabled, allowReentry} = req.body;
+    const {name, description, triggerType, triggerConfig, enabled, allowReentry, keepUntilExit} = req.body;
 
     if (!workflowId) {
       return res.status(400).json({error: 'Workflow ID is required'});
+    }
+    if (keepUntilExit !== undefined && typeof keepUntilExit !== 'boolean') {
+      return res.status(400).json({error: 'keepUntilExit must be true or false'});
     }
 
     const workflow = await WorkflowService.update(auth.projectId!, workflowId, {
@@ -172,9 +208,11 @@ export class Workflows {
       triggerConfig,
       enabled,
       allowReentry,
+      keepUntilExit,
     });
 
-    return res.status(200).json(workflow);
+    // Plunk Lite: the switch lives in a table of its own
+    return res.status(200).json({...workflow, keepUntilExit: await ParkedRuns.keepsUntilExit(workflow.id)});
   }
 
   /**

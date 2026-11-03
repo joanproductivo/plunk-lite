@@ -29,6 +29,8 @@ type WorkflowExecutionRow = WorkflowExecution & {
   currentStep?: {id: string; name: string; type: string} | null;
   /** The last step with an error: a failed one, or a webhook's last attempt */
   stepExecutions: {error: string | null; status: string; executeAfter: string | null}[];
+  /** Plunk Lite: finished, and waiting at the end of the workflow for new steps */
+  parked?: boolean;
 };
 
 export interface PaginatedExecutions {
@@ -73,10 +75,13 @@ function ExecutionDetail({execution}: {execution: WorkflowExecutionRow}) {
 export function WorkflowExecutionsTable({
   workflowId,
   activeExecutionsCount,
+  parkedCount = 0,
   onChange,
 }: {
   workflowId: string;
   activeExecutionsCount: number;
+  /** Plunk Lite: contacts waiting at the end of the workflow, who leave it with the rest */
+  parkedCount?: number;
   onChange: () => void;
 }) {
   const [page, setPage] = useState(1);
@@ -101,7 +106,7 @@ export function WorkflowExecutionsTable({
     setDialog({type: 'cancelOne', execution, cancelling: true});
     try {
       await network.fetch('DELETE', `/workflows/${workflowId}/executions/${execution.id}`);
-      toast.success('Execution canceled');
+      toast.success(execution.parked ? 'Contact left the workflow' : 'Execution canceled');
       changed();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Couldn’t cancel the execution. Try again.');
@@ -112,8 +117,14 @@ export function WorkflowExecutionsTable({
   const handleCancelAllExecutions = async () => {
     setDialog({type: 'cancelAll', cancelling: true});
     try {
-      const result = await network.fetch<{cancelled: number}>('POST', `/workflows/${workflowId}/executions/cancel-all`);
-      toast.success(`Canceled ${result.cancelled} execution${result.cancelled === 1 ? '' : 's'}`);
+      const result = await network.fetch<{cancelled: number; released?: number}>(
+        'POST',
+        `/workflows/${workflowId}/executions/cancel-all`,
+      );
+      toast.success(
+        `Canceled ${result.cancelled} execution${result.cancelled === 1 ? '' : 's'}` +
+          (result.released ? `, and ${result.released} waiting at the end left the workflow` : ''),
+      );
       changed();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Couldn’t cancel those executions. Try again.');
@@ -142,9 +153,9 @@ export function WorkflowExecutionsTable({
               <CardTitle>Workflow executions</CardTitle>
               <CardDescription>View and manage all executions of this workflow</CardDescription>
             </div>
-            {activeExecutionsCount > 0 && (
+            {(activeExecutionsCount > 0 || parkedCount > 0) && (
               <Button variant="outline" onClick={() => setDialog({type: 'cancelAll', cancelling: false})}>
-                Cancel All Active ({activeExecutionsCount})
+                Cancel All Active ({activeExecutionsCount + parkedCount})
               </Button>
             )}
           </div>
@@ -188,18 +199,20 @@ export function WorkflowExecutionsTable({
                         <td className="px-6 py-4 whitespace-nowrap">
                           <Badge
                             variant={
-                              execution.status === 'COMPLETED'
-                                ? 'success'
-                                : execution.status === 'FAILED'
-                                  ? 'destructive'
-                                  : execution.status === 'WAITING'
-                                    ? 'warning'
-                                    : execution.status === 'RUNNING'
-                                      ? 'default'
-                                      : 'neutral'
+                              execution.parked
+                                ? 'warning'
+                                : execution.status === 'COMPLETED'
+                                  ? 'success'
+                                  : execution.status === 'FAILED'
+                                    ? 'destructive'
+                                    : execution.status === 'WAITING'
+                                      ? 'warning'
+                                      : execution.status === 'RUNNING'
+                                        ? 'default'
+                                        : 'neutral'
                             }
                           >
-                            {execution.status}
+                            {execution.parked ? 'Waiting for new steps' : execution.status}
                           </Badge>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-neutral-500">
@@ -215,7 +228,7 @@ export function WorkflowExecutionsTable({
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          {isActive(execution) && (
+                          {(isActive(execution) || execution.parked) && (
                             <Button
                               variant="destructiveGhost"
                               size="sm"
@@ -304,18 +317,27 @@ export function WorkflowExecutionsTable({
             return handleCancelExecution(dialog.execution);
           }
         }}
-        title="Cancel this execution?"
+        title={
+          dialog.type === 'cancelOne' && dialog.execution.parked ? 'Let this contact leave?' : 'Cancel this execution?'
+        }
         icon={CircleStop}
         description={
           dialog.type === 'cancelOne' ? (
-            <>
-              Stops this workflow for <strong>{dialog.execution.contact.email}</strong>. They won&apos;t receive any
-              remaining emails or actions from it. This can&apos;t be undone.
-            </>
+            dialog.execution.parked ? (
+              <>
+                <strong>{dialog.execution.contact.email}</strong> finished every step and waits at the end of this
+                workflow. Leaving it, they won&apos;t get the steps you add after the end. This can&apos;t be undone.
+              </>
+            ) : (
+              <>
+                Stops this workflow for <strong>{dialog.execution.contact.email}</strong>. They won&apos;t receive any
+                remaining emails or actions from it. This can&apos;t be undone.
+              </>
+            )
           ) : undefined
         }
-        confirmText="Cancel execution"
-        cancelText="Keep running"
+        confirmText={dialog.type === 'cancelOne' && dialog.execution.parked ? 'Let them leave' : 'Cancel execution'}
+        cancelText={dialog.type === 'cancelOne' && dialog.execution.parked ? 'Keep waiting' : 'Keep running'}
         variant="destructive"
         status={dialog.type === 'cancelOne' && dialog.cancelling ? 'loading' : 'idle'}
       />
@@ -328,19 +350,28 @@ export function WorkflowExecutionsTable({
         title="Cancel every active execution?"
         icon={CircleStop}
         description={
-          activeExecutionsCount === 1 ? (
-            <>
-              Stops the execution running or waiting in this workflow. Its contact won&apos;t receive any remaining
-              emails or actions. This can&apos;t be undone.
-            </>
-          ) : (
-            <>
-              Stops all <strong>{activeExecutionsCount}</strong> executions running or waiting in this workflow. Their
-              contacts won&apos;t receive any remaining emails or actions. This can&apos;t be undone.
-            </>
-          )
+          <>
+            {activeExecutionsCount === 0 ? null : activeExecutionsCount === 1 ? (
+              <>
+                Stops the execution running or waiting in this workflow. Its contact won&apos;t receive any remaining
+                emails or actions.{' '}
+              </>
+            ) : (
+              <>
+                Stops all <strong>{activeExecutionsCount}</strong> executions running or waiting in this workflow. Their
+                contacts won&apos;t receive any remaining emails or actions.{' '}
+              </>
+            )}
+            {parkedCount > 0 && (
+              <>
+                {parkedCount === 1 ? 'The contact' : <>The {parkedCount} contacts</>} waiting at its end leave it
+                too.{' '}
+              </>
+            )}
+            This can&apos;t be undone.
+          </>
         }
-        confirmText={`Cancel ${activeExecutionsCount} execution${activeExecutionsCount !== 1 ? 's' : ''}`}
+        confirmText={`Cancel ${activeExecutionsCount + parkedCount} execution${activeExecutionsCount + parkedCount !== 1 ? 's' : ''}`}
         cancelText="Keep running"
         variant="destructive"
         status={dialog.type === 'cancelAll' && dialog.cancelling ? 'loading' : 'idle'}
