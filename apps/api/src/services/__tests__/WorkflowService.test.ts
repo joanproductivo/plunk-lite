@@ -241,6 +241,45 @@ describe('WorkflowService', () => {
       expect(found?._count.executions).toBe(1);
     });
 
+    it('counts distinct contacts that entered and those still running or waiting', async () => {
+      const a = await factories.createWorkflow({projectId, allowReentry: true});
+      const b = await factories.createWorkflow({projectId});
+      const empty = await factories.createWorkflow({projectId});
+      const [c1, c2, c3, c4, c5, c6] = await Promise.all(
+        Array.from({length: 6}, () => factories.createContact({projectId})),
+      );
+
+      // Contact 1 entered A twice (re-entry): once finished, once still waiting
+      await factories.createWorkflowExecution(a.id, c1.id, {status: WorkflowExecutionStatus.COMPLETED});
+      await factories.createWorkflowExecution(a.id, c1.id, {status: WorkflowExecutionStatus.WAITING});
+      // Contact 2 is in A twice at once: one contact in progress, not two
+      await factories.createWorkflowExecution(a.id, c2.id, {status: WorkflowExecutionStatus.RUNNING});
+      await factories.createWorkflowExecution(a.id, c2.id, {status: WorkflowExecutionStatus.WAITING});
+      // Finished one way or another: entered, but no longer in progress
+      await factories.createWorkflowExecution(a.id, c3.id, {status: WorkflowExecutionStatus.FAILED});
+      await factories.createWorkflowExecution(a.id, c4.id, {status: WorkflowExecutionStatus.CANCELLED});
+      await factories.createWorkflowExecution(a.id, c5.id, {status: WorkflowExecutionStatus.COMPLETED});
+      await factories.createWorkflowExecution(a.id, c6.id, {status: WorkflowExecutionStatus.EXITED});
+      await factories.createWorkflowExecution(b.id, c1.id, {status: WorkflowExecutionStatus.RUNNING});
+
+      // Another project's workflow stays out of the page. The counts are only read for the page's
+      // ids, so its runs cannot reach them either way
+      const other = await factories.createProject();
+      const otherWorkflow = await factories.createWorkflow({projectId: other.id});
+      const otherContact = await factories.createContact({projectId: other.id});
+      await factories.createWorkflowExecution(otherWorkflow.id, otherContact.id);
+
+      const result = await WorkflowService.list(projectId);
+      const counts = (id: string) =>
+        (result.data.find(w => w.id === id) as {contactCounts?: {entered: number; inProgress: number}} | undefined)
+          ?.contactCounts;
+
+      expect(counts(a.id)).toEqual({entered: 6, inProgress: 2});
+      expect(counts(b.id)).toEqual({entered: 1, inProgress: 1});
+      expect(counts(empty.id)).toEqual({entered: 0, inProgress: 0});
+      expect(result.data.some(w => w.id === otherWorkflow.id)).toBe(false);
+    });
+
     it('should filter by enabled status', async () => {
       await factories.createWorkflow({projectId, name: 'Active A', enabled: true});
       await factories.createWorkflow({projectId, name: 'Active B', enabled: true});

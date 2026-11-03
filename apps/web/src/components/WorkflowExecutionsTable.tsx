@@ -328,11 +328,17 @@ export function WorkflowExecutionsTable({
         title="Cancel every active execution?"
         icon={CircleStop}
         description={
-          <>
-            Stops this workflow for all <strong>{activeExecutionsCount}</strong> contact
-            {activeExecutionsCount !== 1 ? 's' : ''} currently in it. They won&apos;t receive any remaining emails or
-            actions. This can&apos;t be undone.
-          </>
+          activeExecutionsCount === 1 ? (
+            <>
+              Stops the execution running or waiting in this workflow. Its contact won&apos;t receive any remaining
+              emails or actions. This can&apos;t be undone.
+            </>
+          ) : (
+            <>
+              Stops all <strong>{activeExecutionsCount}</strong> executions running or waiting in this workflow. Their
+              contacts won&apos;t receive any remaining emails or actions. This can&apos;t be undone.
+            </>
+          )
         }
         confirmText={`Cancel ${activeExecutionsCount} execution${activeExecutionsCount !== 1 ? 's' : ''}`}
         cancelText="Keep running"

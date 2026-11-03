@@ -90,8 +90,33 @@ export class WorkflowService {
       prisma.workflow.count({where}),
     ]);
 
+    // Plunk Lite: contacts, not executions. With re-entry one contact can run a workflow many
+    // times, and even be in it twice at once (a WAITING run does not hold re-entry back). The
+    // statuses go as parameters, which Prisma sends as text, so they are cast to the enum
+    const ids = workflows.map(w => w.id);
+    const active = [WorkflowExecutionStatus.RUNNING, WorkflowExecutionStatus.WAITING];
+    const counts = ids.length
+      ? await prisma.$queryRaw<{workflowId: string; entered: bigint; inProgress: bigint}[]>`
+          SELECT "workflowId",
+            COUNT(DISTINCT "contactId") AS "entered",
+            COUNT(DISTINCT "contactId") FILTER (
+              WHERE "status" = ANY(ARRAY[${Prisma.join(active)}]::"WorkflowExecutionStatus"[])
+            ) AS "inProgress"
+          FROM "workflow_executions"
+          WHERE "workflowId" IN (${Prisma.join(ids)})
+          GROUP BY "workflowId"
+        `
+      : [];
+    // COUNT comes back as bigint, which res.json cannot serialise
+    const byWorkflow = new Map(
+      counts.map(c => [c.workflowId, {entered: Number(c.entered), inProgress: Number(c.inProgress)}]),
+    );
+
     return {
-      data: workflows as Workflow[],
+      data: workflows.map(w => ({
+        ...w,
+        contactCounts: byWorkflow.get(w.id) ?? {entered: 0, inProgress: 0},
+      })) as Workflow[],
       total,
       page,
       pageSize,
