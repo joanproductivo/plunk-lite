@@ -29,6 +29,8 @@ type WorkflowExecutionRow = WorkflowExecution & {
   currentStep?: {id: string; name: string; type: string} | null;
   /** The last step with an error: a failed one, or a webhook's last attempt */
   stepExecutions: {error: string | null; status: string; executeAfter: string | null}[];
+  /** Plunk Lite: finished, and waiting at the end of the workflow for new steps */
+  parked?: boolean;
 };
 
 export interface PaginatedExecutions {
@@ -188,18 +190,20 @@ export function WorkflowExecutionsTable({
                         <td className="px-6 py-4 whitespace-nowrap">
                           <Badge
                             variant={
-                              execution.status === 'COMPLETED'
-                                ? 'success'
-                                : execution.status === 'FAILED'
-                                  ? 'destructive'
-                                  : execution.status === 'WAITING'
-                                    ? 'warning'
-                                    : execution.status === 'RUNNING'
-                                      ? 'default'
-                                      : 'neutral'
+                              execution.parked
+                                ? 'warning'
+                                : execution.status === 'COMPLETED'
+                                  ? 'success'
+                                  : execution.status === 'FAILED'
+                                    ? 'destructive'
+                                    : execution.status === 'WAITING'
+                                      ? 'warning'
+                                      : execution.status === 'RUNNING'
+                                        ? 'default'
+                                        : 'neutral'
                             }
                           >
-                            {execution.status}
+                            {execution.parked ? 'Waiting for new steps' : execution.status}
                           </Badge>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-neutral-500">
@@ -215,7 +219,7 @@ export function WorkflowExecutionsTable({
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          {isActive(execution) && (
+                          {(isActive(execution) || execution.parked) && (
                             <Button
                               variant="destructiveGhost"
                               size="sm"
