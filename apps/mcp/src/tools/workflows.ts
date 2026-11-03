@@ -656,17 +656,23 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
           .boolean()
           .optional()
           .describe('Let a contact enter the workflow again after a previous run. Defaults to false.'),
+        keepUntilExit: z
+          .boolean()
+          .optional()
+          .describe(
+            'Keep contacts who reach the end without an EXIT step until steps are added after it. Defaults to false.',
+          ),
       }),
       annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true},
     },
-    async ({name, description, eventName, allowReentry}) =>
+    async ({name, description, eventName, allowReentry, keepUntilExit}) =>
       runTool(async () => {
         // Always created disabled: enabling goes through plunk_set_workflow_enabled
         // so it gets the same confirmation as any other send.
         const created = await client.request<Workflow>({
           method: 'POST',
           path: '/workflows',
-          body: {name, description, eventName, allowReentry, enabled: false},
+          body: {name, description, eventName, allowReentry, keepUntilExit, enabled: false},
         });
 
         // The create response does not include the trigger step the API adds,

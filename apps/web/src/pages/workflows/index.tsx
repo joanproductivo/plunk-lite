@@ -718,6 +718,7 @@ function CreateWorkflowDialog({open, onOpenChange, onSuccess}: CreateWorkflowDia
   const [eventName, setEventName] = useState('');
   const [eventPopoverOpen, setEventPopoverOpen] = useState(false);
   const [allowReentry, setAllowReentry] = useState(false);
+  const [keepUntilExit, setKeepUntilExit] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Fetch available event names
@@ -735,6 +736,7 @@ function CreateWorkflowDialog({open, onOpenChange, onSuccess}: CreateWorkflowDia
         description: description || undefined,
         eventName: eventName.trim(),
         allowReentry,
+        keepUntilExit,
         enabled: false,
       });
 
@@ -743,6 +745,7 @@ function CreateWorkflowDialog({open, onOpenChange, onSuccess}: CreateWorkflowDia
       setDescription('');
       setEventName('');
       setAllowReentry(false);
+      setKeepUntilExit(false);
       onOpenChange(false);
       onSuccess();
 
@@ -867,6 +870,25 @@ function CreateWorkflowDialog({open, onOpenChange, onSuccess}: CreateWorkflowDia
               </Label>
               <p className="text-xs text-neutral-500 mt-0.5">
                 When enabled, contacts can enter this workflow multiple times.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3">
+            <input
+              id="keepUntilExit"
+              type="checkbox"
+              checked={keepUntilExit}
+              onChange={e => setKeepUntilExit(e.target.checked)}
+              className="mt-0.5 h-4 w-4 text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 border-neutral-300 rounded"
+            />
+            <div className="flex-1">
+              <Label htmlFor="keepUntilExit" className="font-medium cursor-pointer">
+                Keep contacts until an Exit step
+              </Label>
+              <p className="text-xs text-neutral-500 mt-0.5">
+                Contacts who reach the end without an Exit step wait there. When you add steps after it, you choose when
+                they continue.
               </p>
             </div>
           </div>
