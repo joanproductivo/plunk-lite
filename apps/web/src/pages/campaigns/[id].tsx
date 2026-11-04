@@ -729,10 +729,16 @@ function CampaignDetails() {
                       <Select
                         value={editedCampaign.audienceType ?? c.audienceType}
                         onValueChange={(value: CampaignAudienceType) => {
+                          const segmentId =
+                            value === CampaignAudienceType.SEGMENT ? editedCampaign.segmentId : undefined;
                           setEditedCampaign({
                             ...editedCampaign,
                             audienceType: value,
-                            segmentId: value === CampaignAudienceType.SEGMENT ? editedCampaign.segmentId : undefined,
+                            segmentId,
+                            // Plunk Lite: back on a segment, that segment cannot also be left out
+                            excludedSegmentIds: (editedCampaign.excludedSegmentIds ?? c.excludedSegmentIds).filter(
+                              id => id !== segmentId,
+                            ),
                           });
                         }}
                       >

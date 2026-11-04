@@ -41,7 +41,7 @@ const BATCH_SIZE = 500; // Number of emails to process per batch (increased for 
 /** Plunk Lite: the share of SES's 24-hour quota a campaign may use up when it starts */
 const DAILY_QUOTA_SHARE = 0.95;
 
-/** Plunk Lite: what saving or sending a campaign says when one of its excluded segments was deleted */
+/** Plunk Lite: what counting or sending a campaign says when one of its excluded segments was deleted */
 const MISSING_EXCLUDED_SEGMENT =
   'An excluded segment no longer exists (it shows as "Deleted segment"). Remove it from the campaign\'s audience.';
 
@@ -119,11 +119,12 @@ export class CampaignService {
       },
     });
 
-    // Calculate and update recipient count for the draft
-    const recipientCount = await this.getRecipientCount(projectId, campaign);
+    // Calculate and update recipient count for the draft. Plunk Lite: an excluded segment deleted
+    // between the check above and here leaves it at 0 rather than failing a campaign already created
+    const recipientCount = await this.draftRecipientCount(projectId, campaign);
     const updatedCampaign = await prisma.campaign.update({
       where: {id: campaign.id},
-      data: {totalRecipients: recipientCount},
+      data: {totalRecipients: recipientCount ?? 0},
     });
 
     // Send notification about campaign creation
@@ -221,12 +222,8 @@ export class CampaignService {
       data.excludedSegmentIds !== undefined;
 
     if (audienceChanged && updatedCampaign.status === CampaignStatus.DRAFT) {
-      // Plunk Lite: an excluded segment deleted since leaves the count as it was rather than failing
-      // a save that was written; sending is what it stops
-      const recipientCount = await this.getRecipientCount(projectId, updatedCampaign).catch(error => {
-        if (error instanceof HttpException && error.message === MISSING_EXCLUDED_SEGMENT) return null;
-        throw error;
-      });
+      // Plunk Lite: an excluded segment deleted since leaves the count as it was
+      const recipientCount = await this.draftRecipientCount(projectId, updatedCampaign);
       if (recipientCount === null) {
         return updatedCampaign;
       }
@@ -1935,10 +1932,21 @@ export class CampaignService {
   ): Promise<string[]> {
     const unique = Array.from(new Set(ids));
     if ((await this.findSegments(projectId, unique)).length !== unique.length) {
-      throw new HttpException(400, MISSING_EXCLUDED_SEGMENT);
+      throw new HttpException(400, 'An excluded segment is not a segment of this project');
     }
     this.assertNotExcludingAudience(unique, audience);
     return unique;
+  }
+
+  /**
+   * Plunk Lite: a draft's recipient count, or null when one of its excluded segments was deleted
+   * since. A save that was already written does not fail on it: sending is what it stops.
+   */
+  private static async draftRecipientCount(projectId: string, campaign: Campaign): Promise<number | null> {
+    return this.getRecipientCount(projectId, campaign).catch(error => {
+      if (error instanceof HttpException && error.message === MISSING_EXCLUDED_SEGMENT) return null;
+      throw error;
+    });
   }
 
   /** Plunk Lite: a campaign sent to a segment cannot also leave it out */

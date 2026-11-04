@@ -247,7 +247,32 @@ describe('CampaignService - excluded segments', () => {
         CampaignService.update(projectId, campaign.id, {
           excludedSegmentIds: [...campaign.excludedSegmentIds, other.id],
         }),
-      ).rejects.toMatchObject({code: 400, message: expect.stringContaining('Deleted segment')});
+      ).rejects.toMatchObject({code: 400, message: expect.stringContaining('not a segment of this project')});
+    });
+
+    it('leaves a campaign created as it is deleted with a count of 0, not an error', async () => {
+      await contact('a@x.test');
+      const gone = await staticSegment('Gone', []);
+      // Deleted after the campaign's list was checked and before it is counted, as a race would
+      const service = CampaignService as unknown as {findSegments: (...args: unknown[]) => Promise<unknown>};
+      const findSegments = service.findSegments.bind(CampaignService);
+      vi.spyOn(service, 'findSegments').mockImplementationOnce(async (...args: unknown[]) => {
+        const found = await findSegments(...args);
+        await prisma.segment.delete({where: {id: gone.id}});
+        return found;
+      });
+
+      const created = await CampaignService.create(projectId, {
+        name: 'Race',
+        subject: 'Hi',
+        body: '<p>Hi</p>',
+        from: 'news@example.com',
+        audienceType: CampaignAudienceType.ALL,
+        excludedSegmentIds: [gone.id],
+      });
+
+      expect(created.excludedSegmentIds).toEqual([gone.id]);
+      expect(created.totalRecipients).toBe(0);
     });
 
     it('is left out of a duplicate, which keeps the ones that still exist', async () => {
@@ -287,7 +312,7 @@ describe('CampaignService - excluded segments', () => {
 
       await expect(
         CampaignService.update(projectId, campaign.id, {excludedSegmentIds: [theirs.id]}),
-      ).rejects.toMatchObject({code: 400});
+      ).rejects.toMatchObject({code: 400, message: 'An excluded segment is not a segment of this project'});
     });
 
     it('refuses to exclude the segment the campaign is sent to, also when the audience changes to it', async () => {
