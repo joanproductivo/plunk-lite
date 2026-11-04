@@ -16,18 +16,19 @@ import type {FilterCondition, FilterGroup, SegmentFilter, SegmentFilterOperator}
 import {Check, ChevronsUpDown, GripVertical, Plus, Search, Trash2} from 'lucide-react';
 import {memo, useCallback, useEffect, useMemo, useState} from 'react';
 import {network} from '../lib/network';
+import {fieldsIncludedWhenMissing, includeMissingField, leavesOutMissingField} from '../lib/segments';
 
 const STANDARD_OPERATORS: {value: SegmentFilterOperator; label: string; description: string}[] = [
   {value: 'equals', label: 'Equals', description: 'Exact match'},
-  {value: 'notEquals', label: 'Not equals', description: 'Anything other than this value'},
+  {value: 'notEquals', label: 'Not equals', description: "Has a value, and it's a different one"},
   {value: 'contains', label: 'Contains', description: 'Value includes this text'},
-  {value: 'notContains', label: 'Does not contain', description: 'Value does not include this text'},
+  {value: 'notContains', label: 'Does not contain', description: "Has a value that doesn't include this text"},
   {value: 'greaterThan', label: 'Greater than', description: 'Value is higher than'},
   {value: 'lessThan', label: 'Less than', description: 'Value is lower than'},
   {value: 'greaterThanOrEqual', label: 'Greater than or equal', description: 'Value is at least'},
   {value: 'lessThanOrEqual', label: 'Less than or equal', description: 'Value is at most'},
   {value: 'exists', label: 'Has a value', description: 'Field is set to anything'},
-  {value: 'notExists', label: 'Has no value', description: 'Field is empty or unset'},
+  {value: 'notExists', label: 'Has no value', description: 'Field is unset'},
   {value: 'within', label: 'Less than X ago', description: 'Date is within the last X days/hours'},
   {value: 'olderThan', label: 'More than X ago', description: 'Date is older than X days/hours'},
 ];
@@ -152,9 +153,20 @@ interface FilterRowProps {
   onChange: (filter: SegmentFilter) => void;
   onRemove: () => void;
   availableFields: FieldOption[];
+  /** Plunk Lite: warn that the filter leaves out contacts without its field */
+  warnMissing?: boolean;
+  /** Plunk Lite: lets those contacts in, when the group can take it */
+  onIncludeMissing?: () => void;
 }
 
-const FilterRow = memo(function FilterRow({filter, onChange, onRemove, availableFields}: FilterRowProps) {
+const FilterRow = memo(function FilterRow({
+  filter,
+  onChange,
+  onRemove,
+  availableFields,
+  warnMissing,
+  onIncludeMissing,
+}: FilterRowProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
 
@@ -372,7 +384,7 @@ const FilterRow = memo(function FilterRow({filter, onChange, onRemove, available
   }, [groupedFields, search]);
 
   return (
-    <div className="flex items-start gap-2 p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+    <div className="flex flex-wrap items-start gap-2 p-3 bg-neutral-50 rounded-lg border border-neutral-200">
       <div className="flex-1 grid grid-cols-3 gap-3">
         {/* Field Selection */}
         <div className="space-y-1.5">
@@ -576,6 +588,26 @@ const FilterRow = memo(function FilterRow({filter, onChange, onRemove, available
       <Button type="button" variant="destructiveGhost" size="sm" onClick={onRemove} className="mt-6">
         <Trash2 className="h-4 w-4" />
       </Button>
+
+      {warnMissing && (
+        <div className="basis-full flex items-center justify-between gap-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+          <span>
+            Only contacts that have this field. Contacts without it are left out
+            {onIncludeMissing ? '.' : ': to include them, OR this filter with "Has no value" in a nested condition.'}
+          </span>
+          {onIncludeMissing && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onIncludeMissing}
+              className="h-7 shrink-0 text-xs"
+            >
+              Include contacts without this field
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 });
@@ -586,9 +618,18 @@ interface FilterGroupComponentProps {
   onRemove?: () => void;
   depth?: number;
   availableFields: FieldOption[];
+  /** Plunk Lite: fields a sibling OR group already lets in when missing */
+  includedWhenMissing: Set<string>;
 }
 
-function FilterGroupComponent({group, onChange, onRemove, depth = 0, availableFields}: FilterGroupComponentProps) {
+function FilterGroupComponent({
+  group,
+  onChange,
+  onRemove,
+  depth = 0,
+  availableFields,
+  includedWhenMissing,
+}: FilterGroupComponentProps) {
   const addFilter = useCallback(() => {
     onChange({
       ...group,
@@ -669,6 +710,13 @@ function FilterGroupComponent({group, onChange, onRemove, depth = 0, availableFi
             onChange={f => updateFilter(index, f)}
             onRemove={() => removeFilter(index)}
             availableFields={availableFields}
+            warnMissing={
+              leavesOutMissingField(filter) &&
+              // A sibling OR group "<field> has no value" covers the filter only when it is alone in
+              // its group: next to other filters it would also let in who those leave out
+              !(group.filters.length === 1 && !group.conditions && includedWhenMissing.has(filter.field))
+            }
+            onIncludeMissing={group.conditions ? undefined : () => onChange(includeMissingField(group, index))}
           />
         ))}
 
@@ -754,6 +802,8 @@ function FilterConditionComponent({condition, onChange, depth = 0, availableFiel
     });
   }, [condition, onChange]);
 
+  const includedWhenMissing = useMemo(() => fieldsIncludedWhenMissing(condition), [condition]);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -787,6 +837,7 @@ function FilterConditionComponent({condition, onChange, depth = 0, availableFiel
               onRemove={condition.groups.length > 1 ? () => removeGroup(index) : undefined}
               depth={depth}
               availableFields={availableFields}
+              includedWhenMissing={includedWhenMissing}
             />
           </div>
         ))}

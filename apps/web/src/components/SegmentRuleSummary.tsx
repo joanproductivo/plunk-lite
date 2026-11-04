@@ -1,5 +1,7 @@
 import type {FilterCondition, SegmentFilter} from '@plunk/types';
 
+import {filterIncludingMissing} from '../lib/segments';
+
 /**
  * One readable token per filter, e.g. `plan = pro`, `user.signup in last 30d`.
  * Split into parts so the field, operator and value can be styled separately.
@@ -8,6 +10,8 @@ interface RulePart {
   field: string;
   op?: string;
   value?: string;
+  /** Plunk Lite: what else the rule lets in, e.g. "or no value" */
+  extra?: string;
 }
 
 const STANDARD_FIELD_LABELS: Record<string, string> = {
@@ -109,7 +113,13 @@ function tokenize(condition: FilterCondition, segmentNames: Map<string, string>)
     });
     if (group.conditions) {
       if (group.filters.length > 0) tokens.push({kind: 'join', logic: 'AND'});
-      tokens.push({kind: 'nested', count: countFilters(group.conditions)});
+      // Plunk Lite: what "Include contacts without this field" nests reads as one rule
+      const includingMissing = filterIncludingMissing(group.conditions);
+      tokens.push(
+        includingMissing
+          ? {kind: 'rule', part: {...describeFilter(includingMissing, segmentNames), extra: 'or no value'}}
+          : {kind: 'nested', count: countFilters(group.conditions)},
+      );
     }
   });
   return tokens;
@@ -120,7 +130,11 @@ export function segmentRuleText(condition: unknown, segmentNames: Map<string, st
   if (!isCondition(condition)) return '';
   return tokenize(condition, segmentNames)
     .map(t =>
-      t.kind === 'rule' ? [t.part.field, t.part.op, t.part.value].filter(Boolean).join(' ') : t.kind === 'join' ? t.logic : '',
+      t.kind === 'rule'
+        ? [t.part.field, t.part.op, t.part.value, t.part.extra].filter(Boolean).join(' ')
+        : t.kind === 'join'
+          ? t.logic
+          : '',
     )
     .join(' ');
 }
@@ -176,6 +190,7 @@ export function SegmentRuleSummary({condition, segmentNames, maxRules = 3, class
             <span className="truncate text-neutral-700">{token.part.field}</span>
             {token.part.op && <span className="shrink-0 text-neutral-400">{token.part.op}</span>}
             {token.part.value && <span className="truncate font-medium text-neutral-900">{token.part.value}</span>}
+            {token.part.extra && <span className="shrink-0 text-neutral-400">{token.part.extra}</span>}
           </span>
         ),
       )}
