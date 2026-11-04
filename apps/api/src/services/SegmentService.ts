@@ -4,7 +4,7 @@ import {fromPrismaJson, toPrismaJson} from '@plunk/types';
 import signale from 'signale';
 
 import {prisma} from '../database/prisma.js';
-import {HttpException} from '../exceptions/index.js';
+import {ErrorCode, HttpException} from '../exceptions/index.js';
 // The cascade over a big static segment's memberships can outlast Prisma's 5 s default
 import {LONG_TRANSACTION} from '../utils/database.js';
 
@@ -22,6 +22,12 @@ const ACTIVE_CAMPAIGN_STATUSES: CampaignStatus[] = ['DRAFT', 'SCHEDULED', 'SENDI
  */
 const MAX_BLOCKED_SEGMENTS_LISTED = 5;
 const MAX_BLOCKING_NAMES_LISTED = 3;
+
+/** Operators whose value is a number of `unit`s back from now */
+const WINDOW_OPERATORS = ['within', 'olderThan', 'triggeredWithin', 'triggeredOlderThan', 'notTriggeredWithin'];
+const RANGE_OPERATORS = ['greaterThan', 'lessThan', 'greaterThanOrEqual', 'lessThanOrEqual'];
+/** Longest time window, in days whatever its unit: 100 years keeps every computed date valid */
+const MAX_WINDOW_DAYS = 36_500;
 
 /** What uses a segment, by name: collected as sets, returned sorted */
 interface SegmentBlockers<Names> {
@@ -796,6 +802,8 @@ export class SegmentService {
     visitedSegments = new Set<string>(),
   ): Promise<Prisma.ContactWhereInput> {
     const {field, operator, value, unit} = filter;
+    // Conditions saved before values were checked reach here too
+    this.assertFilterValue(filter);
 
     // Handle segment membership filters (e.g., "segment.<segmentId>")
     if (field.startsWith('segment.')) {
@@ -1033,8 +1041,51 @@ export class SegmentService {
     }
 
     // Validate unit for time-based operators
-    if (['within', 'triggeredWithin', 'olderThan', 'triggeredOlderThan', 'notTriggeredWithin'].includes(filter.operator) && !filter.unit) {
+    if (WINDOW_OPERATORS.includes(filter.operator) && !filter.unit) {
       throw new HttpException(400, `"${filter.operator}" operator requires a unit (days, hours, or minutes)`);
+    }
+
+    this.assertFilterValue(filter);
+  }
+
+  /**
+   * Reject a value the query cannot compare: Prisma panics on a JSON range filter that is not a
+   * text or a number, and an invalid date fails before or inside the query.
+   */
+  private static assertFilterValue({field, operator, value, unit}: SegmentFilter): void {
+    // A missing value is validateFilter's to report; segment membership takes none
+    if (value === undefined || field.startsWith('segment.')) {
+      return;
+    }
+    const fail = (expected: string): never => {
+      throw new HttpException(400, `Filter "${field} ${operator}" needs ${expected}`, ErrorCode.VALIDATION_ERROR);
+    };
+
+    if (WINDOW_OPERATORS.includes(operator)) {
+      const units = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+      // The same 100 years in any unit. A missing or unknown unit is reported by itself.
+      const max = (MAX_WINDOW_DAYS * this.getMilliseconds(1, 'days')) / this.getMilliseconds(1, unit ?? 'days');
+      // Also false for NaN
+      if (typeof units !== 'number' || !(Math.abs(units) <= max)) {
+        fail(`a number of ${unit ?? 'days'} up to ${max}`);
+      }
+    } else if (
+      (field === 'createdAt' || field === 'updatedAt') &&
+      (operator === 'equals' || operator === 'notEquals' || RANGE_OPERATORS.includes(operator))
+    ) {
+      const year = typeof value === 'string' || typeof value === 'number' ? new Date(value).getUTCFullYear() : NaN;
+      // Before 9999, so that the day after it is still a date Postgres takes
+      if (!(year >= 1 && year < 9999)) {
+        fail('a date');
+      }
+    } else if (field.startsWith('data.') && RANGE_OPERATORS.includes(operator)) {
+      if (typeof value !== 'string' && typeof value !== 'number') {
+        fail('a text or a number');
+      }
+    } else if (field === 'email' || operator === 'contains' || operator === 'notContains') {
+      if (!['string', 'number', 'boolean'].includes(typeof value)) {
+        fail('a text, a number or true/false');
+      }
     }
   }
 

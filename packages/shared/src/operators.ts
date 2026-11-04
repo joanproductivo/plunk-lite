@@ -131,6 +131,11 @@ export const WORKFLOW_CONDITION_OPERATORS = [
  *     - Matches when date field is within specified time period
  *     - Requires unit: 'days' | 'hours' | 'minutes'
  *     - Example: within 7 days = createdAt >= (now - 7 days)
+ *
+ * Segments refuse a value their query cannot compare with a 400: a data.* range value that is not a
+ * text or a number, a time window that is not a number of units of up to 100 years, a contact date
+ * that is not a date, and a contains/notContains or email value that is not a text, a number or
+ * true/false.
  */
 
 /**

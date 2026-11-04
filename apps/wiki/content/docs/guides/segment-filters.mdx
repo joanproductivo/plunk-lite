@@ -135,6 +135,7 @@ For `segment.<segmentId>`, where `<segmentId>` is the ID of another segment in y
 - **Need a `value`**: `equals`, `notEquals`, `contains`, `notContains`, `greaterThan`, `lessThan`, `greaterThanOrEqual`, `lessThanOrEqual`, `within`, `olderThan`, `triggeredWithin`, `triggeredOlderThan`, `notTriggeredWithin`.
 - **Need a `unit`** (`"days"`, `"hours"`, or `"minutes"`): `within`, `olderThan`, `triggeredWithin`, `triggeredOlderThan`, `notTriggeredWithin`.
 - **Need nothing extra**: `exists`, `notExists`, `triggered`, `notTriggered`, `memberOfSegment`, `notMemberOfSegment`.
+- **Values the query can't compare are refused** with a `400` that names the filter: `greaterThan`, `lessThan`, `greaterThanOrEqual` and `lessThanOrEqual` on a `data.<key>` need a text or a number; time windows need a number of units (or a text holding one) of up to 100 years (36,500 days, 876,000 hours or 52,560,000 minutes); `createdAt` and `updatedAt` need a date; `contains`, `notContains` and any operator on `email` need a text, a number or `true`/`false`.
 
 ## Examples
 
