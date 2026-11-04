@@ -710,7 +710,12 @@ function FilterGroupComponent({
             onChange={f => updateFilter(index, f)}
             onRemove={() => removeFilter(index)}
             availableFields={availableFields}
-            warnMissing={leavesOutMissingField(filter) && !includedWhenMissing.has(filter.field)}
+            warnMissing={
+              leavesOutMissingField(filter) &&
+              // A sibling OR group "<field> has no value" covers the filter only when it is alone in
+              // its group: next to other filters it would also let in who those leave out
+              !(group.filters.length === 1 && !group.conditions && includedWhenMissing.has(filter.field))
+            }
             onIncludeMissing={group.conditions ? undefined : () => onChange(includeMissingField(group, index))}
           />
         ))}

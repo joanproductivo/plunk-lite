@@ -81,6 +81,17 @@ describe('SegmentFilterBuilder: contacts without the field', () => {
     expect(container.textContent).not.toContain(WARNING);
   });
 
+  it('keeps warning when "Has no value" is a top-level OR group next to other filters', async () => {
+    // This lets in the unsubscribed contacts without a plan too: the button nests it instead
+    await render({
+      logic: 'OR',
+      groups: [{filters: [subscribed, notPro]}, {filters: [{field: 'data.plan', operator: 'notExists'}]}],
+    });
+
+    expect(container.textContent).toContain(WARNING);
+    expect(includeButton()).toBeDefined();
+  });
+
   it('only explains how when the group already has a nested condition', async () => {
     await render({
       logic: 'AND',

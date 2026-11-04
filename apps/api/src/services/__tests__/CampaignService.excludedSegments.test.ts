@@ -13,7 +13,8 @@ import {QueueService} from '../QueueService';
 /**
  * Plunk Lite: a campaign can leave out the contacts of some segments, whatever its audience. Who is
  * in an excluded segment is counted and taken away, never negated: Prisma's NOT on a typed `data.*`
- * filter also requires the value's type, so negating a dynamic segment would leave out people not in it.
+ * filter also requires the value's type, and equals/notEquals null are still NULL without the key, so
+ * negating a dynamic segment would leave out people not in it.
  */
 describe('CampaignService - excluded segments', () => {
   const prisma = getPrismaClient();
