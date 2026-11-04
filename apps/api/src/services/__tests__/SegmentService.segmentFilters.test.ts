@@ -172,32 +172,40 @@ describe('SegmentService - segment membership filters', () => {
     });
 
     it.each([
-      ['next to another filter', [{field: 'subscribed', operator: 'equals', value: true}]],
-      ['alone in its group', []],
-    ] as const)('saves and applies what "Include contacts without this field" builds, %s', async (_name, others) => {
-      // The dashboard button's shape: the filter ORed with its field having no value, nested in its group
-      const segment = await SegmentService.create(projectId, {
-        name: 'Not pro, or no plan',
-        condition: {
-          logic: 'AND',
-          groups: [
-            {
-              filters: [...others] as SegmentFilter[],
-              conditions: {
-                logic: 'OR',
-                groups: [
-                  {filters: [{field: 'data.plan', operator: 'notEquals', value: 'pro'}]},
-                  {filters: [{field: 'data.plan', operator: 'notExists'}]},
-                ],
+      ['next to another filter', [{field: 'subscribed', operator: 'equals', value: true}], false],
+      ['alone in its group', [], true],
+    ] as const)(
+      'saves and applies what "Include contacts without this field" builds, %s',
+      async (_name, others, letsInUnsubscribed) => {
+        // The dashboard button's shape: the filter ORed with its field having no value, nested in its group.
+        // An unsubscribed contact without a plan shows the OR stays inside the group, ANDed with the rest.
+        const unsubscribed = await prisma.contact.create({
+          data: {projectId, email: `contact-${randomUUID()}@test.com`, subscribed: false},
+        });
+        const segment = await SegmentService.create(projectId, {
+          name: 'Not pro, or no plan',
+          condition: {
+            logic: 'AND',
+            groups: [
+              {
+                filters: [...others] as SegmentFilter[],
+                conditions: {
+                  logic: 'OR',
+                  groups: [
+                    {filters: [{field: 'data.plan', operator: 'notEquals', value: 'pro'}]},
+                    {filters: [{field: 'data.plan', operator: 'notExists'}]},
+                  ],
+                },
               },
-            },
-          ],
-        },
-      });
+            ],
+          },
+        });
 
-      const {data} = await SegmentService.getContacts(projectId, segment.id);
-      expect(data.map(contact => contact.id).sort()).toEqual(allBut(contacts.pro));
-    });
+        const {data} = await SegmentService.getContacts(projectId, segment.id);
+        const expected = [...allBut(contacts.pro), ...(letsInUnsubscribed ? [unsubscribed.id] : [])].sort();
+        expect(data.map(contact => contact.id).sort()).toEqual(expected);
+      },
+    );
   });
 
   describe('a data field set to null', () => {

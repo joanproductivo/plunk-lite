@@ -1119,7 +1119,8 @@ export class SegmentService {
   }
 
   /**
-   * Compare a JSON field that may be missing; buildJsonFieldCondition requires it first
+   * Compare a JSON field that may be missing; buildJsonFieldCondition requires it first, except for
+   * equals/notEquals null
    */
   private static buildJsonComparison(
     path: string[],
