@@ -51,18 +51,22 @@ export function SegmentChip({name, href, onRemove, removeLabel, disabled}: Segme
   );
 }
 
-interface StaticSegmentSelectProps {
+interface SegmentSelectProps {
   /** Segment ids not to offer, such as the ones already chosen */
   exclude: string[];
   onSelect: (segment: Segment) => void;
   placeholder: string;
+  /** Offers static segments only, the ones that can be added to and removed from */
+  staticOnly?: boolean;
   disabled?: boolean;
 }
 
-/** Picks one of the project's static segments; renders nothing when none is left to pick */
-export function StaticSegmentSelect({exclude, onSelect, placeholder, disabled}: StaticSegmentSelectProps) {
+/** Picks one of the project's segments; renders nothing when none is left to pick */
+export function SegmentSelect({exclude, onSelect, placeholder, staticOnly, disabled}: SegmentSelectProps) {
   const {data: segments} = useSegments();
-  const choices = (segments ?? []).filter(segment => segment.type === 'STATIC' && !exclude.includes(segment.id));
+  const choices = (segments ?? []).filter(
+    segment => (!staticOnly || segment.type === 'STATIC') && !exclude.includes(segment.id),
+  );
 
   if (choices.length === 0) {
     return null;
@@ -84,6 +88,7 @@ export function StaticSegmentSelect({exclude, onSelect, placeholder, disabled}: 
         {choices.map(segment => (
           <SelectItem key={segment.id} value={segment.id}>
             {segment.name}
+            {!staticOnly && segment.type === 'DYNAMIC' && <span className="text-neutral-400"> (dynamic)</span>}
           </SelectItem>
         ))}
       </SelectContent>

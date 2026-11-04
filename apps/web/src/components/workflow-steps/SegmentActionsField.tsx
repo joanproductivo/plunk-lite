@@ -2,7 +2,7 @@ import {WORKFLOW_SEGMENT_CHANGES_MAX} from '@plunk/shared';
 import type {UpdateContactSegmentChanges} from '@plunk/types';
 import {Label} from '@plunk/ui';
 
-import {SegmentChip, StaticSegmentSelect, useSegmentName} from '../segments/SegmentPicker';
+import {SegmentChip, SegmentSelect, useSegmentName} from '../segments/SegmentPicker';
 
 const ROWS: Array<{key: keyof UpdateContactSegmentChanges; label: string; verb: string; placeholder: string}> = [
   {key: 'add', label: 'Add to segments', verb: 'add to', placeholder: 'Add to a segment…'},
@@ -41,7 +41,8 @@ export function SegmentActionsField({value, onChange}: SegmentActionsFieldProps)
             </div>
           )}
           {value[row.key].length < WORKFLOW_SEGMENT_CHANGES_MAX && (
-            <StaticSegmentSelect
+            <SegmentSelect
+              staticOnly
               exclude={chosen}
               onSelect={segment => onChange({...value, [row.key]: [...value[row.key], segment.id]})}
               placeholder={row.placeholder}

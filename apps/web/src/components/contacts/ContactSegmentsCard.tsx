@@ -8,7 +8,7 @@ import useSWR from 'swr';
 
 import {network} from '../../lib/network';
 import {addSegmentMembers} from '../../lib/segmentMembers';
-import {SegmentChip, StaticSegmentSelect} from '../segments/SegmentPicker';
+import {SegmentChip, SegmentSelect} from '../segments/SegmentPicker';
 
 interface ContactSegmentsCardProps {
   contactId: string;
@@ -80,7 +80,8 @@ export function ContactSegmentsCard({contactId, email}: ContactSegmentsCardProps
                   ))}
                 </div>
               )}
-              <StaticSegmentSelect
+              <SegmentSelect
+                staticOnly
                 exclude={segments.static.map(segment => segment.id)}
                 onSelect={segment => void changeMembership(segment, 'add')}
                 placeholder="Add to a segment…"

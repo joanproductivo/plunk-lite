@@ -18,6 +18,7 @@ import {
 import type {Segment, Template} from '@plunk/db';
 import {CampaignAudienceType, TemplateType} from '@plunk/db';
 import {NextSeo} from 'next-seo';
+import {ExcludedSegmentsField} from '../../components/campaigns/ExcludedSegmentsField';
 import {DashboardLayout} from '../../components/DashboardLayout';
 import {EmailSettings} from '../../components/EmailSettings';
 import {EmailEditor} from '../../components/EmailEditor';
@@ -45,6 +46,7 @@ export default function CreateCampaignPage() {
   const [campaignType, setCampaignType] = useState<TemplateType>(TemplateType.MARKETING);
   const [audienceType, setAudienceType] = useState<CampaignAudienceType>(CampaignAudienceType.ALL);
   const [segmentId, setSegmentId] = useState('');
+  const [excludedSegmentIds, setExcludedSegmentIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [loadingTemplate, setLoadingTemplate] = useState(false);
 
@@ -62,7 +64,17 @@ export default function CreateCampaignPage() {
         replyTo: queryReplyTo,
         audienceType: queryAudienceType,
         segmentId: querySegmentId,
+        excludedSegmentIds: queryExcludedSegmentIds,
       } = router.query;
+      const applyQueryAudience = () => {
+        if (queryAudienceType && typeof queryAudienceType === 'string') {
+          setAudienceType(queryAudienceType as CampaignAudienceType);
+        }
+        if (querySegmentId && typeof querySegmentId === 'string') setSegmentId(querySegmentId);
+        if (queryExcludedSegmentIds && typeof queryExcludedSegmentIds === 'string') {
+          setExcludedSegmentIds(queryExcludedSegmentIds.split(',').filter(Boolean));
+        }
+      };
 
       if (templateId && typeof templateId === 'string') {
         setLoadingTemplate(true);
@@ -89,10 +101,7 @@ export default function CreateCampaignPage() {
           if (queryFrom && typeof queryFrom === 'string') setFrom(queryFrom);
           if (queryFromName && typeof queryFromName === 'string') setFromName(queryFromName);
           if (queryReplyTo && typeof queryReplyTo === 'string') setReplyTo(queryReplyTo);
-          if (queryAudienceType && typeof queryAudienceType === 'string') {
-            setAudienceType(queryAudienceType as CampaignAudienceType);
-          }
-          if (querySegmentId && typeof querySegmentId === 'string') setSegmentId(querySegmentId);
+          applyQueryAudience();
           setBody(campaign.data.body);
           toast.success('Campaign loaded');
         } catch {
@@ -106,10 +115,7 @@ export default function CreateCampaignPage() {
         if (queryFrom && typeof queryFrom === 'string') setFrom(queryFrom);
         if (queryFromName && typeof queryFromName === 'string') setFromName(queryFromName);
         if (queryReplyTo && typeof queryReplyTo === 'string') setReplyTo(queryReplyTo);
-        if (queryAudienceType && typeof queryAudienceType === 'string') {
-          setAudienceType(queryAudienceType as CampaignAudienceType);
-        }
-        if (querySegmentId && typeof querySegmentId === 'string') setSegmentId(querySegmentId);
+        applyQueryAudience();
       }
     };
 
@@ -141,7 +147,7 @@ export default function CreateCampaignPage() {
         type: campaignType,
         audienceType,
         segmentId: audienceType === CampaignAudienceType.SEGMENT ? segmentId : undefined,
-        audienceFilter: audienceType === CampaignAudienceType.FILTERED ? [] : undefined,
+        excludedSegmentIds,
       } as any);
 
       toast.success('Campaign created');
@@ -333,7 +339,13 @@ export default function CreateCampaignPage() {
                         </Label>
                         <Select
                           value={audienceType}
-                          onValueChange={value => setAudienceType(value as CampaignAudienceType)}
+                          onValueChange={value => {
+                            setAudienceType(value as CampaignAudienceType);
+                            // Plunk Lite: back on a segment, that segment cannot also be left out
+                            if (value === CampaignAudienceType.SEGMENT) {
+                              setExcludedSegmentIds(ids => ids.filter(id => id !== segmentId));
+                            }
+                          }}
                           required
                         >
                           <SelectTrigger>
@@ -359,7 +371,15 @@ export default function CreateCampaignPage() {
                           <Label htmlFor="segment">
                             Select Segment <span className="text-red-500">*</span>
                           </Label>
-                          <Select value={segmentId} onValueChange={setSegmentId} required>
+                          <Select
+                            value={segmentId}
+                            onValueChange={value => {
+                              setSegmentId(value);
+                              // Plunk Lite: the segment it is sent to cannot also be left out
+                              setExcludedSegmentIds(ids => ids.filter(id => id !== value));
+                            }}
+                            required
+                          >
                             <SelectTrigger>
                               <SelectValue placeholder="Choose a segment" />
                             </SelectTrigger>
@@ -385,10 +405,19 @@ export default function CreateCampaignPage() {
                           {estimatedRecipients > 0 && (
                             <p className="text-sm text-neutral-500">
                               <span className="font-medium text-neutral-900">{estimatedRecipients.toLocaleString()} recipients</span> in this segment
+                              {excludedSegmentIds.length > 0 && ', before exclusions'}
                             </p>
                           )}
                         </div>
                       )}
+
+                      <ExcludedSegmentsField
+                        value={excludedSegmentIds}
+                        onChange={setExcludedSegmentIds}
+                        audienceSegmentId={
+                          audienceType === CampaignAudienceType.SEGMENT ? segmentId || undefined : undefined
+                        }
+                      />
                     </CardContent>
                   </Card>
                 </div>

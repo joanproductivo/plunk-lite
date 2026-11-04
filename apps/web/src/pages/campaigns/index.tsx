@@ -519,6 +519,9 @@ export default function CampaignsPage() {
       if (campaign.segmentId) {
         query.segmentId = campaign.segmentId;
       }
+      if (campaign.excludedSegmentIds.length > 0) {
+        query.excludedSegmentIds = campaign.excludedSegmentIds.join(',');
+      }
     }
 
     void router.push({
