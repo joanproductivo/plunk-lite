@@ -23,6 +23,16 @@ const ACTIVE_CAMPAIGN_STATUSES: CampaignStatus[] = ['DRAFT', 'SCHEDULED', 'SENDI
 const MAX_BLOCKED_SEGMENTS_LISTED = 5;
 const MAX_BLOCKING_NAMES_LISTED = 3;
 
+/** What uses a segment, by name: collected as sets, returned sorted */
+interface SegmentBlockers<Names> {
+  campaigns: number;
+  filteredCampaigns: Names;
+  /** Plunk Lite: the active campaigns that leave it out */
+  excludingCampaigns: Names;
+  workflows: Names;
+  segments: Names;
+}
+
 /** `"A", "B", "C"`, or `"A", "B" and 3 more` past `max` names. */
 function listNames(names: string[], max: number): string {
   const shown = names
@@ -297,6 +307,13 @@ export class SegmentService {
       );
     }
 
+    if (blockers?.excludingCampaigns.length) {
+      throw new HttpException(
+        409,
+        `Cannot delete segment: the active campaign(s) ${listNames(blockers.excludingCampaigns, MAX_BLOCKING_NAMES_LISTED)} exclude it. Remove it from their audience first or wait for them to complete.`,
+      );
+    }
+
     if (blockers?.workflows.length) {
       throw new HttpException(
         409,
@@ -336,7 +353,9 @@ export class SegmentService {
     const {deleted, projectName} = await prisma.$transaction(async tx => {
       // Locks the rows first, so a campaign pointed at one of them meanwhile either is seen by the
       // check below or waits and then fails on its foreign key; a concurrent bulk delete of the
-      // same segments waits too and then finds them gone.
+      // same segments waits too and then finds them gone. Plunk Lite: a campaign's excluded segments
+      // have no foreign key, so one excluded meanwhile is left dangling, and that campaign does not
+      // send until it is removed.
       await tx.$queryRaw`SELECT 1 FROM segments WHERE id IN (${Prisma.join(ids)}) AND "projectId" = ${projectId} FOR UPDATE`;
       const segments = await tx.segment.findMany({
         where: {id: {in: ids}, projectId},
@@ -354,6 +373,9 @@ export class SegmentService {
           blocker?.campaigns ? `${blocker.campaigns} active campaign(s)` : null,
           blocker?.filteredCampaigns.length
             ? `the audience filter of the active campaign(s) ${listNames(blocker.filteredCampaigns, MAX_BLOCKING_NAMES_LISTED)}`
+            : null,
+          blocker?.excludingCampaigns.length
+            ? `the excluded segments of the active campaign(s) ${listNames(blocker.excludingCampaigns, MAX_BLOCKING_NAMES_LISTED)}`
             : null,
           blocker?.workflows.length
             ? `the workflow(s) ${listNames(blocker.workflows, MAX_BLOCKING_NAMES_LISTED)}`
@@ -394,8 +416,9 @@ export class SegmentService {
   /**
    * What keeps each segment from being deleted: how many active campaigns send to it, the names of
    * the active campaigns whose audience filter uses its `segment.<id>` field, the names of the
-   * workflows with an Update contact step that adds or removes it or a Condition step on that
-   * field, and the names of the other segments whose condition uses that field. Segments among
+   * active campaigns that exclude it (Plunk Lite), the names of the workflows with an Update
+   * contact step that adds or removes it or a Condition step on that field, and the names of the
+   * other segments whose condition uses that field. Segments among
    * `segmentIds` do not count, since they go together. Triggers and waits on its
    * `segment.<slug>.*` events are not tracked: the slug follows the name and is not unique.
    * Segments nothing uses are left out.
@@ -404,15 +427,18 @@ export class SegmentService {
     db: Prisma.TransactionClient,
     projectId: string,
     segmentIds: string[],
-  ): Promise<Map<string, {campaigns: number; filteredCampaigns: string[]; workflows: string[]; segments: string[]}>> {
-    const blockers = new Map<
-      string,
-      {campaigns: number; filteredCampaigns: Set<string>; workflows: Set<string>; segments: Set<string>}
-    >();
+  ): Promise<Map<string, SegmentBlockers<string[]>>> {
+    const blockers = new Map<string, SegmentBlockers<Set<string>>>();
     const blockerFor = (segmentId: string) => {
       let blocker = blockers.get(segmentId);
       if (!blocker) {
-        blocker = {campaigns: 0, filteredCampaigns: new Set(), workflows: new Set(), segments: new Set()};
+        blocker = {
+          campaigns: 0,
+          filteredCampaigns: new Set(),
+          excludingCampaigns: new Set(),
+          workflows: new Set(),
+          segments: new Set(),
+        };
         blockers.set(segmentId, blocker);
       }
       return blocker;
@@ -463,6 +489,17 @@ export class SegmentService {
       }
     }
 
+    // Plunk Lite: the active campaigns that leave any of them out, matched here like the steps above
+    const excludingCampaigns = await db.campaign.findMany({
+      where: {projectId, status: {in: ACTIVE_CAMPAIGN_STATUSES}, excludedSegmentIds: {hasSome: segmentIds}},
+      select: {name: true, excludedSegmentIds: true},
+    });
+    for (const campaign of excludingCampaigns) {
+      for (const segmentId of campaign.excludedSegmentIds) {
+        if (wanted.has(segmentId)) blockerFor(segmentId).excludingCampaigns.add(campaign.name);
+      }
+    }
+
     const referencing = await db.segment.findMany({
       where: {projectId, id: {notIn: segmentIds}, type: 'DYNAMIC'},
       select: {name: true, condition: true},
@@ -481,6 +518,7 @@ export class SegmentService {
         {
           campaigns: blocker.campaigns,
           filteredCampaigns: sorted(blocker.filteredCampaigns),
+          excludingCampaigns: sorted(blocker.excludingCampaigns),
           workflows: sorted(blocker.workflows),
           segments: sorted(blocker.segments),
         },

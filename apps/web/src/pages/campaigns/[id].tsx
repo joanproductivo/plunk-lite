@@ -33,9 +33,10 @@ import {
 import type {Campaign, Segment} from '@plunk/db';
 import type {CampaignRecipientType} from '@plunk/types';
 import {CampaignAudienceType, CampaignStatus, TemplateType} from '@plunk/db';
-import {CampaignSchemas, detectUnsubscribeSignal} from '@plunk/shared';
+import {CampaignSchemas, detectUnsubscribeSignal, sameSegmentIds} from '@plunk/shared';
 import {AnimatedNumber} from '../../components/AnimatedNumber';
 import {CampaignRecipientsSheet, describeNotDelivered} from '../../components/CampaignRecipientsSheet';
+import {ExcludedSegmentsField, ExcludedSegmentsSuffix} from '../../components/campaigns/ExcludedSegmentsField';
 import {DashboardLayout} from '../../components/DashboardLayout';
 import {EmailSettings} from '../../components/EmailSettings';
 import {EmailEditor} from '../../components/EmailEditor';
@@ -321,6 +322,12 @@ function CampaignDetails() {
   };
 
   const handleSend = async () => {
+    // Plunk Lite: a send goes out as last saved, so unsaved changes (an excluded segment just added,
+    // say) would not be in it while the dialog shows them
+    if (hasChanges) {
+      toast.error('Save your changes before sending.');
+      return;
+    }
     try {
       await network.fetch<void>('POST', `/campaigns/${id}/send`);
       toast.success('Campaign is being sent!');
@@ -331,6 +338,10 @@ function CampaignDetails() {
   };
 
   const handleSchedule = async () => {
+    if (hasChanges) {
+      toast.error('Save your changes before scheduling.');
+      return;
+    }
     if (!scheduledDateTime) {
       toast.error('Please select a date and time');
       return;
@@ -403,8 +414,17 @@ function CampaignDetails() {
         fromName: editedCampaign.fromName || null,
         replyTo: editedCampaign.replyTo || null,
         type: editedCampaign.type,
-        audienceType: editedCampaign.audienceType,
+        // Plunk Lite: a FILTERED audience comes from the API; this page cannot pick one, so it is left as it is
+        audienceType:
+          editedCampaign.audienceType === CampaignAudienceType.FILTERED ? undefined : editedCampaign.audienceType,
         segmentId: editedCampaign.segmentId || undefined,
+        // Plunk Lite: only when changed, so one that was deleted since does not block saving anything else
+        excludedSegmentIds: sameSegmentIds(
+          editedCampaign.excludedSegmentIds ?? [],
+          campaign?.data.excludedSegmentIds ?? [],
+        )
+          ? undefined
+          : editedCampaign.excludedSegmentIds,
       });
       // Silent save - no toast notification
       setHasChanges(false);
@@ -422,6 +442,7 @@ function CampaignDetails() {
           type: updated.data.type,
           audienceType: updated.data.audienceType,
           segmentId: updated.data.segmentId || undefined,
+          excludedSegmentIds: updated.data.excludedSegmentIds,
         });
       }
     } catch (error) {
@@ -445,6 +466,7 @@ function CampaignDetails() {
         type: campaign.data.type,
         audienceType: campaign.data.audienceType,
         segmentId: campaign.data.segmentId || undefined,
+        excludedSegmentIds: campaign.data.excludedSegmentIds,
       });
       // Reset hasChanges when loading fresh data
       setHasChanges(false);
@@ -465,7 +487,8 @@ function CampaignDetails() {
       (editedCampaign.replyTo || '') !== (campaign.data.replyTo || '') ||
       editedCampaign.type !== campaign.data.type ||
       editedCampaign.audienceType !== campaign.data.audienceType ||
-      (editedCampaign.segmentId || null) !== (campaign.data.segmentId || null);
+      (editedCampaign.segmentId || null) !== (campaign.data.segmentId || null) ||
+      !sameSegmentIds(editedCampaign.excludedSegmentIds ?? [], campaign.data.excludedSegmentIds);
 
     setHasChanges(changed);
   }, [editedCampaign, campaign]);
@@ -621,23 +644,33 @@ function CampaignDetails() {
                         </div>
                       </div>
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setDialog({type: 'send'})} className="py-3 cursor-pointer">
+                    <DropdownMenuItem
+                      onClick={() => setDialog({type: 'send'})}
+                      disabled={hasChanges}
+                      className="py-3 cursor-pointer"
+                    >
                       <div className="flex items-start gap-3">
                         <Send className="h-4 w-4 mt-0.5 text-neutral-700" />
                         <div className="flex flex-col gap-0.5 flex-1">
                           <span className="font-medium text-sm">Send now</span>
                           <span className="text-xs text-neutral-500 leading-snug">
-                            Send immediately to all recipients
+                            {hasChanges ? 'Save your changes first' : 'Send immediately to all recipients'}
                           </span>
                         </div>
                       </div>
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setDialog({type: 'schedule'})} className="py-3 cursor-pointer">
+                    <DropdownMenuItem
+                      onClick={() => setDialog({type: 'schedule'})}
+                      disabled={hasChanges}
+                      className="py-3 cursor-pointer"
+                    >
                       <div className="flex items-start gap-3">
                         <Calendar className="h-4 w-4 mt-0.5 text-neutral-700" />
                         <div className="flex flex-col gap-0.5 flex-1">
                           <span className="font-medium text-sm">Schedule for later</span>
-                          <span className="text-xs text-neutral-500 leading-snug">Choose a specific date and time</span>
+                          <span className="text-xs text-neutral-500 leading-snug">
+                            {hasChanges ? 'Save your changes first' : 'Choose a specific date and time'}
+                          </span>
                         </div>
                       </div>
                     </DropdownMenuItem>
@@ -696,10 +729,16 @@ function CampaignDetails() {
                       <Select
                         value={editedCampaign.audienceType ?? c.audienceType}
                         onValueChange={(value: CampaignAudienceType) => {
+                          const segmentId =
+                            value === CampaignAudienceType.SEGMENT ? editedCampaign.segmentId : undefined;
                           setEditedCampaign({
                             ...editedCampaign,
                             audienceType: value,
-                            segmentId: value === CampaignAudienceType.SEGMENT ? editedCampaign.segmentId : undefined,
+                            segmentId,
+                            // Plunk Lite: back on a segment, that segment cannot also be left out
+                            excludedSegmentIds: (editedCampaign.excludedSegmentIds ?? c.excludedSegmentIds).filter(
+                              id => id !== segmentId,
+                            ),
                           });
                         }}
                       >
@@ -732,6 +771,10 @@ function CampaignDetails() {
                             setEditedCampaign({
                               ...editedCampaign,
                               segmentId: value,
+                              // Plunk Lite: the segment it is sent to cannot also be left out
+                              excludedSegmentIds: (editedCampaign.excludedSegmentIds ?? c.excludedSegmentIds).filter(
+                                id => id !== value,
+                              ),
                             });
                           }}
                           disabled={!segments || segments.length === 0}
@@ -771,6 +814,16 @@ function CampaignDetails() {
                       Filtered audiences are configured with advanced filter conditions
                     </p>
                   )}
+
+                  <ExcludedSegmentsField
+                    value={editedCampaign.excludedSegmentIds ?? c.excludedSegmentIds}
+                    onChange={excludedSegmentIds => setEditedCampaign({...editedCampaign, excludedSegmentIds})}
+                    audienceSegmentId={
+                      (editedCampaign.audienceType ?? c.audienceType) === CampaignAudienceType.SEGMENT
+                        ? (editedCampaign.segmentId ?? c.segmentId ?? undefined)
+                        : undefined
+                    }
+                  />
 
                   {draftRecipientCount > 0 && (
                     <p className="text-xs text-neutral-500">
@@ -1096,6 +1149,7 @@ function CampaignDetails() {
                           {(editedCampaign.audienceType ?? c.audienceType) === CampaignAudienceType.SEGMENT &&
                             (segments?.find(s => s.id === (editedCampaign.segmentId ?? c.segmentId))?.name ?? 'the selected segment')}
                           {(editedCampaign.audienceType ?? c.audienceType) === CampaignAudienceType.FILTERED && 'filtered contacts'}
+                          <ExcludedSegmentsSuffix ids={editedCampaign.excludedSegmentIds ?? c.excludedSegmentIds} />
                         </p>
                       </div>
                     )}
@@ -1156,6 +1210,7 @@ function CampaignDetails() {
                   {(editedCampaign.audienceType ?? c.audienceType) === CampaignAudienceType.SEGMENT &&
                     (segments?.find(s => s.id === (editedCampaign.segmentId ?? c.segmentId))?.name ?? 'Selected segment')}
                   {(editedCampaign.audienceType ?? c.audienceType) === CampaignAudienceType.FILTERED && 'Filtered contacts'}
+                  <ExcludedSegmentsSuffix ids={editedCampaign.excludedSegmentIds ?? c.excludedSegmentIds} />
                 </div>
               </div>
 
@@ -1511,10 +1566,16 @@ function CampaignDetails() {
                         (segments?.find(s => s.id === c.segmentId)?.name || 'Selected Segment')}
                       {c.audienceType === CampaignAudienceType.FILTERED && 'Filtered Contacts'}
                     </p>
+                    {c.excludedSegmentIds.length > 0 && (
+                      <p className="text-xs text-neutral-500">
+                        <ExcludedSegmentsSuffix ids={c.excludedSegmentIds} />
+                      </p>
+                    )}
                     {c.audienceType === CampaignAudienceType.SEGMENT &&
                       segments?.find(s => s.id === c.segmentId)?.memberCount && (
                         <p className="text-xs text-neutral-500">
                           {segments.find(s => s.id === c.segmentId)!.memberCount.toLocaleString()} contacts
+                          {c.excludedSegmentIds.length > 0 && ' in the segment, before exclusions'}
                         </p>
                       )}
                   </div>

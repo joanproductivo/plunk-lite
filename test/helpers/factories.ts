@@ -1,11 +1,13 @@
 import {
   AuthMethod,
+  CampaignAudienceType,
   CampaignStatus,
   EmailSourceType,
   EmailStatus,
   Prisma,
   PrismaClient,
   Role,
+  SegmentType,
   TemplateType,
   TrackingMode,
   WorkflowExecutionStatus,
@@ -68,6 +70,8 @@ export interface CampaignFactoryOptions {
   scheduledFor?: Date | null;
   segmentId?: string | null;
   type?: TemplateType;
+  audienceType?: CampaignAudienceType;
+  excludedSegmentIds?: string[];
 }
 
 export interface WorkflowFactoryOptions {
@@ -228,6 +232,8 @@ export class TestFactories {
         scheduledFor: options.scheduledFor,
         segmentId: options.segmentId,
         type: options.type || TemplateType.MARKETING,
+        audienceType: options.audienceType ?? CampaignAudienceType.ALL,
+        excludedSegmentIds: options.excludedSegmentIds ?? [],
       },
     });
   }
@@ -530,8 +536,11 @@ export class TestFactories {
         groups: Array<{filters: Array<{field: string; operator: string; value?: unknown; unit?: string}>}>;
       };
       trackMembership?: boolean;
+      /** A STATIC segment gets no condition: its members are segmentMembership rows */
+      type?: SegmentType;
     } = {},
   ) {
+    const type = overrides.type ?? SegmentType.DYNAMIC;
     // Convert filters array to condition format if condition not provided
     const condition = overrides.condition || {
       logic: 'AND' as const,
@@ -542,7 +551,8 @@ export class TestFactories {
       data: {
         projectId,
         name: overrides.name || `Segment ${uniqueId()}`,
-        condition: condition as unknown as Prisma.InputJsonValue,
+        type,
+        condition: type === SegmentType.STATIC ? Prisma.DbNull : (condition as unknown as Prisma.InputJsonValue),
         trackMembership: overrides.trackMembership ?? false,
       },
     });

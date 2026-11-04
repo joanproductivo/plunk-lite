@@ -25,8 +25,20 @@ export class Campaigns {
     const auth = res.locals.auth;
     // Before the schema, whose error doesn't say which field it refused
     assertValidReplyTo(req.body?.replyTo);
-    const {name, description, subject, body, from, fromName, replyTo, type, audienceType, audienceCondition, segmentId} =
-      CampaignSchemas.create.parse(req.body);
+    const {
+      name,
+      description,
+      subject,
+      body,
+      from,
+      fromName,
+      replyTo,
+      type,
+      audienceType,
+      audienceCondition,
+      segmentId,
+      excludedSegmentIds,
+    } = CampaignSchemas.create.parse(req.body);
 
     if (audienceType === CampaignAudienceType.SEGMENT && !segmentId) {
       throw new HttpException(400, 'Segment ID is required for SEGMENT audience type');
@@ -53,6 +65,7 @@ export class Campaigns {
       audienceType,
       audienceCondition,
       segmentId,
+      excludedSegmentIds,
     });
 
     return res.status(201).json({
@@ -168,6 +181,8 @@ export class Campaigns {
     const {id} = UtilitySchemas.id.parse(req.params);
     const {name, description, subject, body, from, fromName, replyTo, type, audienceType, audienceCondition, segmentId} =
       req.body;
+    // Plunk Lite: the rest of this body is read as it comes; the excluded segments go through their schema
+    const excludedSegmentIds = CampaignSchemas.update.shape.excludedSegmentIds.parse(req.body?.excludedSegmentIds);
 
     // Validate audience-specific fields if audienceType is being updated
     if (audienceType === CampaignAudienceType.SEGMENT && segmentId === undefined) {
@@ -198,6 +213,7 @@ export class Campaigns {
       audienceType,
       audienceCondition,
       segmentId,
+      excludedSegmentIds,
     });
 
     return res.json({

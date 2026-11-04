@@ -326,6 +326,10 @@ model Campaign {
   segment   Segment? @relation(fields: [segmentId], references: [id])
   segmentId String? // For SEGMENT: reference to saved segment
 
+  // Plunk Lite: segments whose contacts never get this campaign, whatever the audience. Ids
+  // without a foreign key: a deleted one stops the send until it is removed
+  excludedSegmentIds String[] @default([])
+
   // Scheduling
   scheduledFor DateTime?
 

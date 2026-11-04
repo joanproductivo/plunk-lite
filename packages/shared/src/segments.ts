@@ -33,3 +33,13 @@ export const REQUEST_SEGMENTS_MAX = 20;
 
 /** Most segments one Update contact workflow step adds to, and removes from, each */
 export const WORKFLOW_SEGMENT_CHANGES_MAX = 20;
+
+/** Plunk Lite: most segments a campaign leaves out (the MCP's campaign tool repeats it) */
+export const CAMPAIGN_EXCLUDED_SEGMENTS_MAX = 20;
+
+/** Plunk Lite: whether two lists name the same segments, whatever their order or repeats */
+export function sameSegmentIds(a: readonly string[], b: readonly string[]): boolean {
+  const left = new Set(a);
+  const right = new Set(b);
+  return left.size === right.size && [...left].every(id => right.has(id));
+}

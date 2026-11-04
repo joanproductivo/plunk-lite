@@ -384,6 +384,29 @@ describe('Workflow segment actions', () => {
       expect(await prisma.segment.findUnique({where: {id: done.id}})).toBeNull();
     });
 
+    it('is refused while an active campaign excludes it, alone or with others (Plunk Lite)', async () => {
+      const excluded = await staticSegment('Excluded', false);
+      const sentOnly = await staticSegment('Sent only', false);
+      await factories.createCampaign({projectId, name: 'Spring', excludedSegmentIds: [excluded.id]});
+      await factories.createCampaign({
+        projectId,
+        name: 'Last year',
+        status: CampaignStatus.SENT,
+        excludedSegmentIds: [sentOnly.id],
+      });
+
+      await expect(SegmentService.delete(projectId, excluded.id)).rejects.toMatchObject({
+        code: 409,
+        message: expect.stringContaining('the active campaign(s) "Spring" exclude it'),
+      });
+      await expect(SegmentService.bulkUpdate(projectId, {ids: [excluded.id], delete: true})).rejects.toMatchObject({
+        code: 409,
+        message: expect.stringContaining('the excluded segments of the active campaign(s) "Spring"'),
+      });
+      await SegmentService.delete(projectId, sentOnly.id);
+      expect(await prisma.segment.findUnique({where: {id: sentOnly.id}})).toBeNull();
+    });
+
     describe('several at once', () => {
       const remaining = async (ids: string[]) =>
         (await prisma.segment.findMany({where: {id: {in: ids}}, select: {name: true}})).map(s => s.name).sort();
