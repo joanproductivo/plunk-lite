@@ -85,7 +85,8 @@ export class SegmentService {
    * match for a dynamic segment's filter (evaluated live, like the member counts). False when
    * the segment is missing or belongs to another project, or its filter cannot be built (e.g.
    * it references a deleted segment). A database error is thrown, so the caller fails rather
-   * than taking the "not a member" path by mistake.
+   * than taking the "not a member" path by mistake, and so is a filter value the query cannot
+   * compare (a 400).
    */
   public static async isMember(projectId: string, segmentId: string, contactId: string): Promise<boolean> {
     const segment = await prisma.segment.findFirst({
@@ -109,6 +110,10 @@ export class SegmentService {
     try {
       where = await this.buildConditionClause(projectId, fromPrismaJson<FilterCondition>(segment.condition));
     } catch (error) {
+      // A filter value the query cannot compare is a broken segment to report, not a contact outside it
+      if (error instanceof HttpException && error.errorCode === ErrorCode.VALIDATION_ERROR) {
+        throw error;
+      }
       signale.warn(`[SEGMENT] Membership check on segment ${segmentId}: its filter cannot be built:`, error);
       return false;
     }

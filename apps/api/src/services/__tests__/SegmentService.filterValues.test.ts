@@ -113,6 +113,22 @@ describe('SegmentService - filter values', () => {
       await SegmentService.refreshAllMemberCounts(projectId);
       expect((await prisma.segment.findUniqueOrThrow({where: {id: segment.id}})).memberCount).toBe(3);
     });
+
+    it('fails a membership check rather than answering "not a member"', async () => {
+      const segment = await broken();
+      const contact = await prisma.contact.findFirstOrThrow({where: {projectId}});
+
+      await expect(SegmentService.isMember(projectId, segment.id, contact.id)).rejects.toMatchObject({code: 400});
+    });
+
+    it('still answers "not a member" for a segment whose referenced segment is gone', async () => {
+      const segment = await factories.createSegment(projectId, {
+        filters: [{field: 'segment.00000000-0000-0000-0000-000000000000', operator: 'memberOfSegment'}],
+      });
+      const contact = await prisma.contact.findFirstOrThrow({where: {projectId}});
+
+      await expect(SegmentService.isMember(projectId, segment.id, contact.id)).resolves.toBe(false);
+    });
   });
 
   describe('campaigns', () => {
