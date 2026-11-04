@@ -184,6 +184,9 @@ export function EmailEditor({
         heading: {
           levels: [1, 2, 3],
         },
+        // StarterKit 3 bundles Link: keep only the configured one below, or both run and its
+        // click handler opens links clicked while editing
+        link: false,
       }),
       EmailDocument,
       EmailTextAlign,
