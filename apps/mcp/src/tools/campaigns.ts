@@ -127,6 +127,9 @@ export function registerCampaignTools(ctx: ToolContext, client: PlunkClient): vo
         '- `SEGMENT` — one existing segment; requires `segmentId` (find one with `plunk_list_segments`)',
         '- `FILTERED` — an inline filter tree; requires `audienceCondition`',
         '',
+        'Any of them can leave out the contacts of some segments with `excludedSegmentIds`: they never',
+        'get the campaign, even when they are also in the audience.',
+        '',
         FILTER_HELP,
         '',
         '**Key trigger phrases:** "create a campaign", "draft a newsletter", "email my whole list"',
@@ -145,6 +148,14 @@ export function registerCampaignTools(ctx: ToolContext, client: PlunkClient): vo
         audienceCondition: z
           .optional(filterCondition)
           .describe('Inline filter tree. Required when audienceType is FILTERED.'),
+        excludedSegmentIds: z
+          .array(z.string())
+          // CAMPAIGN_EXCLUDED_SEGMENTS_MAX in @plunk/shared, which this package cannot import (schemas.ts)
+          .max(20)
+          .optional()
+          .describe(
+            'Segment IDs whose contacts never get this campaign, whatever the audience. Find them with plunk_list_segments.',
+          ),
       }),
       annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true},
     },
