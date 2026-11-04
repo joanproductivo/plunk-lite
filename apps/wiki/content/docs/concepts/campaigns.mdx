@@ -25,6 +25,7 @@ import {TypeTable} from 'fumadocs-ui/components/type-table';
     audienceType: { type: 'string', required: true, description: 'Who this campaign is sent to. One of `ALL`, `SEGMENT`, or `FILTERED` — see below.' },
     segmentId: { type: 'string', description: 'Required when `audienceType = SEGMENT`.' },
     audienceCondition: { type: 'object', description: 'Inline filter when `audienceType = FILTERED`. Uses the same format as [segment filters](/guides/segment-filters).' },
+    excludedSegmentIds: { type: 'string[]', description: 'Plunk Lite: up to 20 segments whose contacts never get the campaign, whatever the audience; none of them can be the `segmentId`. Checked again as it sends; a deleted one stops the send until it is removed.' },
     scheduledFor: { type: 'string', description: 'ISO 8601 timestamp. If set, the campaign sends at that time; if null, it sends immediately when you trigger send.' },
   }}
 />

@@ -1,6 +1,6 @@
-import type {Campaign, Contact} from '@plunk/db';
+import type {Campaign, Contact, Segment} from '@plunk/db';
 import {CampaignAudienceType, CampaignStatus, EmailSourceType, EmailStatus, Prisma, TemplateType} from '@plunk/db';
-import {compileSubjectTemplate, compileTemplate, markVisualContent} from '@plunk/shared';
+import {compileSubjectTemplate, compileTemplate, markVisualContent, sameSegmentIds} from '@plunk/shared';
 import type {
   CampaignBatchJobData,
   CampaignListResponse,
@@ -12,6 +12,7 @@ import type {
   UpdateCampaignData,
 } from '@plunk/types';
 import {fromPrismaJson, toPrismaJson} from '@plunk/types';
+import {UnrecoverableError} from 'bullmq';
 import signale from 'signale';
 
 import {prisma} from '../database/prisma.js';
@@ -39,6 +40,10 @@ import {getDailyQuotaQuick, sendRawEmail} from './SESService.js';
 const BATCH_SIZE = 500; // Number of emails to process per batch (increased for better performance)
 /** Plunk Lite: the share of SES's 24-hour quota a campaign may use up when it starts */
 const DAILY_QUOTA_SHARE = 0.95;
+
+/** Plunk Lite: what saving or sending a campaign says when one of its excluded segments was deleted */
+const MISSING_EXCLUDED_SEGMENT =
+  'An excluded segment no longer exists (it shows as "Deleted segment"). Remove it from the campaign\'s audience.';
 
 /** Namespace of the campaign email ids; fixed, and used for nothing else */
 const CAMPAIGN_EMAIL_ID_NAMESPACE = 'b438d7ec-4f8c-4929-b750-e677bcec6d06';
@@ -86,6 +91,8 @@ export class CampaignService {
       SegmentService.validateCondition(data.audienceCondition);
     }
 
+    const excludedSegmentIds = await this.resolveExcludedSegmentIds(projectId, data.excludedSegmentIds ?? [], data);
+
     // Create campaign with initial recipient count of 0
     const campaign = await prisma.campaign.create({
       data: {
@@ -101,6 +108,7 @@ export class CampaignService {
         audienceType: data.audienceType,
         audienceCondition: toPrismaJson(data.audienceCondition || null),
         segmentId: data.segmentId,
+        excludedSegmentIds,
         status: CampaignStatus.DRAFT,
         totalRecipients: 0, // Will be updated below
       },
@@ -175,6 +183,30 @@ export class CampaignService {
       delete (updateData as Record<string, unknown>).segmentId;
     }
 
+    // Plunk Lite: the excluded segments are written cleaned up or not at all, never as they came in
+    // (buildEmailFieldsUpdate copies every key it is given). A list that does not change is not
+    // checked again: one of its segments deleted since stops the send, not every other save.
+    delete (updateData as Record<string, unknown>).excludedSegmentIds;
+    const audience = {
+      audienceType: data.audienceType ?? campaign.audienceType,
+      segmentId: data.segmentId ?? campaign.segmentId,
+    };
+    if (
+      data.excludedSegmentIds !== undefined &&
+      !sameSegmentIds(data.excludedSegmentIds, campaign.excludedSegmentIds)
+    ) {
+      if (campaign.status === CampaignStatus.SCHEDULED) {
+        throw new HttpException(400, 'Cannot change excluded segments for scheduled campaigns');
+      }
+      updateData.excludedSegmentIds = await this.resolveExcludedSegmentIds(
+        projectId,
+        data.excludedSegmentIds,
+        audience,
+      );
+    } else {
+      this.assertNotExcludingAudience(campaign.excludedSegmentIds, audience);
+    }
+
     // Update the campaign first
     const updatedCampaign = await prisma.campaign.update({
       where: {id: campaignId},
@@ -183,10 +215,21 @@ export class CampaignService {
 
     // If audience-related fields changed and campaign is still a draft, recalculate totalRecipients
     const audienceChanged =
-      data.audienceType !== undefined || data.segmentId !== undefined || data.audienceCondition !== undefined;
+      data.audienceType !== undefined ||
+      data.segmentId !== undefined ||
+      data.audienceCondition !== undefined ||
+      data.excludedSegmentIds !== undefined;
 
     if (audienceChanged && updatedCampaign.status === CampaignStatus.DRAFT) {
-      const recipientCount = await this.getRecipientCount(projectId, updatedCampaign);
+      // Plunk Lite: an excluded segment deleted since leaves the count as it was rather than failing
+      // a save that was written; sending is what it stops
+      const recipientCount = await this.getRecipientCount(projectId, updatedCampaign).catch(error => {
+        if (error instanceof HttpException && error.message === MISSING_EXCLUDED_SEGMENT) return null;
+        throw error;
+      });
+      if (recipientCount === null) {
+        return updatedCampaign;
+      }
       return prisma.campaign.update({
         where: {id: campaignId},
         data: {totalRecipients: recipientCount},
@@ -481,6 +524,12 @@ export class CampaignService {
   public static async duplicate(projectId: string, campaignId: string): Promise<Campaign> {
     const campaign = await this.get(projectId, campaignId);
 
+    // Plunk Lite: only the excluded segments that still exist. A deleted one has no members left to
+    // leave out, so dropping it does not change who the copy reaches, and counting it would fail
+    const excludedSegmentIds = (await this.findSegments(projectId, campaign.excludedSegmentIds)).map(
+      segment => segment.id,
+    );
+
     // Create a new campaign with the same data but reset status and stats
     const duplicatedCampaign = await prisma.campaign.create({
       data: {
@@ -496,6 +545,7 @@ export class CampaignService {
         audienceType: campaign.audienceType,
         audienceCondition: campaign.audienceCondition as Prisma.InputJsonValue,
         segmentId: campaign.segmentId,
+        excludedSegmentIds,
         status: CampaignStatus.DRAFT,
         totalRecipients: 0, // Will be updated below
         sentCount: 0,
@@ -768,8 +818,17 @@ export class CampaignService {
       return;
     }
 
-    // Get batch of recipients using cursor-based pagination
-    const {contacts, nextCursor, hasMore} = await this.getRecipientsCursor(campaign.projectId, campaign, limit, cursor);
+    // Get batch of recipients using cursor-based pagination. Plunk Lite: a 400 building the audience
+    // (an excluded segment deleted since, say) fails the same way on every try, so BullMQ does not
+    // retry it and the failure is reported at once; the recovery sweep may still give it its rounds
+    const {contacts, nextCursor, hasMore} = await this.getRecipientsCursor(
+      campaign.projectId,
+      campaign,
+      limit,
+      cursor,
+    ).catch(error => {
+      throw error instanceof HttpException && error.code === 400 ? new UnrecoverableError(error.message) : error;
+    });
 
     // Parse the Liquid templates once per batch rather than once per recipient. The
     // subject and body are identical for every contact, only the variables differ.
@@ -1719,8 +1778,9 @@ export class CampaignService {
       return {unsubscribed: 0};
     }
     const where = await this.buildRecipientWhereAsync(projectId, campaign);
+    const exclusion = await this.buildExclusionWhereAsync(projectId, campaign);
     // In an AND, so no key of the audience's own filter can override it
-    return {unsubscribed: await prisma.contact.count({where: {AND: [where, {subscribed: false}]}})};
+    return {unsubscribed: await this.countRecipients({AND: [where, {subscribed: false}]}, exclusion)};
   }
 
   /**
@@ -1728,7 +1788,26 @@ export class CampaignService {
    */
   private static async getRecipientCount(projectId: string, campaign: Campaign): Promise<number> {
     const where = await this.buildRecipientWhereAsync(projectId, campaign);
-    return prisma.contact.count({where});
+    return this.countRecipients(where, await this.buildExclusionWhereAsync(projectId, campaign));
+  }
+
+  /**
+   * Plunk Lite: the contacts matching `where`, less the ones `exclusion` leaves out. Both counts read
+   * one snapshot, so the second (a subset of the first) can never make the result drop below what
+   * is really there -- a total of 0 or less would let `finalizeIfDone` close the send early.
+   */
+  private static async countRecipients(
+    where: Prisma.ContactWhereInput,
+    exclusion: Prisma.ContactWhereInput | null,
+  ): Promise<number> {
+    if (!exclusion) {
+      return prisma.contact.count({where});
+    }
+    const [all, excluded] = await prisma.$transaction(
+      [prisma.contact.count({where}), prisma.contact.count({where: {AND: [where, exclusion]}})],
+      {isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead},
+    );
+    return Math.max(0, all - excluded);
   }
 
   /**
@@ -1741,6 +1820,7 @@ export class CampaignService {
     cursor?: string,
   ): Promise<{contacts: Contact[]; nextCursor?: string; hasMore: boolean}> {
     const where = await this.buildRecipientWhereAsync(projectId, campaign);
+    const exclusion = await this.buildExclusionWhereAsync(projectId, campaign);
 
     // Fetch one extra to determine if there are more results. Plunk Lite: the contacts after the
     // cursor by id, rather than Prisma's cursor, which starts from the cursor's row -- and skipped
@@ -1754,6 +1834,18 @@ export class CampaignService {
     const hasMore = contacts.length > limit;
     const results = hasMore ? contacts.slice(0, -1) : contacts;
     const nextCursor = hasMore ? results[results.length - 1]?.id : undefined;
+
+    // Plunk Lite: the excluded contacts leave the batch only now, after the cursor was taken from the
+    // rows read -- taken after, it would step back or skip contacts. A batch may end up empty and
+    // still have more after it.
+    if (exclusion && results.length > 0) {
+      const excluded = await prisma.contact.findMany({
+        where: {AND: [{id: {in: results.map(contact => contact.id)}}, exclusion]},
+        select: {id: true},
+      });
+      const excludedIds = new Set(excluded.map(contact => contact.id));
+      return {contacts: results.filter(contact => !excludedIds.has(contact.id)), nextCursor, hasMore};
+    }
 
     return {
       contacts: results,
@@ -1779,13 +1871,18 @@ export class CampaignService {
       case CampaignAudienceType.ALL:
         return baseWhere;
 
-      case CampaignAudienceType.SEGMENT:
+      case CampaignAudienceType.SEGMENT: {
         if (!campaign.segmentId) {
           throw new HttpException(400, 'Segment ID is required for SEGMENT audience type');
         }
 
         // Get segment and use its filters
-        return this.buildSegmentWhereAsync(projectId, campaign.segmentId, baseWhere);
+        const segment = await prisma.segment.findFirst({where: {id: campaign.segmentId, projectId}});
+        if (!segment) {
+          throw new HttpException(404, 'Segment not found');
+        }
+        return {...baseWhere, ...(await this.segmentClause(projectId, segment))};
+      }
 
       case CampaignAudienceType.FILTERED: {
         const condition = fromPrismaJson<FilterCondition>(campaign.audienceCondition);
@@ -1808,28 +1905,15 @@ export class CampaignService {
   }
 
   /**
-   * Build WHERE clause for segment-based campaigns
+   * The contacts in a segment as a campaign sees them: a static one by its active memberships, a
+   * dynamic one by its condition, evaluated now
    */
-  private static async buildSegmentWhereAsync(
-    projectId: string,
-    segmentId: string,
-    baseWhere: Prisma.ContactWhereInput,
-  ): Promise<Prisma.ContactWhereInput> {
-    // Fetch the segment to get its condition
-    const segment = await prisma.segment.findUnique({
-      where: {id: segmentId},
-    });
-
-    if (!segment) {
-      throw new HttpException(404, 'Segment not found');
-    }
-
+  private static async segmentClause(projectId: string, segment: Segment): Promise<Prisma.ContactWhereInput> {
     if (segment.type === 'STATIC') {
       return {
-        ...baseWhere,
         segmentMemberships: {
           some: {
-            segmentId,
+            segmentId: segment.id,
             exitedAt: null,
           },
         },
@@ -1837,11 +1921,67 @@ export class CampaignService {
     }
 
     const condition = fromPrismaJson<FilterCondition>(segment.condition);
-    const segmentWhere = await SegmentService.buildConditionClause(projectId, condition);
+    return SegmentService.buildConditionClause(projectId, condition);
+  }
 
-    return {
-      ...baseWhere,
-      ...segmentWhere,
-    };
+  /**
+   * Plunk Lite: the cleaned-up list of segments a campaign leaves out -- without repeats, all of them
+   * in the project, and none the segment it is sent to.
+   */
+  private static async resolveExcludedSegmentIds(
+    projectId: string,
+    ids: string[],
+    audience: {audienceType?: CampaignAudienceType; segmentId?: string | null},
+  ): Promise<string[]> {
+    const unique = Array.from(new Set(ids));
+    if ((await this.findSegments(projectId, unique)).length !== unique.length) {
+      throw new HttpException(400, MISSING_EXCLUDED_SEGMENT);
+    }
+    this.assertNotExcludingAudience(unique, audience);
+    return unique;
+  }
+
+  /** Plunk Lite: a campaign sent to a segment cannot also leave it out */
+  private static assertNotExcludingAudience(
+    excludedSegmentIds: string[],
+    audience: {audienceType?: CampaignAudienceType; segmentId?: string | null},
+  ): void {
+    if (
+      audience.audienceType === CampaignAudienceType.SEGMENT &&
+      audience.segmentId &&
+      excludedSegmentIds.includes(audience.segmentId)
+    ) {
+      throw new HttpException(400, 'A campaign cannot exclude the segment it is sent to');
+    }
+  }
+
+  /** Plunk Lite: the project's segments among `ids`, each once; the missing ones are left out */
+  private static async findSegments(projectId: string, ids: string[]): Promise<Segment[]> {
+    const unique = Array.from(new Set(ids));
+    return unique.length > 0 ? prisma.segment.findMany({where: {projectId, id: {in: unique}}}) : [];
+  }
+
+  /**
+   * Plunk Lite: who the campaign's excluded segments leave out -- anyone a campaign to one of them
+   * would reach now -- or null when it excludes none. Positive on purpose, and taken away by the
+   * callers: Prisma's NOT reads a `data.*` filter on a contact without that key as NULL and drops
+   * the contact too (measured 2026-11-04), so negating a dynamic segment would leave out people who
+   * are not in it. A segment that no longer exists stops the count and the send.
+   */
+  private static async buildExclusionWhereAsync(
+    projectId: string,
+    campaign: Campaign,
+  ): Promise<Prisma.ContactWhereInput | null> {
+    const ids = new Set(campaign.excludedSegmentIds);
+    if (ids.size === 0) {
+      return null;
+    }
+
+    const segments = await this.findSegments(projectId, campaign.excludedSegmentIds);
+    if (segments.length !== ids.size) {
+      throw new HttpException(400, MISSING_EXCLUDED_SEGMENT);
+    }
+
+    return {OR: await Promise.all(segments.map(segment => this.segmentClause(projectId, segment)))};
   }
 }

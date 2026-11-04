@@ -177,6 +177,14 @@
             "nullable": true,
             "description": "Set when `audienceType` is `SEGMENT`."
           },
+          "excludedSegmentIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Plunk Lite: segments whose contacts never get this campaign, whatever its audience. One deleted since stops the send until it is removed."
+          },
           "scheduledFor": {
             "type": "string",
             "format": "date-time",
@@ -2024,6 +2032,15 @@
                     "format": "uuid",
                     "description": "Segment ID. Required when `audienceType` is `SEGMENT`."
                   },
+                  "excludedSegmentIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "maxItems": 20,
+                    "description": "Plunk Lite: segments whose contacts never get this campaign, whatever its audience. Up to 20; none of them can be the `segmentId`."
+                  },
                   "audienceCondition": {
                     "allOf": [
                       {
@@ -2112,7 +2129,7 @@
             }
           },
           "400": {
-            "description": "`segmentId` missing for a `SEGMENT` campaign, or `audienceCondition` missing for a `FILTERED` campaign.",
+            "description": "`segmentId` missing for a `SEGMENT` campaign, or `audienceCondition` missing for a `FILTERED` campaign. Plunk Lite: also an `excludedSegmentIds` entry that is not a segment of the project, or that is the campaign's own `segmentId`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2271,7 +2288,7 @@
             }
           },
           "400": {
-            "description": "Unparseable `scheduledFor`, the campaign is not in a sendable state, or (Plunk Lite) an immediate send would not fit in what is left of the SES 24-hour quota, keeping 5 % of it for transactional and workflow emails, counting what the campaigns still sending have left. The message gives the figures. A scheduled send is checked when its time comes: if it does not fit then, it stays scheduled and an alert says so.",
+            "description": "Unparseable `scheduledFor`, the campaign is not in a sendable state, or (Plunk Lite) an immediate send would not fit in what is left of the SES 24-hour quota, keeping 5 % of it for transactional and workflow emails, counting what the campaigns still sending have left. The message gives the figures. A scheduled send is checked when its time comes: if it does not fit then, it stays scheduled and an alert says so. Plunk Lite: also when one of the campaign's `excludedSegmentIds` was deleted since; remove it and send again.",
             "content": {
               "application/json": {
                 "schema": {

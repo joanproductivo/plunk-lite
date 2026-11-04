@@ -4,6 +4,7 @@ import {CONTACT_SUBSCRIPTION_STATUSES, SNOOZE_DURATIONS} from '@plunk/types';
 import {z} from 'zod';
 
 import {
+  CAMPAIGN_EXCLUDED_SEGMENTS_MAX,
   REQUEST_SEGMENTS_MAX,
   SEGMENT_MEMBERS_MAX,
   SEGMENTS_BULK_MAX,
@@ -539,6 +540,9 @@ export const DomainSchemas = {
   }),
 };
 
+/** Plunk Lite: the segments a campaign leaves out */
+const campaignExcludedSegments = z.array(uuid).max(CAMPAIGN_EXCLUDED_SEGMENTS_MAX).optional();
+
 export const CampaignSchemas = {
   create: z.object({
     name: z.string().min(1),
@@ -552,6 +556,7 @@ export const CampaignSchemas = {
     audienceType: z.nativeEnum(CampaignAudienceType),
     audienceCondition: filterConditionSchema.optional(),
     segmentId: uuid.optional(),
+    excludedSegmentIds: campaignExcludedSegments,
   }),
   schedule: z.object({
     scheduledFor: z.string(),
@@ -568,6 +573,7 @@ export const CampaignSchemas = {
     audienceType: z.nativeEnum(CampaignAudienceType).optional(),
     audienceCondition: filterConditionSchema.optional(),
     segmentId: z.string().optional(),
+    excludedSegmentIds: campaignExcludedSegments,
   }),
   sendTest: z.object({
     email,

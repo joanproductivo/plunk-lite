@@ -24,6 +24,8 @@ export interface CreateCampaignData {
   audienceType: CampaignAudienceType;
   audienceCondition?: FilterCondition;
   segmentId?: string;
+  /** Plunk Lite: segments whose contacts never get the campaign */
+  excludedSegmentIds?: string[];
 }
 
 /**
@@ -41,6 +43,8 @@ export interface UpdateCampaignData {
   audienceType?: CampaignAudienceType;
   audienceCondition?: FilterCondition;
   segmentId?: string;
+  /** Plunk Lite: segments whose contacts never get the campaign */
+  excludedSegmentIds?: string[];
 }
 
 /**
