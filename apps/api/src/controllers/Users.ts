@@ -3,6 +3,7 @@ import {randomBytes} from 'node:crypto';
 import {Controller, Delete, Get, Middleware, Patch, Post, Put} from '@overnightjs/core';
 import {BillingLimitSchemas, ProjectSchemas, UserSchemas, UtilitySchemas} from '@plunk/shared';
 import type {NextFunction, Request, Response} from 'express';
+import type Stripe from 'stripe';
 
 import {
   DASHBOARD_URI,
@@ -207,7 +208,7 @@ export class Users {
     }
 
     // Check if user is a member of any disabled project
-    const {hasDisabledProject, disabledProjectNames} = await SecurityService.userHasDisabledProject(auth.userId);
+    const {hasDisabledProject} = await SecurityService.userHasDisabledProject(auth.userId);
     if (hasDisabledProject) {
       throw new HttpException(
         403,
@@ -588,14 +589,14 @@ export class Users {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
     // Get upcoming invoice to see costs and usage
-    let upcomingInvoice = null;
+    let upcomingInvoice: Stripe.Invoice | null = null;
     let totalUsage = 0;
 
     try {
-      upcomingInvoice = (await stripe.invoices.createPreview({
+      upcomingInvoice = await stripe.invoices.createPreview({
         customer: project.customer,
         subscription: project.subscription,
-      })) as any;
+      });
 
       // Extract metered usage from invoice line items
       if (upcomingInvoice && upcomingInvoice.lines && upcomingInvoice.lines.data) {
