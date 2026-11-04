@@ -28,6 +28,7 @@ import {errorMessage} from '../database/redis.js';
 import {HttpException} from '../exceptions/index.js';
 import {DASHBOARD_URI} from '../app/constants.js';
 import {POOL_WAIT_TRANSACTION} from '../utils/database.js';
+import {getDateRange, isDateString} from '../utils/dates.js';
 import {readCapped} from '../utils/readCapped.js';
 import {signWebhook, WEBHOOK_SIGNATURE_HEADER} from '../utils/webhookSignature.js';
 import {pickTransition} from '../utils/workflowTransitions.js';
@@ -48,6 +49,9 @@ import {
 } from './WebhookDelivery.js';
 import {WebhookSigningSecrets} from './WebhookSigningSecrets.js';
 import {WorkflowRecoveryService} from './WorkflowRecoveryService.js';
+
+/** Operators that compare two dates as dates in a condition step */
+const DATE_OPERATORS = ['equals', 'notEquals', 'greaterThan', 'greaterThanOrEqual', 'lessThan', 'lessThanOrEqual'];
 
 // A step's error is rethrown through the catch of every step before it in the same run, which
 // had completed; the step it came from has handled it, so those pass it up untouched.
@@ -914,7 +918,7 @@ export class WorkflowExecutionService {
 
     // Resolve the field value (support dot notation)
     // Structure allows access to:
-    // - contact.email, contact.subscribed
+    // - contact.email, contact.subscribed, contact.createdAt, contact.updatedAt (ISO dates)
     // - data.firstName, data.lastName, etc.
     // - workflow.* (execution context - alias for event data)
     // - event.* (event data that triggered the workflow)
@@ -923,6 +927,8 @@ export class WorkflowExecutionService {
       contact: {
         email: contact.email,
         subscribed: contact.subscribed,
+        createdAt: contact.createdAt.toISOString(),
+        updatedAt: contact.updatedAt.toISOString(),
       },
       data: contactData,
       workflow: context,
@@ -1919,6 +1925,16 @@ export class WorkflowExecutionService {
    * Helper: Evaluate condition
    */
   private static evaluateCondition(actualValue: unknown, operator: string, expectedValue: unknown): boolean {
+    if (
+      typeof actualValue === 'string' &&
+      typeof expectedValue === 'string' &&
+      isDateString(actualValue) &&
+      isDateString(expectedValue) &&
+      DATE_OPERATORS.includes(operator)
+    ) {
+      return this.compareDates(actualValue, operator, expectedValue);
+    }
+
     switch (operator) {
       case 'equals':
         // equals can match null/undefined if expectedValue is also null/undefined
@@ -1973,6 +1989,41 @@ export class WorkflowExecutionService {
         return actualValue === undefined || actualValue === null;
       default:
         throw new Error(`Unknown operator: ${operator}`);
+    }
+  }
+
+  /**
+   * Helper: Compare two dates as instants. An expected day without a time stands for the whole day
+   * in UTC, so greaterThan is after that day and lessThanOrEqual up to its end.
+   */
+  private static compareDates(actualValue: string, operator: string, expectedValue: string): boolean {
+    // A time without a zone is UTC, as a day without a time is, not the server's local time
+    const instant = (value: string) => Date.parse(/T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(value) ? `${value}Z` : value);
+    const actual = instant(actualValue);
+    // The expected value covers [start, end): one millisecond, or one day
+    let start = instant(expectedValue);
+    let end = start + 1;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(expectedValue)) {
+      const {startOfDay, startOfNextDay} = getDateRange(expectedValue);
+      start = Date.parse(startOfDay);
+      end = Date.parse(startOfNextDay);
+    }
+
+    switch (operator) {
+      case 'equals':
+        return actual >= start && actual < end;
+      case 'notEquals':
+        return actual < start || actual >= end;
+      case 'greaterThan':
+        return actual >= end;
+      case 'greaterThanOrEqual':
+        return actual >= start;
+      case 'lessThan':
+        return actual < start;
+      case 'lessThanOrEqual':
+        return actual < end;
+      default:
+        throw new Error(`Unknown date operator: ${operator}`);
     }
   }
 }

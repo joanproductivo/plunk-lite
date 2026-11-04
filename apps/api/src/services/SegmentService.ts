@@ -4,9 +4,10 @@ import {fromPrismaJson, toPrismaJson} from '@plunk/types';
 import signale from 'signale';
 
 import {prisma} from '../database/prisma.js';
-import {HttpException} from '../exceptions/index.js';
+import {ErrorCode, HttpException} from '../exceptions/index.js';
 // The cascade over a big static segment's memberships can outlast Prisma's 5 s default
 import {LONG_TRANSACTION} from '../utils/database.js';
+import {getDateRange, isDateString} from '../utils/dates.js';
 
 import {ContactService} from './ContactService.js';
 import {NtfyService} from './NtfyService.js';
@@ -22,6 +23,12 @@ const ACTIVE_CAMPAIGN_STATUSES: CampaignStatus[] = ['DRAFT', 'SCHEDULED', 'SENDI
  */
 const MAX_BLOCKED_SEGMENTS_LISTED = 5;
 const MAX_BLOCKING_NAMES_LISTED = 3;
+
+/** Operators whose value is a number of `unit`s back from now */
+const WINDOW_OPERATORS = ['within', 'olderThan', 'triggeredWithin', 'triggeredOlderThan', 'notTriggeredWithin'];
+const RANGE_OPERATORS = ['greaterThan', 'lessThan', 'greaterThanOrEqual', 'lessThanOrEqual'];
+/** Longest time window, in days whatever its unit: 100 years keeps every computed date valid */
+const MAX_WINDOW_DAYS = 36_500;
 
 /** What uses a segment, by name: collected as sets, returned sorted */
 interface SegmentBlockers<Names> {
@@ -78,7 +85,8 @@ export class SegmentService {
    * match for a dynamic segment's filter (evaluated live, like the member counts). False when
    * the segment is missing or belongs to another project, or its filter cannot be built (e.g.
    * it references a deleted segment). A database error is thrown, so the caller fails rather
-   * than taking the "not a member" path by mistake.
+   * than taking the "not a member" path by mistake, and so is a filter value the query cannot
+   * compare (a 400).
    */
   public static async isMember(projectId: string, segmentId: string, contactId: string): Promise<boolean> {
     const segment = await prisma.segment.findFirst({
@@ -102,6 +110,10 @@ export class SegmentService {
     try {
       where = await this.buildConditionClause(projectId, fromPrismaJson<FilterCondition>(segment.condition));
     } catch (error) {
+      // A filter value the query cannot compare is a broken segment to report, not a contact outside it
+      if (error instanceof HttpException && error.errorCode === ErrorCode.VALIDATION_ERROR) {
+        throw error;
+      }
       signale.warn(`[SEGMENT] Membership check on segment ${segmentId}: its filter cannot be built:`, error);
       return false;
     }
@@ -796,6 +808,8 @@ export class SegmentService {
     visitedSegments = new Set<string>(),
   ): Promise<Prisma.ContactWhereInput> {
     const {field, operator, value, unit} = filter;
+    // Conditions saved before values were checked reach here too
+    this.assertFilterValue(filter);
 
     // Handle segment membership filters (e.g., "segment.<segmentId>")
     if (field.startsWith('segment.')) {
@@ -1033,8 +1047,51 @@ export class SegmentService {
     }
 
     // Validate unit for time-based operators
-    if (['within', 'triggeredWithin', 'olderThan', 'triggeredOlderThan', 'notTriggeredWithin'].includes(filter.operator) && !filter.unit) {
+    if (WINDOW_OPERATORS.includes(filter.operator) && !filter.unit) {
       throw new HttpException(400, `"${filter.operator}" operator requires a unit (days, hours, or minutes)`);
+    }
+
+    this.assertFilterValue(filter);
+  }
+
+  /**
+   * Reject a value the query cannot compare: Prisma panics on a JSON range filter that is not a
+   * text or a number, and an invalid date fails before or inside the query.
+   */
+  private static assertFilterValue({field, operator, value, unit}: SegmentFilter): void {
+    // A missing value is validateFilter's to report; segment membership takes none
+    if (value === undefined || field.startsWith('segment.')) {
+      return;
+    }
+    const fail = (expected: string): never => {
+      throw new HttpException(400, `Filter "${field} ${operator}" needs ${expected}`, ErrorCode.VALIDATION_ERROR);
+    };
+
+    if (WINDOW_OPERATORS.includes(operator)) {
+      const units = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+      // The same 100 years in any unit. A missing or unknown unit is reported by itself.
+      const max = (MAX_WINDOW_DAYS * this.getMilliseconds(1, 'days')) / this.getMilliseconds(1, unit ?? 'days');
+      // Also false for NaN
+      if (typeof units !== 'number' || !(Math.abs(units) <= max)) {
+        fail(`a number of ${unit ?? 'days'} up to ${max}`);
+      }
+    } else if (
+      (field === 'createdAt' || field === 'updatedAt') &&
+      (operator === 'equals' || operator === 'notEquals' || RANGE_OPERATORS.includes(operator))
+    ) {
+      const year = typeof value === 'string' || typeof value === 'number' ? new Date(value).getUTCFullYear() : NaN;
+      // Before 9999, so that the day after it is still a date Postgres takes
+      if (!(year >= 1 && year < 9999)) {
+        fail('a date');
+      }
+    } else if (field.startsWith('data.') && RANGE_OPERATORS.includes(operator)) {
+      if (typeof value !== 'string' && typeof value !== 'number') {
+        fail('a text or a number');
+      }
+    } else if (field === 'email' || operator === 'contains' || operator === 'notContains') {
+      if (!['string', 'number', 'boolean'].includes(typeof value)) {
+        fail('a text, a number or true/false');
+      }
     }
   }
 
@@ -1131,8 +1188,8 @@ export class SegmentService {
     switch (operator) {
       case 'equals':
         // For date strings, compare only the date portion (ignore time)
-        if (this.isDateString(value)) {
-          const {startOfDay, startOfNextDay} = this.getDateRange(String(value));
+        if (isDateString(value)) {
+          const {startOfDay, startOfNextDay} = getDateRange(String(value));
           return {
             AND: [
               {data: {path, gte: startOfDay as Prisma.InputJsonValue}},
@@ -1143,8 +1200,8 @@ export class SegmentService {
         return {data: {path, equals: value as Prisma.InputJsonValue}};
       case 'notEquals':
         // For date strings, exclude the entire day (not just exact timestamp)
-        if (this.isDateString(value)) {
-          const {startOfDay, startOfNextDay} = this.getDateRange(String(value));
+        if (isDateString(value)) {
+          const {startOfDay, startOfNextDay} = getDateRange(String(value));
           return {
             OR: [
               {data: {path, lt: startOfDay as Prisma.InputJsonValue}},
@@ -1246,8 +1303,8 @@ export class SegmentService {
     switch (operator) {
       case 'equals': {
         // For date fields, compare only the date portion (ignore time)
-        if (this.isDateString(value)) {
-          const {startOfDay, startOfNextDay} = this.getDateRange(String(value));
+        if (isDateString(value)) {
+          const {startOfDay, startOfNextDay} = getDateRange(String(value));
           return {
             AND: [{[field]: {gte: new Date(startOfDay)}}, {[field]: {lt: new Date(startOfNextDay)}}],
           };
@@ -1257,8 +1314,8 @@ export class SegmentService {
       }
       case 'notEquals': {
         // For date fields, exclude the entire day (not just exact timestamp)
-        if (this.isDateString(value)) {
-          const {startOfDay, startOfNextDay} = this.getDateRange(String(value));
+        if (isDateString(value)) {
+          const {startOfDay, startOfNextDay} = getDateRange(String(value));
           return {
             OR: [{[field]: {lt: new Date(startOfDay)}}, {[field]: {gte: new Date(startOfNextDay)}}],
           };
@@ -1317,41 +1374,6 @@ export class SegmentService {
       default:
         throw new HttpException(400, `Unsupported time unit: ${unit}`);
     }
-  }
-
-  /**
-   * Check if a value is a date string in YYYY-MM-DD format
-   */
-  private static isDateString(value: unknown): boolean {
-    if (typeof value !== 'string') return false;
-    // Match YYYY-MM-DD format (with optional time component)
-    const dateRegex = /^\d{4}-\d{2}-\d{2}(T|$)/;
-    if (!dateRegex.test(value)) return false;
-    // Verify it's a valid date
-    const date = new Date(value);
-    return !isNaN(date.getTime());
-  }
-
-  /**
-   * Get date range for a date string (start of day to start of next day in UTC)
-   * @param value - Date string in YYYY-MM-DD format
-   * @returns Object with startOfDay and startOfNextDay as ISO strings
-   */
-  private static getDateRange(value: string): {startOfDay: string; startOfNextDay: string} {
-    // Extract just the date part (YYYY-MM-DD)
-    const dateStr = value.split('T')[0];
-    const startOfDay = `${dateStr}T00:00:00.000Z`;
-
-    if (!dateStr) {
-      throw new HttpException(400, `Invalid date string: ${value}`);
-    }
-
-    // Calculate start of next day
-    const nextDay = new Date(dateStr);
-    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-    const startOfNextDay = nextDay.toISOString().split('T')[0] + 'T00:00:00.000Z';
-
-    return {startOfDay, startOfNextDay};
   }
 
   /**

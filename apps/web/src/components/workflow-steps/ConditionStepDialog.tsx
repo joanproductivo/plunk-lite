@@ -204,7 +204,8 @@ export function ConditionStepDialog({step, workflowId, open, onOpenChange, onSuc
       newConfig = {
         field:    conditionField,
         operator: conditionOperator,
-        value:    parseConditionValue(conditionValue),
+        // Plunk Lite: a date is a day, as in segments; a value saved with a time keeps only its day
+        value:    parseConditionValue(currentFieldType === 'date' ? conditionValue.split('T')[0]! : conditionValue),
       };
     }
 
@@ -501,7 +502,7 @@ function ConditionValueInput({fieldType, value, onChange}: ConditionValueInputPr
     );
   }
 
-  const inputType = fieldType === 'number' ? 'number' : fieldType === 'date' ? 'datetime-local' : 'text';
+  const inputType = fieldType === 'number' ? 'number' : fieldType === 'date' ? 'date' : 'text';
   const placeholder =
     fieldType === 'number' ? 'e.g., 100' : fieldType === 'date' ? '' : 'e.g., premium, active';
 
@@ -509,7 +510,7 @@ function ConditionValueInput({fieldType, value, onChange}: ConditionValueInputPr
     <Input
       id="editConditionValue"
       type={inputType}
-      value={value}
+      value={fieldType === 'date' ? value.split('T')[0] : value}
       onChange={e => onChange(e.target.value)}
       required
       placeholder={placeholder}

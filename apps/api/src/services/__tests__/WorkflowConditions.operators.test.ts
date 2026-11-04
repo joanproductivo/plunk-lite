@@ -981,4 +981,80 @@ describe('Workflow CONDITION Step - Comprehensive Operator Tests', () => {
       expect(defaultStepExecution).toBeNull();
     });
   });
+
+  // ========================================
+  // DATES
+  // ========================================
+  describe('Dates', () => {
+    /** The branch a condition takes, for a contact created at `createdAt` with `data` */
+    async function branchFor(
+      conditionConfig: {field: string; operator: string; value: unknown},
+      data: Record<string, unknown> = {},
+      createdAt?: Date,
+    ) {
+      const {execution, triggerStep, conditionStep, contact} = await createConditionalWorkflow(data, conditionConfig);
+      if (createdAt) {
+        await prisma.contact.update({where: {id: contact.id}, data: {createdAt}});
+      }
+      await WorkflowExecutionService.processStepExecution(execution.id, triggerStep.id);
+      await WorkflowExecutionService.processStepExecution(execution.id, conditionStep.id);
+      return getConditionBranch(execution.id, conditionStep.id);
+    }
+
+    /** Today in UTC, and a contact created at its noon, so that no midnight falls in between */
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    const noonToday = new Date(`${today}T12:00:00.000Z`);
+
+    it('gives contact.createdAt a value', async () => {
+      expect(await branchFor({field: 'contact.createdAt', operator: 'exists', value: undefined})).toBe('yes');
+      expect(await branchFor({field: 'contact.updatedAt', operator: 'exists', value: undefined})).toBe('yes');
+    });
+
+    it('compares contact.createdAt with a day as the whole day in UTC', async () => {
+      const createdAt = (operator: string, value: string) =>
+        branchFor({field: 'contact.createdAt', operator, value}, {}, noonToday);
+
+      expect(await createdAt('greaterThan', yesterday)).toBe('yes');
+      expect(await createdAt('lessThan', yesterday)).toBe('no');
+      expect(await createdAt('equals', today)).toBe('yes');
+      expect(await createdAt('lessThanOrEqual', today)).toBe('yes');
+      expect(await createdAt('greaterThan', today)).toBe('no');
+    });
+
+    it('compares a full date and time as an instant', async () => {
+      const createdAt = new Date('2026-03-01T10:00:00.000Z');
+      const at = (operator: string, value: string) =>
+        branchFor({field: 'contact.createdAt', operator, value}, {}, createdAt);
+
+      expect(await at('equals', '2026-03-01T10:00:00Z')).toBe('yes');
+      expect(await at('greaterThan', '2026-03-01T09:59:59.999Z')).toBe('yes');
+      expect(await at('lessThanOrEqual', '2026-03-01T10:00:00.000Z')).toBe('yes');
+      expect(await at('lessThan', '2026-03-01T10:00:00.000Z')).toBe('no');
+    });
+
+    it('compares custom data dates, also with a time zone', async () => {
+      const data = {signup: '2026-03-01T10:00:00.000Z'};
+      const signup = (operator: string, value: unknown) => branchFor({field: 'data.signup', operator, value}, data);
+
+      expect(await signup('equals', '2026-03-01')).toBe('yes');
+      expect(await signup('greaterThanOrEqual', '2026-01-01')).toBe('yes');
+      expect(await signup('lessThan', '2026-03-01')).toBe('no');
+      expect(await signup('notEquals', '2026-03-01')).toBe('no');
+      // 1:00 at UTC+2 is still the day before in UTC
+      const zoned = {signup: '2026-03-01T01:00:00+02:00'};
+      expect(await branchFor({field: 'data.signup', operator: 'equals', value: '2026-02-28'}, zoned)).toBe('yes');
+      // A time without a zone is UTC, not the local time of the server (or of the machine running this)
+      const local = {signup: '2026-03-01T10:00'};
+      const atTen = {field: 'data.signup', operator: 'equals', value: '2026-03-01T10:00:00Z'};
+      expect(await branchFor(atTen, local)).toBe('yes');
+    });
+
+    it('keeps two equal days, numbers and missing dates as they were', async () => {
+      const day = {day: '2026-03-01'};
+      expect(await branchFor({field: 'data.day', operator: 'equals', value: '2026-03-01'}, day)).toBe('yes');
+      expect(await branchFor({field: 'data.n', operator: 'greaterThan', value: 5}, {n: 10})).toBe('yes');
+      expect(await branchFor({field: 'data.signup', operator: 'notEquals', value: '2026-03-01'})).toBe('no');
+    });
+  });
 });

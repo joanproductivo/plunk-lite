@@ -6,7 +6,8 @@
  * - Segment filtering (SegmentService)
  * - Workflow CONDITION steps (WorkflowExecutionService)
  *
- * IMPORTANT: Both implementations MUST behave identically for consistency.
+ * IMPORTANT: Both implementations MUST behave identically for consistency, except where noted
+ * (rule 12).
  */
 
 /**
@@ -131,6 +132,22 @@ export const WORKFLOW_CONDITION_OPERATORS = [
  *     - Matches when date field is within specified time period
  *     - Requires unit: 'days' | 'hours' | 'minutes'
  *     - Example: within 7 days = createdAt >= (now - 7 days)
+ *
+ * 12. DATES (workflow conditions)
+ *     - When both values are dates (YYYY-MM-DD, with an optional time), EQUALS, NOT_EQUALS and the
+ *       numeric operators compare them as instants instead of the rules above
+ *     - An expected value without a time is the whole day in UTC: greaterThan = after that day,
+ *       lessThanOrEqual = up to its end
+ *     - A time without a zone is UTC, not the server's local time
+ *     - contact.createdAt and contact.updatedAt are ISO dates; updatedAt changes with any write to
+ *       the contact, including an earlier step of the same workflow
+ *     - Segments compare data.* dates as text, and contact dates from midnight UTC, so a day in a
+ *       greaterThan or lessThanOrEqual can give a different result there
+ *
+ * Segments refuse a value their query cannot compare with a 400: a data.* range value that is not a
+ * text or a number, a time window that is not a number of units of up to 100 years, a contact date
+ * that is not a date, and a contains/notContains or email value that is not a text, a number or
+ * true/false.
  */
 
 /**

@@ -49,6 +49,8 @@ An `UPDATE_CONTACT` step can move a contact between static segments: it applies 
 
 A `CONDITION` step can check `segment.<segmentId>`: `true` when the contact is in that segment as the step runs — a current member of a static segment, or a match for a dynamic segment's filter. In the dashboard these fields appear under **Segments**, by name, both in the field picker and on the condition step in the canvas.
 
+A `CONDITION` step compares two dates as dates: `contact.createdAt`, `contact.updatedAt` and any `data.*` or event field holding a date as `YYYY-MM-DD`, optionally followed by `T` and a time (`2026-03-01 10:00`, with a space, is not read as a date), against a date in the step. A time without a zone is UTC, and a date without a time is the whole day in UTC: `equals` matches that day, `greaterThan` is after it and `lessThanOrEqual` up to its end. `contact.updatedAt` changes with any write to the contact, including an earlier step of the same workflow, so it is usually "just now".
+
 Workflows that add contacts to each other's trigger segments can loop; see [Segments](/concepts/segments#tracking-membership-changes) for when, and keep **Allow re-entry** off unless a workflow needs it.
 
 ## Transitions
