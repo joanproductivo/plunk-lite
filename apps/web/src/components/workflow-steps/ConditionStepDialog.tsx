@@ -6,6 +6,8 @@ import {useMemo, useState} from 'react';
 import {toast} from 'sonner';
 import useSWR from 'swr';
 
+import {conditionFieldMayBeMissing, leavesOutMissing} from '../../lib/segments';
+
 import {type EditStepDialogProps, getStepConfig, type StepWithTemplate, StepDialogShell, useStepUpdate} from './shared';
 
 type FieldType = 'string' | 'number' | 'boolean' | 'date';
@@ -258,6 +260,7 @@ export function ConditionStepDialog({step, workflowId, open, onOpenChange, onSuc
               validOperators={validOperators}
               fieldType={currentFieldType}
               needsValue={needsValue}
+              warnMissing={leavesOutMissing(conditionOperator) && conditionFieldMayBeMissing(conditionField)}
             />
           )}
 
@@ -429,6 +432,8 @@ interface BinaryConditionProps {
   validOperators: OperatorOption[];
   fieldType: string;
   needsValue: boolean;
+  /** Plunk Lite: the operator sends contacts without the field down the No branch */
+  warnMissing: boolean;
 }
 
 function BinaryCondition({
@@ -439,6 +444,7 @@ function BinaryCondition({
   validOperators,
   fieldType,
   needsValue,
+  warnMissing,
 }: BinaryConditionProps) {
   return (
     <>
@@ -456,6 +462,12 @@ function BinaryCondition({
             ))}
           </SelectContent>
         </Select>
+        {warnMissing && (
+          <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+            <AlertTriangle className="h-3 w-3 inline mr-1" />
+            Contacts without this field take the No branch.
+          </div>
+        )}
       </div>
 
       {needsValue && (

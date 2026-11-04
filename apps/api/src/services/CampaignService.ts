@@ -1972,9 +1972,9 @@ export class CampaignService {
   /**
    * Plunk Lite: who the campaign's excluded segments leave out -- anyone a campaign to one of them
    * would reach now -- or null when it excludes none. Positive on purpose, and taken away by the
-   * callers: Prisma's NOT reads a `data.*` filter on a contact without that key as NULL and drops
-   * the contact too (measured 2026-11-04), so negating a dynamic segment would leave out people who
-   * are not in it. A segment that no longer exists stops the count and the send.
+   * callers: Prisma's NOT on a typed `data.*` filter also requires the value's type, so negating a
+   * dynamic segment would still leave out a contact whose value has another type (a number where
+   * the filter compares text). A segment that no longer exists stops the count and the send.
    */
   private static async buildExclusionWhereAsync(
     projectId: string,
