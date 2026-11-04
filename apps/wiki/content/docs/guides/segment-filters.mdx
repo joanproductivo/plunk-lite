@@ -85,8 +85,8 @@ For `createdAt`, `updatedAt`, and any `data.<key>` that holds an ISO 8601 date s
 | Operator                                   | What it does                                                                                                              |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
 | `equals` / `notEquals`                     | Match the timestamp. If the value is just a date (`YYYY-MM-DD`), the comparison covers the whole UTC day.                  |
-| `greaterThan` / `lessThan`                 | Strictly after / strictly before.                                                                                          |
-| `greaterThanOrEqual` / `lessThanOrEqual`   | Inclusive variants.                                                                                                        |
+| `greaterThan` / `lessThan`                 | Strictly after / strictly before. A date without a time counts from midnight UTC, so `greaterThan` a day includes that day. |
+| `greaterThanOrEqual` / `lessThanOrEqual`   | Inclusive variants. A date without a time is its midnight UTC, so `lessThanOrEqual` a day leaves out that day.             |
 | `within`                                   | Within the last N units. Pair with `unit: "days" / "hours" / "minutes"`.                                                  |
 | `olderThan`                                | More than N units ago. Pair with `unit`.                                                                                  |
 

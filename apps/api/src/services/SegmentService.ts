@@ -7,6 +7,7 @@ import {prisma} from '../database/prisma.js';
 import {ErrorCode, HttpException} from '../exceptions/index.js';
 // The cascade over a big static segment's memberships can outlast Prisma's 5 s default
 import {LONG_TRANSACTION} from '../utils/database.js';
+import {getDateRange, isDateString} from '../utils/dates.js';
 
 import {ContactService} from './ContactService.js';
 import {NtfyService} from './NtfyService.js';
@@ -1182,8 +1183,8 @@ export class SegmentService {
     switch (operator) {
       case 'equals':
         // For date strings, compare only the date portion (ignore time)
-        if (this.isDateString(value)) {
-          const {startOfDay, startOfNextDay} = this.getDateRange(String(value));
+        if (isDateString(value)) {
+          const {startOfDay, startOfNextDay} = getDateRange(String(value));
           return {
             AND: [
               {data: {path, gte: startOfDay as Prisma.InputJsonValue}},
@@ -1194,8 +1195,8 @@ export class SegmentService {
         return {data: {path, equals: value as Prisma.InputJsonValue}};
       case 'notEquals':
         // For date strings, exclude the entire day (not just exact timestamp)
-        if (this.isDateString(value)) {
-          const {startOfDay, startOfNextDay} = this.getDateRange(String(value));
+        if (isDateString(value)) {
+          const {startOfDay, startOfNextDay} = getDateRange(String(value));
           return {
             OR: [
               {data: {path, lt: startOfDay as Prisma.InputJsonValue}},
@@ -1297,8 +1298,8 @@ export class SegmentService {
     switch (operator) {
       case 'equals': {
         // For date fields, compare only the date portion (ignore time)
-        if (this.isDateString(value)) {
-          const {startOfDay, startOfNextDay} = this.getDateRange(String(value));
+        if (isDateString(value)) {
+          const {startOfDay, startOfNextDay} = getDateRange(String(value));
           return {
             AND: [{[field]: {gte: new Date(startOfDay)}}, {[field]: {lt: new Date(startOfNextDay)}}],
           };
@@ -1308,8 +1309,8 @@ export class SegmentService {
       }
       case 'notEquals': {
         // For date fields, exclude the entire day (not just exact timestamp)
-        if (this.isDateString(value)) {
-          const {startOfDay, startOfNextDay} = this.getDateRange(String(value));
+        if (isDateString(value)) {
+          const {startOfDay, startOfNextDay} = getDateRange(String(value));
           return {
             OR: [{[field]: {lt: new Date(startOfDay)}}, {[field]: {gte: new Date(startOfNextDay)}}],
           };
@@ -1368,41 +1369,6 @@ export class SegmentService {
       default:
         throw new HttpException(400, `Unsupported time unit: ${unit}`);
     }
-  }
-
-  /**
-   * Check if a value is a date string in YYYY-MM-DD format
-   */
-  private static isDateString(value: unknown): boolean {
-    if (typeof value !== 'string') return false;
-    // Match YYYY-MM-DD format (with optional time component)
-    const dateRegex = /^\d{4}-\d{2}-\d{2}(T|$)/;
-    if (!dateRegex.test(value)) return false;
-    // Verify it's a valid date
-    const date = new Date(value);
-    return !isNaN(date.getTime());
-  }
-
-  /**
-   * Get date range for a date string (start of day to start of next day in UTC)
-   * @param value - Date string in YYYY-MM-DD format
-   * @returns Object with startOfDay and startOfNextDay as ISO strings
-   */
-  private static getDateRange(value: string): {startOfDay: string; startOfNextDay: string} {
-    // Extract just the date part (YYYY-MM-DD)
-    const dateStr = value.split('T')[0];
-    const startOfDay = `${dateStr}T00:00:00.000Z`;
-
-    if (!dateStr) {
-      throw new HttpException(400, `Invalid date string: ${value}`);
-    }
-
-    // Calculate start of next day
-    const nextDay = new Date(dateStr);
-    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-    const startOfNextDay = nextDay.toISOString().split('T')[0] + 'T00:00:00.000Z';
-
-    return {startOfDay, startOfNextDay};
   }
 
   /**
