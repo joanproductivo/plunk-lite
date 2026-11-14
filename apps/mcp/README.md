@@ -216,8 +216,9 @@ when `PLUNK_PUBLIC_KEY` is set and with the secret key otherwise. Either way it 
 it does not exist, unsubscribed unless the call passes `subscribed: true`. With the project's double
 opt-in on, only the secret key sends the confirmation email: with the public key the contact stays
 unsubscribed. A server that switches the public key off (`PLUNK_LITE_PUBLIC_TRACK=off`) refuses it with
-403, so leave `PLUNK_PUBLIC_KEY` unset there. Plunk itself takes only the public key on `/v1/track`:
-against it, set `PLUNK_PUBLIC_KEY`.
+403, so leave `PLUNK_PUBLIC_KEY` unset there. Plunk itself takes only the public key on `/v1/track`,
+and creates a new contact subscribed unless the call passes `subscribed: false`: against it, set
+`PLUNK_PUBLIC_KEY`.
 
 ## Development
 

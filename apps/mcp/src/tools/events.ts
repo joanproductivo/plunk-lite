@@ -13,12 +13,15 @@ export function registerEventTools(ctx: ToolContext, client: PlunkClient): void 
       description: [
         '**Purpose:** Record that a contact did something ("user.signup", "order.placed"). Events are',
         'what trigger automation workflows, so this is how you start an automated sequence for someone.',
-        'The contact is created if they do not exist yet, unsubscribed unless you pass `subscribed: true`.',
+        'The contact is created if they do not exist yet, unsubscribed unless you pass `subscribed: true`',
+        '(Plunk Lite; Plunk itself creates it subscribed).',
         '',
         '**NOT for:** Sending an email directly (use `plunk_send_email`). Tracking an event only',
         'records it — any email that follows comes from a workflow triggered by the event.',
         '',
-        '**Returns:** The recorded event and the contact it was attached to.',
+        '**Returns:** The recorded event and the ID of the contact it was attached to. It does not say whether',
+        'the contact ended up subscribed (a suppressed address or the double opt-in can leave it unsubscribed):',
+        'check with `plunk_get_contact`.',
         '',
         'A new contact whose domain does not exist, takes no email, is disposable or is a slip of a large',
         "provider's (gmial.com) is refused with INVALID_EMAIL and the likely correction, and the event is not recorded.",
@@ -47,7 +50,7 @@ export function registerEventTools(ctx: ToolContext, client: PlunkClient): void 
           .optional()
           .describe(
             '`true` subscribes the contact and `false` unsubscribes it. Leave it out to keep the current ' +
-              'state; a new contact is then created unsubscribed.',
+              'state; a new contact is then created unsubscribed (Plunk Lite).',
           ),
         data: z
           .record(z.string(), z.unknown())

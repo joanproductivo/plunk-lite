@@ -177,8 +177,9 @@ in flight, `plunk_cancel_campaign` stops whatever has not gone out yet — it ca
 it is set and with the secret key otherwise. Either way the contact is created if it does not exist,
 unsubscribed unless the call passes `subscribed: true`. With the double opt-in on, only the secret key
 sends the confirmation email. A server with `PLUNK_LITE_PUBLIC_TRACK=off` refuses the public key with
-`403`, so leave `PLUNK_PUBLIC_KEY` unset there. Plunk itself takes only the public key on `/v1/track`:
-against it, set `PLUNK_PUBLIC_KEY`.
+`403`, so leave `PLUNK_PUBLIC_KEY` unset there. Plunk itself takes only the public key on `/v1/track`,
+and creates a new contact subscribed unless the call passes `subscribed: false`: against it, set
+`PLUNK_PUBLIC_KEY`.
 
 **Workflows.** `plunk_create_workflow` creates a workflow that starts when a contact triggers the given
 event. It starts disabled, with only its trigger step. `plunk_add_workflow_steps` then adds the steps —

@@ -32,7 +32,7 @@ The email goes to each contact in their language: their `locale` field, else the
 | The dashboard's **Add contact**, a contact's switch, `PATCH /contacts/:id`, bulk subscribe, the end of a snooze | Subscribe at once: they are your own decision, or bring back a consent already given |
 | Adding to a segment (`createMissing`) | Never subscribes: new contacts are created unsubscribed |
 
-Sign up from your server with the secret key: anyone can read a public key in a page, and with it make your project email any address.
+Sign up from your server with the secret key and `subscribed: true`: anyone can read a public key in a page, and with it make your project email any address.
 
 `/v1/track` answers `data.pendingConfirmation: true` when the sign-up waits, and `data.optIn` says what became of the email: `sent`, `throttled` (one went out a moment ago, or the contact's limits are spent), `capped` (the project's limits), `failed` (it could not be queued; the next sign-up tries again) or `held` (no email for this key). `POST /contacts` answers the same in `_meta`.
 
