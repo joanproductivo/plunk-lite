@@ -16,14 +16,12 @@ export interface ProjectKeys {
 
 export interface PlunkMcpConfig {
   /**
-   * Secret key (`sk_*`). Every tool except `plunk_track_event` needs it.
-   * Unset when `projects` is.
+   * Secret key (`sk_*`). Every tool needs it. Unset when `projects` is.
    */
   apiKey?: string;
   /**
    * Public key (`pk_*`), optional. With it `plunk_track_event` calls
-   * `POST /v1/track` in one request; without it, it resolves the contact first
-   * and goes through `POST /events/track`.
+   * `POST /v1/track` with the public key instead of the secret key (Plunk Lite).
    */
   publicKey?: string;
   /** Base URL of the Plunk API. Self-hosters point this at their own API domain. */
@@ -93,8 +91,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, argv: string[] 
   if (apiKey.startsWith('pk_')) {
     throw new ConfigError(
       'PLUNK_API_KEY is a public key (pk_*), but the MCP server needs the secret key (sk_*). ' +
-        'Public keys can only call the event-tracking endpoint. Set the secret key as PLUNK_API_KEY, ' +
-        'and if you also want event tracking without a contact ID, set the public key as PLUNK_PUBLIC_KEY.',
+        'Public keys can only call the event-tracking endpoint. Set the secret key as PLUNK_API_KEY.',
     );
   }
 

@@ -217,6 +217,22 @@ describe('routing', () => {
     await close();
   });
 
+  it("tracks with the chosen project's secret key when it has no public key", async () => {
+    const calls = mockApi(() => json({success: true}));
+    const {client, close} = await connect();
+
+    await client.callTool({
+      name: 'plunk_track_event',
+      arguments: {project: 'acme', email: 'ada@example.com', event: 'signed-up'},
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toContain('/v1/track');
+    expect(calls[0]?.key).toBe('sk_acme');
+
+    await close();
+  });
+
   it('rejects a call without a project, or with an unknown one, before reaching the API', async () => {
     const calls = mockApi();
     const {client, close} = await connect();

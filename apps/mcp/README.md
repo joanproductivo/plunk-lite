@@ -57,7 +57,7 @@ Point `PLUNK_API_URL` at your own API domain:
 | ------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------- |
 | `PLUNK_API_KEY`                 | yes      | Your project's secret key (`sk_…`).                                                                          |
 | `PLUNK_API_URL`                 | no       | API base URL. Defaults to the hosted API. Set this when self-hosting.                                        |
-| `PLUNK_PUBLIC_KEY`              | no       | Public key (`pk_…`). Lets `plunk_track_event` use the tracking endpoint directly — see below.                 |
+| `PLUNK_PUBLIC_KEY`              | no       | Public key (`pk_…`). `plunk_track_event` uses it instead of the secret key — see below.                      |
 | `PLUNK_READ_ONLY`               | no       | `true` registers only read-only tools. Nothing can be created, changed, sent, or deleted.                     |
 | `PLUNK_ALLOW_UNCONFIRMED_SENDS` | no       | `true` skips the confirmation prompt before sends. For headless automation only.                             |
 | `PLUNK_MCP_API_KEY`             | no       | Takes precedence over `PLUNK_API_KEY`. Use it if `PLUNK_API_KEY` is already taken in your environment.        |
@@ -211,9 +211,13 @@ for anything you would not want an agent to change.
 
 ## Event tracking and the two key types
 
-With `PLUNK_PUBLIC_KEY`, `plunk_track_event` calls Plunk's `/v1/track` endpoint in one request.
-Without it, it gets the same result with the secret key by upserting the contact first and then
-recording the event against it. Both paths create the contact if it does not exist.
+`plunk_track_event` calls Plunk's `/v1/track` endpoint in one request (Plunk Lite), with the public key
+when `PLUNK_PUBLIC_KEY` is set and with the secret key otherwise. Either way it creates the contact if
+it does not exist, unsubscribed unless the call passes `subscribed: true`. With the project's double
+opt-in on, only the secret key sends the confirmation email: with the public key the contact stays
+unsubscribed. A server that switches the public key off (`PLUNK_LITE_PUBLIC_TRACK=off`) refuses it with
+403, so leave `PLUNK_PUBLIC_KEY` unset there. Plunk itself takes only the public key on `/v1/track`:
+against it, set `PLUNK_PUBLIC_KEY`.
 
 ## Development
 

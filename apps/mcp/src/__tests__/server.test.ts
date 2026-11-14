@@ -417,12 +417,12 @@ describe('tool behaviour', () => {
     await close();
   });
 
-  it('tracks an event via the contact upsert when no public key is configured', async () => {
-    const calls: string[] = [];
+  it('tracks an event through /v1/track with the secret key when no public key is configured', async () => {
+    const calls: {url: string; init?: RequestInit}[] = [];
 
-    mockApi((url) => {
-      calls.push(url);
-      return url.endsWith('/contacts') ? json({id: 'contact-1'}) : json({ok: true});
+    mockApi((url, init) => {
+      calls.push({url, init});
+      return json({success: true, data: {contact: 'contact-1'}});
     });
 
     const {client, close} = await connect(baseConfig);
@@ -433,8 +433,33 @@ describe('tool behaviour', () => {
     });
 
     expect(result.isError).toBeFalsy();
-    // Without a public key the event is tracked against the contact it upserts first.
-    expect(calls).toEqual(['https://api.example.com/contacts', 'https://api.example.com/events/track']);
+    // Plunk Lite: one call, which leaves the subscription alone when the tool is not told
+    expect(calls.map((call) => call.url)).toEqual(['https://api.example.com/v1/track']);
+    expect((calls[0]!.init!.headers as Record<string, string>).Authorization).toBe('Bearer sk_test');
+    expect(JSON.parse(calls[0]!.init!.body as string)).toEqual({event: 'user.signup', email: 'ada@example.com'});
+
+    await close();
+  });
+
+  it('creates or updates a contact without touching its subscription unless told', async () => {
+    const bodies: unknown[] = [];
+
+    mockApi((_url, init) => {
+      bodies.push(JSON.parse(init!.body as string));
+      return json({
+        id: 'contact-1',
+        email: 'ada@example.com',
+        subscribed: false,
+        _meta: {isNew: false, isUpdate: true},
+      });
+    });
+
+    const {client, close} = await connect(baseConfig);
+
+    await client.callTool({name: 'plunk_create_contact', arguments: {email: 'ada@example.com', data: {plan: 'pro'}}});
+
+    // Plunk Lite: no `subscribed`, so an existing contact who unsubscribed stays unsubscribed
+    expect(bodies).toEqual([{email: 'ada@example.com', data: {plan: 'pro'}}]);
 
     await close();
   });
@@ -471,26 +496,6 @@ describe('tool behaviour', () => {
     const result = await client.callTool({name: 'plunk_create_contact', arguments: {email: 'ada@example.com'}});
 
     expect(JSON.stringify(result.content)).not.toContain('suppression');
-
-    await close();
-  });
-
-  it('notes a suppressed contact when tracking an event through the upsert', async () => {
-    mockApi((url) =>
-      url.endsWith('/contacts')
-        ? json({id: 'contact-1', _meta: {suppressed: {reason: 'COMPLAINT', createdAt: '2026-10-21T08:00:00.000Z'}}})
-        : json({ok: true}),
-    );
-
-    const {client, close} = await connect(baseConfig);
-
-    const result = await client.callTool({
-      name: 'plunk_track_event',
-      arguments: {event: 'user.signup', email: 'ada@example.com'},
-    });
-
-    expect(result.isError).toBeFalsy();
-    expect(JSON.stringify(result.content)).toContain('reported an email as spam on 2026-10-21');
 
     await close();
   });
@@ -539,11 +544,11 @@ describe('tool behaviour', () => {
     await close();
   });
 
-  it('uses /v1/track directly when a public key is configured', async () => {
-    const calls: string[] = [];
+  it('uses /v1/track with the public key when one is configured', async () => {
+    const calls: {url: string; init?: RequestInit}[] = [];
 
-    mockApi((url) => {
-      calls.push(url);
+    mockApi((url, init) => {
+      calls.push({url, init});
       return json({ok: true});
     });
 
@@ -554,7 +559,8 @@ describe('tool behaviour', () => {
       arguments: {event: 'user.signup', email: 'ada@example.com'},
     });
 
-    expect(calls).toEqual(['https://api.example.com/v1/track']);
+    expect(calls.map((call) => call.url)).toEqual(['https://api.example.com/v1/track']);
+    expect((calls[0]!.init!.headers as Record<string, string>).Authorization).toBe('Bearer pk_test');
 
     await close();
   });
