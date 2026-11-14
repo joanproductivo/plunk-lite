@@ -95,7 +95,7 @@ The last three are auto-generated per-recipient at send time and exposed as temp
 
 ## Subscription State
 
-Every contact has a `subscribed` field that determines which types of emails they will receive. A contact created via `/v1/track` or `/v1/send` is unsubscribed unless the call passes `subscribed: true` (in Plunk Lite; in Plunk, `/v1/track` subscribes new contacts by default); contacts created via `POST /contacts` use whatever value you pass (default: `true`).
+Every contact has a `subscribed` field that determines which types of emails they will receive. A contact created via `/v1/track`, `/v1/send` or `POST /contacts` is unsubscribed unless the call passes `subscribed: true` (in Plunk Lite; in Plunk, `/v1/track` and `POST /contacts` subscribe new contacts by default). Only a CSV import subscribes new contacts without being told, unless its `subscribed` or `status` column says otherwise.
 
 With the [double opt-in](/concepts/double-opt-in) on (Plunk Lite), a sign-up from the API waits until the contact confirms its address, and the contact shows as **Pending confirmation** until then.
 
@@ -105,6 +105,8 @@ Every flip of `subscribed` automatically tracks an event on the contact:
 
 - `subscribed` flipped to `true` → `contact.subscribed` event
 - `subscribed` flipped to `false` → `contact.unsubscribed` event
+
+A contact **created** subscribed fires `contact.subscribed` too (Plunk Lite), so a welcome workflow starts for a new sign-up as for one that was already a contact. Two exceptions: a CSV import, which writes a whole list at once, and a sign-up with the public key. On `/v1/track` the event comes after the contact joins the call's `segments`. On `/v1/send` it is queued, for new and existing recipients alike: it fires shortly after the response (later if the queue is busy with segment events), and only if the contact is still subscribed by then.
 
 These events fire on every path that changes subscription state — manual edits, the public unsubscribe page, bulk operations, automatic unsubscribes from bounces / complaints. You can branch on them in workflows.
 

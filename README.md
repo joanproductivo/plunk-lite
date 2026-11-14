@@ -26,7 +26,7 @@ Thanks to the Plunk team for the platform this is built on. If you find Plunk us
 - **Static segments:** with entry and exit events, usable in bulk from Contacts, on the contact page and in workflows
 - **Campaigns:** leave out the contacts of up to 20 segments, whatever the audience
 - **Filters and conditions:** "is not member of" counts contacts without the field, "not equals" warns that it leaves them out, a filter value the query can't compare is refused with a 400 that names the filter instead of a server error, and workflow conditions compare dates as dates, the contact's creation date included
-- **Contacts:** CSV export, import with segments and signup dates, and `/v1/track` subscribes a new contact only when the call passes `subscribed: true`
+- **Contacts:** CSV export, import with segments and signup dates, and no contact is subscribed unless the call asks for it: `/v1/track` and `POST /contacts` without `subscribed: true`, and inbound email always, create new contacts unsubscribed, and `contact.subscribed` fires for a contact created subscribed too
 - **Double opt-in:** per project, off by default
 - **Suppression you can see:** a "Suppressed" status with its reason, and removal that also clears the address from SES
 - **Sending safeguards:** a cut-off for repeated soft bounces, automatic clicks left out of the statistics, and a DMARC check for each domain
