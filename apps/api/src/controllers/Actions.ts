@@ -40,8 +40,8 @@ export class Actions {
    * - data: object (optional) - Event and contact data
    *   - Simple values are saved to contact (persistent)
    *   - {value: any, persistent: false} are only available to workflows (non-persistent)
-   * - segments: string[] | string | null (optional, Plunk Lite) - Static segments the contact joins, by id;
-   *   naming one needs the secret key. `null` or `""` as the field, and blank or `null` entries, name none
+   * - segments: (string | null)[] | "" | null (optional, Plunk Lite) - Static segments the contact joins, by
+   *   id; naming one needs the secret key. `null` or `""` as the field, and blank or `null` entries, name none
    *
    * Response:
    * - success: boolean
@@ -170,8 +170,8 @@ export class Actions {
    * - data: object (optional) - Contact data and template variables
    *   - Simple values are saved to contact (persistent)
    *   - {value: any, persistent: false} are only used for this email (non-persistent)
-   * - segments: string[] | string | null (optional, Plunk Lite) - Static segments each recipient sent to joins,
-   *   by id. `null` or `""` as the field, and blank or `null` entries, name none
+   * - segments: (string | null)[] | "" | null (optional, Plunk Lite) - Static segments each recipient sent to
+   *   joins, by id. `null` or `""` as the field, and blank or `null` entries, name none
    * - attachments: array (optional) - Email attachments (configurable via MAX_ATTACHMENTS_COUNT / MAX_ATTACHMENT_SIZE_MB, defaults: 10 / 10MB)
    *   - filename: string (required) - Attachment filename
    *   - content: string (required) - Base64 encoded file content

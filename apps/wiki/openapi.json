@@ -1136,7 +1136,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "The public key is switched off on this server (`PLUNK_LITE_PUBLIC_TRACK=off`), or was sent with `segments`: call it from a server with the secret key. Or the project is disabled.",
+            "description": "The public key is switched off on this server (`PLUNK_LITE_PUBLIC_TRACK=off`), or named a segment in `segments`: call it from a server with the secret key. Or the project is disabled.",
             "content": {
               "application/json": {
                 "schema": {
