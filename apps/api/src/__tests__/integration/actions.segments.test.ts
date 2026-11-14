@@ -16,7 +16,8 @@ type Body = {success: boolean; data: Record<string, unknown>};
 
 /**
  * Plunk Lite: /v1/track and /v1/send take `segments`, the static segments their contacts join in the
- * same call -- with the secret key only, all checked before anything is written.
+ * same call -- naming one needs the secret key, and all are checked before anything is written.
+ * Empty entries, as a form sends an empty field, name none.
  */
 describe('segments on /v1/track and /v1/send', () => {
   const prisma = getPrismaClient();
@@ -120,16 +121,84 @@ describe('segments on /v1/track and /v1/send', () => {
       expect(vi.mocked(QueueService.queueSegmentMembershipEvents).mock.calls[0]![0]).toMatchObject({segmentId: first});
     });
 
-    it('refuses segments with the public key, and writes nothing', async () => {
-      const outcome = await track(project.public, {event: 'signup', email: 'ana@example.com', segments: [first]});
+    it.each([
+      ['a segment', () => [first]],
+      ['a segment next to an empty entry', () => ['', first]],
+      ['a segment next to a null entry', () => [null, first]],
+    ])('refuses %s with the public key, before reading segments, and writes nothing', async (_label, segments) => {
+      const findSegments = vi.spyOn(servicePrisma.segment, 'findMany');
+
+      const outcome = await track(project.public, {event: 'signup', email: 'ana@example.com', segments: segments()});
 
       expect(outcome.status).toBe(403);
+      expect(findSegments).not.toHaveBeenCalled();
       expect(await prisma.contact.count({where: {projectId: project.id}})).toBe(0);
     });
 
-    it('still takes the public key without segments, or with an empty list', async () => {
+    it('still takes the public key without segments, or with none named', async () => {
       expect((await track(project.public, {event: 'signup', email: 'ana@example.com'})).status).toBe(200);
       expect((await track(project.public, {event: 'signup', email: 'leo@example.com', segments: []})).status).toBe(200);
+      expect((await track(project.public, {event: 'signup', email: 'eva@example.com', segments: ['']})).status).toBe(
+        200,
+      );
+      expect((await track(project.public, {event: 'signup', email: 'max@example.com', segments: null})).status).toBe(
+        200,
+      );
+      expect((await track(project.public, {event: 'signup', email: 'sol@example.com', segments: ''})).status).toBe(200);
+    });
+
+    // Plunk Lite: a form sends an empty field as `null`, `""` or `[""]`
+    it.each([
+      ['null', null],
+      ['an empty string', ''],
+      ['a list of an empty string', ['']],
+      ['blank entries', ['  ', '\t']],
+      ['a null entry', [null]],
+    ])('takes %s as no segment, and writes the contact and its event', async (_label, segments) => {
+      const outcome = await track(project.secret, {event: 'signup', email: 'ana@example.com', segments});
+
+      expect(outcome.status).toBe(200);
+      expect(await prisma.contact.count({where: {projectId: project.id}})).toBe(1);
+      expect(await prisma.event.count({where: {projectId: project.id, name: 'signup'}})).toBe(1);
+      expect(await prisma.segmentMembership.count({where: {segmentId: {in: [first, second]}}})).toBe(0);
+      expect(QueueService.queueSegmentMembershipEvents).not.toHaveBeenCalled();
+    });
+
+    it('adds the contact to the segments named next to empty entries', async () => {
+      const outcome = await track(project.secret, {event: 'signup', email: 'ana@example.com', segments: ['', first]});
+
+      expect(outcome.status).toBe(200);
+      expect(await members(first)).toEqual([{contactId: outcome.body!.data.contact as string}]);
+      expect(await members(second)).toEqual([]);
+    });
+
+    it('names an entry that is not a UUID by its place, empty entries included, and writes nothing', async () => {
+      const outcome = await track(project.secret, {event: 'signup', email: 'ana@example.com', segments: ['', 'abc']});
+
+      expect(outcome.error).toBeInstanceOf(ZodError);
+      expect((outcome.error as ZodError).issues.map(issue => issue.path)).toEqual([['segments', 1]]);
+      expect(await prisma.contact.count({where: {projectId: project.id}})).toBe(0);
+    });
+
+    it('names a segment that cannot take contacts by its place, empty entries included', async () => {
+      const dynamic = await prisma.segment.create({
+        data: {projectId: project.id, name: 'VIP', type: 'DYNAMIC', condition: {logic: 'AND', groups: []}},
+      });
+
+      const outcome = await track(project.secret, {
+        event: 'signup',
+        email: 'ana@example.com',
+        segments: [' ', first, dynamic.id, '', '00000000-0000-4000-8000-000000000000'],
+      });
+
+      expect(outcome.status).toBe(422);
+      const fields = (outcome.error as HttpException).details?.errors as {field: string; code: string}[];
+      expect(fields.map(error => [error.field, error.code])).toEqual([
+        ['segments.2', 'segment_not_static'],
+        ['segments.4', 'segment_not_found'],
+      ]);
+      expect(await prisma.contact.count({where: {projectId: project.id}})).toBe(0);
+      expect(await members(first)).toEqual([]);
     });
 
     it('refuses a dynamic, foreign or unknown segment with 422, naming each, and writes nothing', async () => {
@@ -163,6 +232,17 @@ describe('segments on /v1/track and /v1/send', () => {
 
       expect(outcome.error).toBeInstanceOf(ZodError);
       expect((outcome.error as ZodError).issues[0]!.path).toEqual(['segments']);
+    });
+
+    it('counts empty entries towards the 20', async () => {
+      const segments = Array.from({length: 21}, () => '');
+
+      const outcome = await track(project.secret, {event: 'signup', email: 'ana@example.com', segments});
+
+      expect(outcome.error).toBeInstanceOf(ZodError);
+      expect((outcome.error as ZodError).issues.map(issue => [issue.path, issue.code])).toEqual([
+        [['segments'], 'too_big'],
+      ]);
     });
   });
 
@@ -227,6 +307,36 @@ describe('segments on /v1/track and /v1/send', () => {
       });
 
       expect(outcome.status).toBe(422);
+      expect(await prisma.email.count({where: {projectId: project.id}})).toBe(0);
+    });
+
+    it('sends without adding anyone to a segment when none is named', async () => {
+      const outcome = await send({
+        to: 'a@example.com',
+        subject: 'Hi',
+        body: '<p>Hi</p>',
+        from: 'hello@example.com',
+        segments: [''],
+      });
+
+      expect(outcome.status).toBe(200);
+      expect(outcome.body!.data.emails).toHaveLength(1);
+      expect(await members(first)).toEqual([]);
+      expect(QueueService.queueSegmentMembershipEvents).not.toHaveBeenCalled();
+    });
+
+    it('names an unknown segment by its place, empty entries included, before sending anything', async () => {
+      const outcome = await send({
+        to: 'a@example.com',
+        subject: 'Hi',
+        body: '<p>Hi</p>',
+        from: 'hello@example.com',
+        segments: ['', '00000000-0000-4000-8000-000000000000'],
+      });
+
+      expect(outcome.status).toBe(422);
+      const fields = (outcome.error as HttpException).details?.errors as {field: string; code: string}[];
+      expect(fields.map(error => [error.field, error.code])).toEqual([['segments.1', 'segment_not_found']]);
       expect(await prisma.email.count({where: {projectId: project.id}})).toBe(0);
     });
 
