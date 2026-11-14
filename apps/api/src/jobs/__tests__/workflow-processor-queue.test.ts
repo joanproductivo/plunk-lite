@@ -143,3 +143,80 @@ describe('workflow worker - webhook retries', () => {
     expect(received.map(headers => headers[WEBHOOK_DELIVERY_HEADER.toLowerCase()])).toEqual([id, id]);
   });
 });
+
+/**
+ * Plunk Lite: a delay's end that wakes up before its date wait's date (moved later meanwhile) waits
+ * the time left as the same job, through the real worker and Redis, without using up an attempt
+ */
+describe('workflow worker - a wait until a date moved later', () => {
+  const prisma = getPrismaClient();
+  let worker: Worker;
+  let projectId: string;
+  let contactId: string;
+  const wall = (ms: number) => ({until: new Date(Date.now() + ms).toISOString().slice(0, 16), timezone: 'UTC'});
+
+  beforeAll(async () => {
+    worker = createWorkflowWorker();
+    await worker.waitUntilReady();
+  });
+
+  afterAll(async () => {
+    await worker.close();
+  });
+
+  beforeEach(async () => {
+    const {project} = await factories.createUserWithProject();
+    projectId = project.id;
+    contactId = (await factories.createContact({projectId})).id;
+  });
+
+  it('holds the job back until the new date, then ends the wait', async () => {
+    const workflow = await factories.createWorkflow({projectId, enabled: true});
+    const trigger = await prisma.workflowStep.findFirstOrThrow({
+      where: {workflowId: workflow.id, type: WorkflowStepType.TRIGGER},
+    });
+    const wait = await factories.createWorkflowStep({
+      workflowId: workflow.id,
+      type: WorkflowStepType.DELAY,
+      config: wall(30 * 60_000),
+    });
+    await prisma.workflowTransition.create({data: {fromStepId: trigger.id, toStepId: wait.id}});
+    const execution = await prisma.workflowExecution.create({
+      data: {workflowId: workflow.id, contactId, status: WorkflowExecutionStatus.RUNNING, currentStepId: trigger.id},
+    });
+    await WorkflowExecutionService.processStepExecution(execution.id, trigger.id);
+    const row = await prisma.workflowStepExecution.findFirstOrThrow({
+      where: {executionId: execution.id, stepId: wait.id},
+    });
+    const job = (await workflowQueue.getJob(`workflow-delay-end-${row.id}`))!;
+
+    // The date moves 90 minutes later, and the old end comes now
+    await prisma.workflowStep.update({where: {id: wait.id}, data: {config: wall(90 * 60_000)}});
+    await job.changeDelay(0);
+
+    await vi.waitFor(
+      async () => {
+        const held = (await workflowQueue.getJob(job.id!))!;
+        expect(await held.getState()).toBe('delayed');
+        expect(held.timestamp + held.delay - Date.now()).toBeGreaterThan(80 * 60_000);
+      },
+      {timeout: 10_000, interval: 100},
+    );
+    const held = (await workflowQueue.getJob(job.id!))!;
+    expect(held.attemptsMade).toBe(0);
+    expect((await prisma.workflowExecution.findUniqueOrThrow({where: {id: execution.id}})).status).toBe(
+      WorkflowExecutionStatus.WAITING,
+    );
+
+    // The date is moved to the past: the same job ends the wait
+    await prisma.workflowStep.update({where: {id: wait.id}, data: {config: wall(-60_000)}});
+    await held.changeDelay(0);
+    await vi.waitFor(
+      async () =>
+        expect((await prisma.workflowExecution.findUniqueOrThrow({where: {id: execution.id}})).status).toBe(
+          WorkflowExecutionStatus.COMPLETED,
+        ),
+      {timeout: 10_000, interval: 100},
+    );
+  }, 30_000);
+});

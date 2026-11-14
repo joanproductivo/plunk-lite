@@ -384,6 +384,28 @@ export class FailureAlertService {
    * there; this catches the ones that failed before a step could run (a missing step, the
    * database), which leave the execution as it was.
    */
+  /**
+   * Plunk Lite: a round that moves the contacts waiting at a wait until a date to its new date
+   * failed for good: some may end at the old date. Recorded against the step's workflow.
+   */
+  public static async recordDateWaitReschedule(stepId: string, error: string): Promise<void> {
+    try {
+      const step = await prisma.workflowStep.findUnique({
+        where: {id: stepId},
+        select: {name: true, workflowId: true, workflow: {select: {name: true, projectId: true}}},
+      });
+      if (step) {
+        await this.record(step.workflow.projectId, {
+          sourceKey: `workflow:${step.workflowId}`,
+          label: step.workflow.name,
+          error: `Moving the contacts waiting at "${step.name}" to its new date failed: ${error}`,
+        });
+      }
+    } catch (lookupError) {
+      signale.error(`[FAILURE-ALERTS] Could not record the failed new date of step ${stepId}:`, lookupError);
+    }
+  }
+
   public static async recordWorkflowJob(executionId: string, error: string): Promise<void> {
     try {
       const execution = await prisma.workflowExecution.findUnique({

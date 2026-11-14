@@ -47,5 +47,18 @@ export interface ContinueParkedRoundJobData {
   after?: string;
 }
 
+/**
+ * Plunk Lite: one round of moving the contacts waiting at a date wait to its new date, after the
+ * date changed. Used by: workflowQueue worker
+ */
+export interface RescheduleDateWaitJobData {
+  type: 'reschedule-date-wait';
+  stepId: string;
+  /** One per save of the date: the jobs of each save have IDs of their own */
+  passId: string;
+  /** The last run the round before went through (they go in ID order) */
+  after?: string;
+}
+
 /** What a workflowQueue job carries */
-export type WorkflowQueueJobData = WorkflowStepJobData | ContinueParkedRoundJobData;
+export type WorkflowQueueJobData = WorkflowStepJobData | ContinueParkedRoundJobData | RescheduleDateWaitJobData;

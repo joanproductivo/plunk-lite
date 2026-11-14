@@ -1,5 +1,6 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {WorkflowExecutionStatus, WorkflowStepType, WorkflowTriggerType} from '@plunk/db';
+import {DateWaits} from '../DateWaits';
 import {WorkflowService} from '../WorkflowService';
 import {Keys} from '../keys';
 import {factories, getPrismaClient} from '../../../../../test/helpers';
@@ -759,6 +760,88 @@ describe('WorkflowService', () => {
       await expect(WorkflowService.updateStep(projectId, workflow.id, 'non-existent', {name: 'New'})).rejects.toThrow(
         'Workflow step not found',
       );
+    });
+
+    // Plunk Lite: waits until a date
+    describe('a wait until a date', () => {
+      const dateWait = (until: string, timezone = 'Europe/Madrid') => ({until, timezone});
+      const inAMonth = () => new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 16);
+
+      async function busyDelay() {
+        const workflow = await factories.createWorkflow({projectId, enabled: true});
+        const step = await factories.createWorkflowStep({
+          workflowId: workflow.id,
+          type: WorkflowStepType.DELAY,
+          config: dateWait(inAMonth()),
+        });
+        const contact = await factories.createContact({projectId});
+        await prisma.workflowExecution.create({
+          data: {
+            workflowId: workflow.id,
+            contactId: contact.id,
+            status: WorkflowExecutionStatus.WAITING,
+            currentStepId: step.id,
+          },
+        });
+        return {workflow, step};
+      }
+
+      it('takes a new date while contacts wait, and moves them to it', async () => {
+        const reschedule = vi.spyOn(DateWaits, 'queueReschedule').mockResolvedValue();
+        const {workflow, step} = await busyDelay();
+        const next = dateWait(new Date(Date.now() + 40 * 86_400_000).toISOString().slice(0, 16), 'America/New_York');
+
+        const updated = await WorkflowService.updateStep(projectId, workflow.id, step.id, {config: next});
+
+        expect(updated.config).toEqual(next);
+        expect(reschedule).toHaveBeenCalledWith(step.id);
+        reschedule.mockClear();
+        await WorkflowService.updateStep(projectId, workflow.id, step.id, {name: 'Renamed', config: next});
+        expect(reschedule).not.toHaveBeenCalled();
+        reschedule.mockRestore();
+      });
+
+      it('still refuses changing it to a duration, or its template, while contacts wait', async () => {
+        const {workflow, step} = await busyDelay();
+        const template = await factories.createTemplate({projectId});
+
+        await expect(
+          WorkflowService.updateStep(projectId, workflow.id, step.id, {config: {amount: 1, unit: 'hours'}}),
+        ).rejects.toMatchObject({code: 409});
+        // A date that cannot be waited for says so, rather than asking to disable the workflow
+        await expect(
+          WorkflowService.updateStep(projectId, workflow.id, step.id, {config: dateWait(inAMonth(), 'Nowhere/City')}),
+        ).rejects.toMatchObject({code: 400});
+        await expect(
+          WorkflowService.updateStep(projectId, workflow.id, step.id, {
+            config: dateWait(inAMonth()),
+            templateId: template.id,
+          }),
+        ).rejects.toMatchObject({code: 409});
+      });
+
+      it('refuses a date that cannot be waited for, when adding or changing a step', async () => {
+        const workflow = await factories.createWorkflow({projectId});
+        const step = await factories.createWorkflowStep({workflowId: workflow.id, type: WorkflowStepType.DELAY});
+        const update = (config: Record<string, unknown>) =>
+          WorkflowService.updateStep(projectId, workflow.id, step.id, {config});
+
+        await expect(update(dateWait('2026-02-31T10:00'))).rejects.toMatchObject({code: 400});
+        await expect(update(dateWait(inAMonth(), '+02:00'))).rejects.toMatchObject({code: 400});
+        await expect(update({...dateWait(inAMonth()), amount: 1, unit: 'hours'})).rejects.toMatchObject({code: 400});
+        await expect(update(dateWait('2099-01-01T10:00'))).rejects.toMatchObject({code: 400});
+        await expect(
+          WorkflowService.addStep(projectId, workflow.id, {
+            type: WorkflowStepType.DELAY,
+            name: 'Wait',
+            position: {x: 0, y: 0},
+            config: dateWait('2026-02-31T10:00'),
+          }),
+        ).rejects.toMatchObject({code: 400});
+        // A step just added from the dashboard, still empty, and a past date are fine
+        await expect(update({})).resolves.toBeTruthy();
+        await expect(update(dateWait('2020-01-01T10:00'))).resolves.toBeTruthy();
+      });
     });
   });
 

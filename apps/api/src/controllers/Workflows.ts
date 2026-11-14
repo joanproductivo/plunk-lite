@@ -4,6 +4,7 @@ import {WorkflowSchemas} from '@plunk/shared';
 import type {NextFunction, Request, Response} from 'express';
 import signale from 'signale';
 import {requireAuth, requireEmailVerified} from '../middleware/auth.js';
+import {DateWaits} from '../services/DateWaits.js';
 import {ParkedRuns} from '../services/ParkedRuns.js';
 import {WebhookSigningSecrets} from '../services/WebhookSigningSecrets.js';
 import {WorkflowService} from '../services/WorkflowService.js';
@@ -117,9 +118,11 @@ export class Workflows {
 
     const workflow = await WorkflowService.get(auth.projectId!, workflowId);
     // Plunk Lite: whether it keeps its contacts until an Exit step, and who waits at its end
-    const [keepUntilExit, summary] = await Promise.all([
+    const [keepUntilExit, summary, stepWaits] = await Promise.all([
       ParkedRuns.keepsUntilExit(workflowId),
       ParkedRuns.summary(workflowId, workflow.steps),
+      // Plunk Lite: the contacts waiting at each step, and when each wait until a date ends
+      DateWaits.stepWaits(workflowId, workflow.steps),
     ]);
     // Contacts left at a step deleted as they were parked wait before it: rare, and fixed here once
     let parked = summary;
@@ -128,7 +131,7 @@ export class Workflows {
       parked = await ParkedRuns.summary(workflowId, workflow.steps);
     }
 
-    return res.status(200).json({...workflow, keepUntilExit, parked, continuePace: ParkedRuns.pace()});
+    return res.status(200).json({...workflow, keepUntilExit, parked, stepWaits, continuePace: ParkedRuns.pace()});
   }
 
   /**

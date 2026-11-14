@@ -106,3 +106,14 @@ export type StepConfig = Prisma.JsonValue;
  * Generic key-value result from step execution
  */
 export type StepResult = Record<string, unknown>;
+
+/**
+ * Plunk Lite: the contacts waiting at one step of a workflow, and, for a wait until a date, the
+ * instant it ends (ISO) and whether that has passed
+ */
+export interface StepWait {
+  stepId: string;
+  waiting: number;
+  at?: string;
+  late?: boolean;
+}
