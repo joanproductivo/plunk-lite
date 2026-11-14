@@ -35,11 +35,7 @@ function main(): void {
   });
 
   const projects = config.projects ? Object.keys(config.projects).sort() : undefined;
-  const target = projects
-    ? ` projects=${projects.join(',')}`
-    : config.publicKey
-      ? ''
-      : ' (no public key: event tracking upserts the contact first)';
+  const target = projects ? ` projects=${projects.join(',')}` : '';
 
   console.error(
     `[plunk-mcp] v${SERVER_VERSION} ready on stdio — api=${config.apiUrl}${config.readOnly ? ' (read-only)' : ''}${target}`,

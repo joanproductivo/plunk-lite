@@ -107,6 +107,27 @@ describe('double opt-in', () => {
       expect(await prisma.email.count({where: {projectId: project.id}})).toBe(0);
       expect(await prisma.plunkLiteOptInRequest.count()).toBe(0);
     });
+
+    it('without subscribed, asks for nothing and joins the segments at once, unsubscribed', async () => {
+      const outcome = await track(project.secret, {event: 'purchase', email: 'ana@plunk.test', segments: [segmentId]});
+
+      expect(outcome.status).toBe(200);
+      expect(outcome.body!.data).not.toHaveProperty('pendingConfirmation');
+      expect(outcome.body!.data).not.toHaveProperty('optIn');
+      expect((await contactNamed('ana@plunk.test'))!.subscribed).toBe(false);
+      expect(await prisma.email.count({where: {projectId: project.id}})).toBe(0);
+      expect(await prisma.plunkLiteOptInRequest.count()).toBe(0);
+      expect(await members()).toBe(1);
+    });
+
+    it('with the public key and without subscribed, asks for nothing either', async () => {
+      const outcome = await track(project.public, {event: 'purchase', email: 'ana@plunk.test'});
+
+      expect(outcome.status).toBe(200);
+      expect(outcome.body!.data).not.toHaveProperty('optIn');
+      expect((await contactNamed('ana@plunk.test'))!.subscribed).toBe(false);
+      expect(await prisma.email.count({where: {projectId: project.id}})).toBe(0);
+    });
   });
 
   describe('/v1/send', () => {
@@ -170,7 +191,7 @@ describe('double opt-in', () => {
     }
 
     it('filters the contacts waiting for confirmation and marks every row', async () => {
-      await track(project.secret, {event: 'signup', email: 'ana@plunk.test'});
+      await track(project.secret, {event: 'signup', email: 'ana@plunk.test', subscribed: true});
       await factories.createContact({projectId: project.id, email: 'bea@plunk.test', subscribed: false});
 
       const pending = await list({status: 'pending'});
@@ -184,7 +205,7 @@ describe('double opt-in', () => {
     });
 
     it("tells the contact's page when it asked and whether it confirmed", async () => {
-      await track(project.secret, {event: 'signup', email: 'ana@plunk.test'});
+      await track(project.secret, {event: 'signup', email: 'ana@plunk.test', subscribed: true});
       const contact = await contactNamed('ana@plunk.test');
       const contacts = new Contacts();
 
@@ -200,7 +221,7 @@ describe('double opt-in', () => {
 
   describe('the confirmation page', () => {
     it('describes a link without confirming it, and confirms it once pressed', async () => {
-      await track(project.secret, {event: 'signup', email: 'ana@plunk.test'});
+      await track(project.secret, {event: 'signup', email: 'ana@plunk.test', subscribed: true});
       const token = await tokenOf('ana@plunk.test');
       const optIn = new OptIn();
 

@@ -40,11 +40,12 @@ curl https://next-api.useplunk.com/v1/track \
   -d '{
     "event": "waitlist.joined",
     "email": "ada@example.com",
+    "subscribed": true,
     "data": { "firstName": "Ada", "product": "Beta" }
   }'
 ```
 
-This call upserts the contact (subscribed by default) and records `waitlist.joined` on them. Anything you put in `data` lands on the contact and is available as `{{firstName}}`, `{{product}}`, etc. in the template.
+This call upserts the contact, subscribes them (`subscribed: true`; in Plunk Lite, without it a new contact is created unsubscribed and the Marketing template from step 1 is skipped) and records `waitlist.joined` on them. Anything you put in `data` lands on the contact and is available as `{{firstName}}`, `{{product}}`, etc. in the template.
 
 <Callout title="Pick a stable event name" type="info">
   A workflow's trigger event **cannot be changed after the first execution**. Namespace it (`waitlist.joined`) rather than something generic you might want to reuse.

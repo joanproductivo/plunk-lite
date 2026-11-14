@@ -92,7 +92,7 @@ const SUPPRESSION_HELP = [
 ].join('\n');
 
 /** The reason a write left a contact unsubscribed, from `_meta.suppressed` on `POST /contacts` */
-export function suppressionNote(contact: unknown): string {
+function suppressionNote(contact: unknown): string {
   const suppressed = (contact as {_meta?: {suppressed?: {reason?: string; createdAt?: string}}} | null)?._meta
     ?.suppressed;
   if (!suppressed) {
@@ -325,7 +325,15 @@ export function registerContactTools(ctx: ToolContext, client: PlunkClient): voi
       ].join('\n'),
       inputSchema: z.object({
         email: z.string().describe('Email address of the contact.'),
-        subscribed: z.boolean().default(true).describe('Whether the contact is subscribed to marketing email.'),
+        // Plunk Lite: no default, so saving fields on a contact who unsubscribed does not subscribe it again
+        subscribed: z
+          .boolean()
+          .optional()
+          .describe(
+            '`true` subscribes the contact to marketing email and `false` unsubscribes it. Leave it out to keep ' +
+              "an existing contact's state; a new contact is then created subscribed (with the double opt-in on, " +
+              'it is sent a confirmation instead).',
+          ),
         data: z
           .record(z.string(), z.unknown())
           .optional()

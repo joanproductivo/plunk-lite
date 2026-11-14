@@ -37,19 +37,15 @@ import {Step, Steps} from 'fumadocs-ui/components/steps';
 
 ### Trigger the signup from your backend
 
-Two calls with your secret key (`sk_*`): create the contact unsubscribed, then track the event that fires the confirmation workflow.
+One call with your secret key (`sk_*`) tracks the event that fires the confirmation workflow:
 
 ```bash
-curl https://next-api.useplunk.com/contacts \
-  -H "Authorization: Bearer sk_your_secret_key" \
-  -d '{ "email": "ada@example.com", "subscribed": false, "data": { "firstName": "Ada" } }'
-
 curl https://next-api.useplunk.com/v1/track \
   -H "Authorization: Bearer sk_your_secret_key" \
-  -d '{ "event": "signup.pending", "email": "ada@example.com", "subscribed": false }'
+  -d '{ "event": "signup.pending", "email": "ada@example.com", "data": { "firstName": "Ada" } }'
 ```
 
-Both calls pass `subscribed: false`. If you skip the first call and rely on `/v1/track` alone, tracking on an unknown email creates the contact — but defaults it to subscribed, which defeats the point.
+Leave `subscribed` out. In Plunk Lite, `/v1/track` then creates an unknown email as an unsubscribed contact and leaves an existing contact as it is. Passing `subscribed: false` would unsubscribe someone who is already subscribed.
 
 </Step>
 
