@@ -332,8 +332,11 @@ describe('ContactService - Duplicate Prevention & Data Merging', () => {
       await SuppressionService.record(appPrisma, projectId, ['kept@example.com'], 'BOUNCE', null);
       vi.spyOn(appPrisma.contact, 'findFirst').mockResolvedValueOnce(null);
 
-      // An event that says nothing about the subscription: the retry must not unsubscribe it
-      const contact = await ContactService.upsert(projectId, 'kept@example.com', {plan: 'pro'});
+      // An import that says nothing about the subscription, so subscribes by default: the retry must
+      // not unsubscribe it
+      const contact = await ContactService.upsert(projectId, 'kept@example.com', {plan: 'pro'}, undefined, true, {
+        consent: 'import',
+      });
 
       expect(contact.subscribed).toBe(true);
     });

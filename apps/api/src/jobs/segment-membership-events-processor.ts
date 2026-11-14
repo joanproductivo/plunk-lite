@@ -2,7 +2,7 @@
  * Segment Membership Events Worker
  * Fires the entry/exit events of segment membership changes made over HTTP (static, or Plunk Lite:
  * a dynamic segment recomputed from the dashboard), and (Plunk Lite) the subscription events of
- * bulk subscription changes, in one ordered queue
+ * bulk subscription changes and of /v1/send's sign-ups, in one ordered queue
  */
 
 import {segmentEventName} from '@plunk/shared';
@@ -30,13 +30,25 @@ import {isInfrastructureError} from '../utils/infrastructureErrors.js';
 export async function processSegmentMembershipEvents(job: Job<MembershipEventsJobData>): Promise<void> {
   const start = typeof job.progress === 'number' ? job.progress : 0;
 
-  // Plunk Lite: the events of a bulk subscription change, with the same progress
+  // Plunk Lite: the events of a subscription change, with the same progress
   if (job.data.type === 'contact-subscription') {
     const {projectId, eventName, contactIds} = job.data;
-    await EventService.trackEventsSequentially(projectId, eventName, contactIds.slice(start), undefined, {
-      onTracked: async done => job.updateProgress(start + done),
-      rethrow: isInfrastructureError,
-    });
+    const remaining = contactIds.slice(start);
+    // Only the contacts still as the event tells: one that unsubscribed while its contact.subscribed
+    // waited behind a long job is not told it subscribed after it left (and the other way round)
+    const current = await contactsSubscribedAs(projectId, remaining, eventName === 'contact.subscribed');
+    const positions = remaining.flatMap((id, index) => (current.has(id) ? [index] : []));
+    await EventService.trackEventsSequentially(
+      projectId,
+      eventName,
+      positions.map(index => remaining[index]!),
+      undefined,
+      {
+        // Progress counts the job's contacts, so a resumed run skips the ones it left out too
+        onTracked: async done => job.updateProgress(start + positions[done - 1]! + 1),
+        rethrow: isInfrastructureError,
+      },
+    );
     return;
   }
 
@@ -59,6 +71,21 @@ export async function processSegmentMembershipEvents(job: Job<MembershipEventsJo
     {segmentId, segmentName},
     {onTracked: async done => job.updateProgress(start + done), rethrow: isInfrastructureError},
   );
+}
+
+/** Plunk Lite: which of these contacts are (or are not, with `subscribed` false) subscribed now */
+async function contactsSubscribedAs(projectId: string, contactIds: string[], subscribed: boolean): Promise<Set<string>> {
+  const found = new Set<string>();
+  for (let i = 0; i < contactIds.length; i += 1000) {
+    const rows = await prisma.contact.findMany({
+      where: {projectId, id: {in: contactIds.slice(i, i + 1000)}, subscribed},
+      select: {id: true},
+    });
+    for (const row of rows) {
+      found.add(row.id);
+    }
+  }
+  return found;
 }
 
 /**

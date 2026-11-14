@@ -11,6 +11,7 @@ import {EmailService} from '../services/EmailService.js';
 import {EmailVerificationService} from '../services/EmailVerificationService.js';
 import {EventService} from '../services/EventService.js';
 import {OptInService} from '../services/OptInService.js';
+import {QueueService} from '../services/QueueService.js';
 import {SegmentMembershipService} from '../services/SegmentMembershipService.js';
 import {describeError, ErrorCode, HttpException, NotAllowed, NotFound, ValidationError} from '../exceptions/index.js';
 import {CatchAsync} from '../utils/asyncHandler.js';
@@ -84,22 +85,41 @@ export class Actions {
     // unless the call passes a value. A new contact whose address takes no email is refused (422) and
     // the event is not stored, so the form can ask for the address again. With the double opt-in on,
     // `subscribed: true` waits for the contact to confirm, and joins its segments then.
-    const {contact, optIn} = await ContactService.upsertWithOptIn(
+    const {contact, optIn, becameSubscribed} = await ContactService.upsertWithOptIn(
       auth.projectId,
       email,
       data as Record<string, unknown> | undefined,
       subscribed,
       false,
-      {verifySignup: true, key: auth.key === 'secret' ? 'secret' : 'public', segmentIds: segments.map(s => s.id)},
+      {
+        verifySignup: true,
+        key: auth.key === 'secret' ? 'secret' : 'public',
+        segmentIds: segments.map(s => s.id),
+        subscribedEvent: 'caller',
+      },
     );
 
-    // Plunk Lite: into its segments before the event, so the workflows the event starts see it there
-    const entries = optIn ? [] : await SegmentMembershipService.enterSegments(auth.projectId, segments, [contact.id]);
+    // Plunk Lite: into its segments before the events, so the workflows they start see it there
+    let entries: Awaited<ReturnType<typeof SegmentMembershipService.enterSegments>>;
+    try {
+      entries = optIn ? [] : await SegmentMembershipService.enterSegments(auth.projectId, segments, [contact.id]);
+    } catch (error) {
+      // The contact is subscribed already, and a retry would not subscribe it again: tell it now
+      if (becameSubscribed) {
+        await ContactService.trackSubscribed(auth.projectId, contact.id);
+      }
+      throw error;
+    }
 
     // Track the event with ALL data (persistent + non-persistent)
     // Non-persistent data flows to workflows via execution context
     let eventRecord;
     try {
+      // Plunk Lite: a sign-up's contact.subscribed before the event and the segments' entry events,
+      // in the order a confirmed double opt-in uses
+      if (becameSubscribed) {
+        await ContactService.trackSubscribed(auth.projectId, contact.id);
+      }
       eventRecord = await EventService.trackEvent(
         auth.projectId,
         event,
@@ -332,6 +352,24 @@ export class Actions {
     const failed: {email: string; code: string; message: string; suggestedEmail?: string}[] = [];
     // Plunk Lite: the contacts of the emails created, which join the request's segments
     const sentContactIds: string[] = [];
+    // Plunk Lite: the contacts this send subscribed. Their contact.subscribed is queued once, after
+    // they join the segments and before the segments' entry events, the order /v1/track fires them in
+    const subscribedContactIds: string[] = [];
+    let subscribedQueued = false;
+    const queueSubscribedEvents = async () => {
+      if (subscribedQueued || subscribedContactIds.length === 0) {
+        return;
+      }
+      subscribedQueued = true;
+      await QueueService.queueWithoutWaiting(
+        QueueService.queueContactSubscriptionEvents({
+          projectId: auth.projectId,
+          eventName: 'contact.subscribed',
+          contactIds: subscribedContactIds,
+        }),
+        'contact.subscribed events of /v1/send',
+      );
+    };
     let firstClientError: unknown;
     let firstServerError: unknown;
 
@@ -353,15 +391,20 @@ export class Actions {
         // New contacts default to unsubscribed unless explicitly opted in
         // Existing contacts preserve their subscription state unless explicitly changed
         // Plunk Lite: a new recipient whose address takes no email fails with 422 INVALID_EMAIL
-        // With the double opt-in on, a sign-up waits for confirmation and joins the segments then
-        const {contact, optIn} = await ContactService.upsertWithOptIn(
+        // With the double opt-in on, a sign-up waits for confirmation and joins the segments then.
+        // A send has up to 50 recipients, so their contact.subscribed is queued rather than running
+        // each one's workflows inside the request
+        const {contact, optIn, becameSubscribed} = await ContactService.upsertWithOptIn(
           auth.projectId,
           recipient.email,
           recipientData,
           subscribed,
           false,
-          {verifySignup: true, key: 'secret', segmentIds: segments.map(s => s.id)},
+          {verifySignup: true, key: 'secret', segmentIds: segments.map(s => s.id), subscribedEvent: 'caller'},
         );
+        if (becameSubscribed) {
+          subscribedContactIds.push(contact.id);
+        }
 
         // Get merged data including non-persistent fields for template rendering
         const mergedData = ContactService.getMergedData(contact, data as Record<string, unknown> | undefined);
@@ -447,6 +490,8 @@ export class Actions {
     // Nothing sent: the same answer as one recipient would give. An unexpected error wins over a
     // client error, so the idempotency key stays claimed when an email may already be queued.
     if (emailResults.length === 0 && (firstServerError || firstClientError)) {
+      // A contact subscribed before its email failed is subscribed all the same
+      await queueSubscribedEvents();
       throw firstServerError ?? firstClientError;
     }
     // A 207 does not carry an unexpected error to the error handler, so it is logged here
@@ -465,12 +510,14 @@ export class Actions {
     if (segments.length > 0 && sentContactIds.length > 0) {
       try {
         const entries = await SegmentMembershipService.enterSegments(auth.projectId, segments, sentContactIds);
+        await queueSubscribedEvents();
         await SegmentMembershipService.fireEntryEvents(auth.projectId, entries);
       } catch (error) {
         segmentsError = 'The emails were queued, but adding their contacts to some of the segments failed';
         logger.error('Could not add the recipients of /v1/send to its segments', error, {}, res);
       }
     }
+    await queueSubscribedEvents();
 
     // Plunk Lite: a partial send is 207, with the recipients that failed; still 2xx, so its
     // idempotency key stays claimed and a blind retry cannot send the others twice

@@ -412,17 +412,10 @@ export class Webhooks {
                 continue;
               }
 
-              // Find or create a contact for the sender in this project. Plunk Lite: an email in is not
-              // a sign-up -- an existing contact keeps its subscription, and with the double opt-in on
-              // a new one is created unsubscribed
-              const contact = await ContactService.upsert(
-                domainRecord.projectId,
-                senderEmail,
-                undefined, // No additional data
-                true, // New senders subscribe by default; an existing contact never does (see consent)
-                true,
-                {consent: 'none'},
-              );
+              // Find or create a contact for the sender in this project. Plunk Lite: writing in is not
+              // asking for the newsletter, so a new sender is created unsubscribed and an existing
+              // contact keeps its subscription
+              const contact = await ContactService.upsert(domainRecord.projectId, senderEmail);
 
               // Create an Email record for tracking with parsed content
               const inboundEmail = await prisma.email.create({

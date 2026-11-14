@@ -116,8 +116,11 @@ describe('Contact Import - Subscription Status Preservation', () => {
     it('should create new contact as subscribed when CSV has no subscribed column', async () => {
       const newEmail = 'new-import-default@example.com';
 
-      // Simulate import without subscribed column (undefined)
-      const contact = await ContactService.upsert(projectId, newEmail, {firstName: 'New'}, undefined);
+      // Simulate import without subscribed column (undefined): an import subscribes new contacts by
+      // default, and says so (Plunk Lite: the service itself subscribes no one unless told)
+      const contact = await ContactService.upsert(projectId, newEmail, {firstName: 'New'}, undefined, true, {
+        consent: 'import',
+      });
 
       // New contacts should default to subscribed=true
       expect(contact.subscribed).toBe(true);

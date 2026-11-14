@@ -163,5 +163,17 @@ describe('processSegmentMembershipEvents', () => {
 
       expect(await events('contact.subscribed')).toEqual([ids[2]]);
     });
+
+    it('leaves out a contact that unsubscribed while the event waited, keeping progress in the job', async () => {
+      const ids = (await factories.createContacts(projectId, 3)).map(c => c.id);
+      await prisma.contact.update({where: {id: ids[1]}, data: {subscribed: false}});
+      const job = subscriptionJob(ids);
+
+      await processSegmentMembershipEvents(job);
+
+      expect(await events('contact.subscribed')).toEqual([ids[0], ids[2]].sort());
+      // The progress after the third contact is 3, the one left out counted as done
+      expect(job.updateProgress).toHaveBeenLastCalledWith(3);
+    });
   });
 });

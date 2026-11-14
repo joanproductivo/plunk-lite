@@ -520,18 +520,6 @@ describe('OptInService', () => {
       expect(await prisma.email.count({where: {projectId}})).toBe(0);
     });
 
-    it('never subscribes an existing contact for an inbound email, opt-in or not', async () => {
-      await prisma.plunkLiteOptInSettings.update({where: {projectId}, data: {enabled: false}});
-      const unsubscribed = await factories.createContact({projectId, subscribed: false});
-
-      expect((await upsert(unsubscribed.email, true, {consent: 'none'})).contact.subscribed).toBe(false);
-      expect((await upsert('new@plunk.test', true, {consent: 'none'})).contact.subscribed).toBe(true);
-
-      await prisma.plunkLiteOptInSettings.update({where: {projectId}, data: {enabled: true}});
-      expect((await upsert('other@plunk.test', true, {consent: 'none'})).contact.subscribed).toBe(false);
-      expect(await prisma.email.count({where: {projectId}})).toBe(0);
-    });
-
     it('subscribes as always with the opt-in off', async () => {
       await prisma.plunkLiteOptInSettings.update({where: {projectId}, data: {enabled: false}});
       const unsubscribed = await factories.createContact({projectId, subscribed: false});

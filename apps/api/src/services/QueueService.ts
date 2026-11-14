@@ -337,7 +337,7 @@ export const snoozeSweepQueue = new Queue<SnoozeSweepJobData>('snooze-sweep', {
 /**
  * Segment entry/exit events fired outside the request that changed the membership (static, or
  * Plunk Lite: a dynamic segment recomputed from the dashboard), and (Plunk Lite) the subscription
- * events of bulk subscription changes.
+ * events of bulk subscription changes and of /v1/send's sign-ups.
  * Retries are safe: the worker records how far it got and resumes from there.
  */
 export const segmentMembershipEventsQueue = new Queue<MembershipEventsJobData>('segment-membership-events', {
@@ -851,8 +851,8 @@ export class QueueService {
 
   /**
    * Plunk Lite: queue the contact.subscribed / contact.unsubscribed events of a bulk subscription
-   * change, in the same ordered queue, so they run with progress and retries instead of in a loop
-   * nobody waits for
+   * change, or of /v1/send's sign-ups, in the same ordered queue, so they run with progress and
+   * retries instead of in a loop nobody waits for, or inside the request
    */
   public static async queueContactSubscriptionEvents(
     data: Omit<ContactSubscriptionEventsJobData, 'type'>,

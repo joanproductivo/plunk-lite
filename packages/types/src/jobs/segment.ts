@@ -22,7 +22,7 @@ export interface SegmentMembershipEventsJobData {
 
 /**
  * Job data for the contact.subscribed / contact.unsubscribed events of a bulk subscription change
- * (Plunk Lite), fired in the same ordered queue as segment membership events
+ * or of /v1/send's sign-ups (Plunk Lite), fired in the same ordered queue as segment membership events
  * Used by: segmentMembershipEventsQueue worker
  */
 export interface ContactSubscriptionEventsJobData {
