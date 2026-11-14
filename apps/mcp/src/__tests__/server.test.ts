@@ -441,6 +441,31 @@ describe('tool behaviour', () => {
     await close();
   });
 
+  it('passes subscribed to /v1/track when it is given', async () => {
+    const bodies: unknown[] = [];
+
+    mockApi((_url, init) => {
+      bodies.push(JSON.parse(init!.body as string));
+      return json({success: true, data: {contact: 'contact-1'}});
+    });
+
+    const {client, close} = await connect(baseConfig);
+
+    for (const subscribed of [true, false]) {
+      await client.callTool({
+        name: 'plunk_track_event',
+        arguments: {event: 'user.signup', email: 'ada@example.com', subscribed},
+      });
+    }
+
+    expect(bodies).toEqual([
+      {event: 'user.signup', email: 'ada@example.com', subscribed: true},
+      {event: 'user.signup', email: 'ada@example.com', subscribed: false},
+    ]);
+
+    await close();
+  });
+
   it('creates or updates a contact without touching its subscription unless told', async () => {
     const bodies: unknown[] = [];
 

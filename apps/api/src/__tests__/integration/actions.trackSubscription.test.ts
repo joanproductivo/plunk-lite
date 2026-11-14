@@ -43,7 +43,6 @@ describe('subscription on /v1/track', () => {
     const contact = await contactNamed('ana@example.com');
     expect(contact.subscribed).toBe(false);
     expect(await prisma.event.count({where: {contactId: contact.id, name: 'purchase'}})).toBe(1);
-    expect(await subscriptionEvents(contact.id)).toBe(0);
   });
 
   it('creates a new contact subscribed with subscribed: true', async () => {

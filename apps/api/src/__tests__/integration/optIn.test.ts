@@ -119,6 +119,15 @@ describe('double opt-in', () => {
       expect(await prisma.plunkLiteOptInRequest.count()).toBe(0);
       expect(await members()).toBe(1);
     });
+
+    it('with the public key and without subscribed, asks for nothing either', async () => {
+      const outcome = await track(project.public, {event: 'purchase', email: 'ana@plunk.test'});
+
+      expect(outcome.status).toBe(200);
+      expect(outcome.body!.data).not.toHaveProperty('optIn');
+      expect((await contactNamed('ana@plunk.test'))!.subscribed).toBe(false);
+      expect(await prisma.email.count({where: {projectId: project.id}})).toBe(0);
+    });
   });
 
   describe('/v1/send', () => {
