@@ -20,8 +20,9 @@ The email goes to each contact in their language: their `locale` field, else the
 
 | Way in | With the double opt-in on |
 | --- | --- |
-| `POST /v1/track` with the secret key, creating a contact or with `subscribed: true` | Waits, and the confirmation email goes out |
-| `POST /v1/track` with the public key | No email: the contact stays as it was (a new one unsubscribed) |
+| `POST /v1/track` with the secret key and `subscribed: true` | Waits, and the confirmation email goes out |
+| `POST /v1/track` with the public key and `subscribed: true` | No email: the contact stays as it was (a new one unsubscribed) |
+| `POST /v1/track` without `subscribed` | Never subscribes: a new contact is created unsubscribed, and no email goes out |
 | `POST /contacts` with an API key | Waits, and the confirmation email goes out |
 | `POST /v1/send` with `subscribed: true` | Waits, and the confirmation email goes out besides the email sent. A marketing template is refused with `422 OPT_IN_NEEDS_TRANSACTIONAL`, before anything is written |
 | The public subscribe page, without a link from an email the contact received | Only for a contact already waiting to confirm: the confirmation email goes out again and the page asks them to check their inbox. Anyone else is refused with `409` `CONFIRMATION_NEEDS_EMAIL`: the page needs only the contact's id, which the public key hands out |
@@ -35,7 +36,7 @@ Sign up from your server with the secret key: anyone can read a public key in a 
 
 `/v1/track` answers `data.pendingConfirmation: true` when the sign-up waits, and `data.optIn` says what became of the email: `sent`, `throttled` (one went out a moment ago, or the contact's limits are spent), `capped` (the project's limits), `failed` (it could not be queued; the next sign-up tries again) or `held` (no email for this key). `POST /contacts` answers the same in `_meta`.
 
-The `segments` of `/v1/track` and `/v1/send` are joined when the contact confirms, not before, so the workflows that start on their entry events run once the contact can receive them. The event of `/v1/track` is recorded at once: workflows that start on it run for a contact still waiting, and their marketing emails are skipped. Start welcome emails on `contact.subscribed` or on the segment's entry instead.
+The `segments` of a sign-up that waits (`/v1/track` or `/v1/send` with `subscribed: true`) are joined when the contact confirms, not before, so the workflows that start on their entry events run once the contact can receive them. A call without `subscribed: true` asks for no confirmation, and its contact joins them at once. The event of `/v1/track` is recorded at once: workflows that start on it run for a contact still waiting, and their marketing emails are skipped. Start welcome emails on `contact.subscribed` or on the segment's entry instead.
 
 ## The confirmation
 

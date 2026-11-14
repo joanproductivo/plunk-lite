@@ -1066,7 +1066,7 @@
                   },
                   "subscribed": {
                     "type": "boolean",
-                    "description": "Subscription state to apply to the contact. **New** contacts default to subscribed (`true`). **Existing** contacts keep their current state unless you pass an explicit value here. Pass `false` to track an event without resubscribing an unsubscribed contact. With the [double opt-in](/concepts/double-opt-in) on (Plunk Lite), a sign-up (a new contact, or `true` on an unsubscribed one) waits for the contact to confirm instead: see `pendingConfirmation` in the response."
+                    "description": "`true` subscribes the contact and `false` unsubscribes it. Leave it out to keep the current state: a **new** contact is then created unsubscribed (Plunk Lite; Plunk subscribes it), and an **existing** one keeps its state. With the [double opt-in](/concepts/double-opt-in) on (Plunk Lite), `true` on a new or unsubscribed contact waits for the contact to confirm instead: see `pendingConfirmation` in the response."
                   },
                   "data": {
                     "type": "object",
