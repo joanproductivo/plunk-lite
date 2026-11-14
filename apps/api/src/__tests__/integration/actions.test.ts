@@ -979,14 +979,14 @@ describe('Actions API Integration Tests', () => {
         expect(updatedContact?.subscribed).toBe(false);
       });
 
-      it('should create new contacts as subscribed when subscribed is undefined', async () => {
+      it('should create new contacts as subscribed when subscribed=true is provided', async () => {
         const newEmail = 'new-track-contact@example.com';
 
-        // Track event for new contact without specifying subscribed
+        // Track event for a new contact with subscribed=true
         const {ContactService} = await import('../../services/ContactService.js');
         const contact = await ContactService.upsert(projectId, newEmail, {event: 'test'}, true);
 
-        // Event tracking should create contacts as subscribed by default
+        // An explicit subscribed=true creates the contact subscribed
         expect(contact.subscribed).toBe(true);
       });
 

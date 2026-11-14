@@ -34,7 +34,8 @@ export class Actions {
    * Request body:
    * - event: string (required) - Event name
    * - email: string (required) - Contact email
-   * - subscribed: boolean (optional) - Contact subscription status (only updates if explicitly specified)
+   * - subscribed: boolean (optional) - true subscribes the contact and false unsubscribes it; without it
+   *   nothing changes, and a new contact is created unsubscribed (Plunk Lite)
    * - data: object (optional) - Event and contact data
    *   - Simple values are saved to contact (persistent)
    *   - {value: any, persistent: false} are only available to workflows (non-persistent)
@@ -78,17 +79,17 @@ export class Actions {
 
     // Create or update contact with persistent data only
     // ContactService.upsert will filter out non-persistent fields
-    // Event tracking should subscribe new contacts by default (subscribed=true in ContactService)
-    // but preserve existing subscription state for existing contacts
-    // Plunk Lite: a new contact whose address takes no email is refused (422) and the event is not
-    // stored, so the form can ask for the address again. With the double opt-in on, a sign-up waits
-    // for the contact to confirm, and joins its segments then.
+    // Plunk Lite: tracking an event subscribes no one unless the call says so. A new contact is created
+    // unsubscribed unless `subscribed: true`, as /v1/send does, and an existing one keeps its state
+    // unless the call passes a value. A new contact whose address takes no email is refused (422) and
+    // the event is not stored, so the form can ask for the address again. With the double opt-in on,
+    // `subscribed: true` waits for the contact to confirm, and joins its segments then.
     const {contact, optIn} = await ContactService.upsertWithOptIn(
       auth.projectId,
       email,
       data as Record<string, unknown> | undefined,
       subscribed,
-      true,
+      false,
       {verifySignup: true, key: auth.key === 'secret' ? 'secret' : 'public', segmentIds: segments.map(s => s.id)},
     );
 
