@@ -1,5 +1,5 @@
 import {CampaignAudienceType, TemplateType, TrackingMode, WorkflowStepType, WorkflowTriggerType} from '@plunk/db';
-import type {FilterCondition, FilterGroup, OptInTexts} from '@plunk/types';
+import type {FilterCondition, FilterGroup, OptInTexts, RequestedSegment} from '@plunk/types';
 import {CONTACT_SUBSCRIPTION_STATUSES, SNOOZE_DURATIONS} from '@plunk/types';
 import {z} from 'zod';
 
@@ -596,8 +596,29 @@ export const CampaignSchemas = {
   }),
 } as const;
 
-/** Plunk Lite: the static segments a /v1 request adds its contacts to, by id; none when empty */
-const requestSegments = z.array(uuid).max(REQUEST_SEGMENTS_MAX).optional();
+/** Plunk Lite: a `segments` field or entry that names none: `null` or a blank string, as from an empty form field */
+const isEmptySegmentEntry = (entry: unknown) => entry === null || (typeof entry === 'string' && entry.trim() === '');
+
+/**
+ * Plunk Lite: the static segments a /v1 request adds its contacts to, by id, each with its place in
+ * the request so an error names the entry sent. `null`, a blank string and empty entries name none;
+ * any other entry must be a UUID. Up to REQUEST_SEGMENTS_MAX entries, empty ones included.
+ */
+const requestSegments = z.preprocess(
+  value =>
+    Array.isArray(value)
+      ? value.map(entry => (isEmptySegmentEntry(entry) ? null : entry))
+      : isEmptySegmentEntry(value)
+        ? undefined
+        : value,
+  z
+    .array(uuid.nullable())
+    .max(REQUEST_SEGMENTS_MAX)
+    .optional()
+    .transform((entries): RequestedSegment[] =>
+      (entries ?? []).flatMap((id, index) => (id === null ? [] : [{id, index}])),
+    ),
+);
 
 export const ActionSchemas = {
   track: z.object({
@@ -611,7 +632,7 @@ export const ActionSchemas = {
     email,
     subscribed: z.boolean().optional(),
     data: boundedJson(TRACK_DATA_MAX_BYTES, TRACK_DATA_MAX_DEPTH).optional(),
-    /** Plunk Lite: static segments to add the contact to, by id (secret key only) */
+    /** Plunk Lite: static segments to add the contact to, by id (naming one needs the secret key) */
     segments: requestSegments,
   }),
   send: z

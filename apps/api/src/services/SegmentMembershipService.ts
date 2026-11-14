@@ -1,6 +1,6 @@
 import {Prisma, type Segment} from '@plunk/db';
 import {segmentEventName} from '@plunk/shared';
-import type {BulkSegmentOperation, SegmentEventKind} from '@plunk/types';
+import type {BulkSegmentOperation, RequestedSegment, SegmentEventKind} from '@plunk/types';
 import signale from 'signale';
 
 import {prisma} from '../database/prisma.js';
@@ -82,12 +82,12 @@ export class SegmentMembershipService {
   }
 
   /**
-   * Plunk Lite: the static segments of the project with these ids, for a request that adds
-   * contacts to them (/v1/track, /v1/send). All of them, in one query, or a 422 naming each id that
-   * is not one by its place in `ids`, so the request writes nothing.
+   * Plunk Lite: the static segments of the project a request names, for one that adds contacts to
+   * them (/v1/track, /v1/send). All of them, in one query, or a 422 naming each id that is not one
+   * by its place in the request's `segments` -- empty entries included -- so it writes nothing.
    */
-  public static async resolveStaticSegments(projectId: string, ids: string[]): Promise<Segment[]> {
-    const unique = [...new Set(ids)];
+  public static async resolveStaticSegments(projectId: string, requested: RequestedSegment[]): Promise<Segment[]> {
+    const unique = [...new Set(requested.map(({id}) => id))];
     if (unique.length === 0) {
       return [];
     }
@@ -95,7 +95,7 @@ export class SegmentMembershipService {
     const found = new Map(
       (await prisma.segment.findMany({where: {projectId, id: {in: unique}}})).map(segment => [segment.id, segment]),
     );
-    const errors = ids.flatMap((id, index) => {
+    const errors = requested.flatMap(({id, index}) => {
       const segment = found.get(id);
       if (!segment) {
         return [{field: `segments.${index}`, message: 'Segment not found', code: 'segment_not_found', received: id}];

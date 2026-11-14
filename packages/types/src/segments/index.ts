@@ -76,6 +76,12 @@ export interface SegmentRef {
   name: string;
 }
 
+/** Plunk Lite: a segment a /v1 request names, with its place in the request's `segments` */
+export interface RequestedSegment {
+  id: string;
+  index: number;
+}
+
 /** A contact's segments, each list sorted by name. Returned by `GET /contacts/:id/segments`. */
 export interface ContactSegments {
   /** Static segments the contact is currently a member of */
