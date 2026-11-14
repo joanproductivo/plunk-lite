@@ -91,8 +91,9 @@ describe('sign-ups and contact.subscribed', () => {
       }
     });
 
-    it('still subscribes the contact when contact.subscribed cannot be tracked', async () => {
+    it('still subscribes the contact, and queues contact.subscribed, when it cannot be tracked', async () => {
       const tracked = vi.spyOn(EventService, 'trackEvent').mockRejectedValueOnce(new Error('database down'));
+      const queued = vi.spyOn(QueueService, 'queueContactSubscriptionEvents').mockResolvedValue({} as never);
 
       const outcome = await create(apiKey(), {email: 'ana@example.com', subscribed: true});
 
@@ -100,6 +101,11 @@ describe('sign-ups and contact.subscribed', () => {
       const contact = await contactNamed('ana@example.com');
       expect(contact.subscribed).toBe(true);
       expect(tracked).toHaveBeenCalledWith(project.id, 'contact.subscribed', contact.id);
+      expect(queued).toHaveBeenCalledWith({
+        projectId: project.id,
+        eventName: 'contact.subscribed',
+        contactIds: [contact.id],
+      });
     });
 
     it('refuses a subscribed that is not true or false, here and on PATCH', async () => {
@@ -109,6 +115,16 @@ describe('sign-ups and contact.subscribed', () => {
       expect((await update(contact.id, {subscribed: 'yes'})).status).toBe(400);
       expect(await prisma.contact.count({where: {projectId: project.id, email: 'ana@example.com'}})).toBe(0);
       expect((await prisma.contact.findUniqueOrThrow({where: {id: contact.id}})).subscribed).toBe(false);
+    });
+
+    it('reads a null subscribed as left out, here and on PATCH', async () => {
+      const subscribed = await factories.createContact({projectId: project.id, subscribed: true});
+
+      expect((await create(apiKey(), {email: 'ana@example.com', subscribed: null})).status).toBe(201);
+      expect((await contactNamed('ana@example.com')).subscribed).toBe(false);
+      expect((await update(subscribed.id, {subscribed: null, data: {plan: 'pro'}})).status).toBe(200);
+      const now = await prisma.contact.findUniqueOrThrow({where: {id: subscribed.id}});
+      expect(now).toMatchObject({subscribed: true, data: {plan: 'pro'}});
     });
   });
 
@@ -163,8 +179,9 @@ describe('sign-ups and contact.subscribed', () => {
       expect(await subscribedEvents(contact.id)).toBe(0);
     });
 
-    it('still subscribes, and tells the workflows, when contact.subscribed cannot be tracked', async () => {
+    it('still subscribes, records the event, and queues contact.subscribed when it cannot be tracked', async () => {
       const tracked = vi.spyOn(EventService, 'trackEvent').mockRejectedValueOnce(new Error('database down'));
+      const queued = vi.spyOn(QueueService, 'queueContactSubscriptionEvents').mockResolvedValue({} as never);
 
       const outcome = await track(project.secret, {event: 'signup', email: 'ana@example.com', subscribed: true});
 
@@ -172,6 +189,11 @@ describe('sign-ups and contact.subscribed', () => {
       const contact = await contactNamed('ana@example.com');
       expect(contact.subscribed).toBe(true);
       expect(tracked).toHaveBeenCalledWith(project.id, 'contact.subscribed', contact.id);
+      expect(queued).toHaveBeenCalledWith({
+        projectId: project.id,
+        eventName: 'contact.subscribed',
+        contactIds: [contact.id],
+      });
       expect(await prisma.event.count({where: {contactId: contact.id, name: 'signup'}})).toBe(1);
     });
 
@@ -234,6 +256,29 @@ describe('sign-ups and contact.subscribed', () => {
         eventName: 'contact.subscribed',
         contactIds: [contact.id],
       });
+    });
+
+    it('queues it after the recipients join the segments and before their entry events', async () => {
+      await factories.createDomain({projectId: project.id, domain: 'plunk.test'});
+      const segment = await prisma.segment.create({
+        data: {projectId: project.id, name: 'Newsletter', type: 'STATIC', trackMembership: true},
+      });
+      const entered = vi.spyOn(SegmentMembershipService, 'enterSegments');
+      const entries = vi.spyOn(SegmentMembershipService, 'fireEntryEvents');
+      const queued = vi.spyOn(QueueService, 'queueContactSubscriptionEvents').mockResolvedValue({} as never);
+
+      const outcome = await send({
+        to: 'ana@plunk.test',
+        subject: 'Hi',
+        body: '<p>Hi</p>',
+        from: 'hello@plunk.test',
+        subscribed: true,
+        segments: [segment.id],
+      });
+
+      expect(outcome.status).toBe(200);
+      expect(entered.mock.invocationCallOrder[0]).toBeLessThan(queued.mock.invocationCallOrder[0]!);
+      expect(queued.mock.invocationCallOrder[0]).toBeLessThan(entries.mock.invocationCallOrder[0]!);
     });
 
     it('queues it for an existing recipient it subscribes too', async () => {

@@ -54,11 +54,12 @@ function readSourceEmailId(req: Request): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
-const SUBSCRIBED_NOT_BOOLEAN = '`subscribed` must be true or false';
+const SUBSCRIBED_NOT_BOOLEAN = '`subscribed` must be true, false or left out';
 
 /**
- * Plunk Lite: whether a body's `subscribed` is a decision or absent. Anything else -- `"false"`,
- * `1` -- is refused, since a truthy string would read as a sign-up.
+ * Plunk Lite: whether a body's `subscribed` is a decision or absent (`null`, an empty field from an
+ * integration, is read as absent first). Anything else -- `"false"`, `1` -- is refused, since a
+ * truthy string would read as a sign-up.
  */
 function isSubscriptionChoice(value: unknown): value is boolean | undefined {
   return value === undefined || typeof value === 'boolean';
@@ -253,7 +254,9 @@ export class Contacts {
   @CatchAsync
   public async create(req: Request, res: Response, _next: NextFunction) {
     const auth = res.locals.auth;
-    const {email, data, subscribed} = req.body;
+    const {email, data} = req.body;
+    // Plunk Lite: `null` leaves the subscription as it is, like leaving the field out
+    const subscribed = req.body.subscribed ?? undefined;
 
     if (!email) {
       return res.status(400).json({error: 'Email is required'});
@@ -300,7 +303,9 @@ export class Contacts {
   public async update(req: Request, res: Response, _next: NextFunction) {
     const auth = res.locals.auth;
     const contactId = req.params.id;
-    const {email, data, subscribed} = req.body;
+    const {email, data} = req.body;
+    // Plunk Lite: `null` leaves the subscription as it is, like leaving the field out
+    const subscribed = req.body.subscribed ?? undefined;
 
     if (!contactId) {
       return res.status(400).json({error: 'Contact ID is required'});

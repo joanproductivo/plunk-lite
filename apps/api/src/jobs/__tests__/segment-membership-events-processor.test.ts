@@ -126,11 +126,15 @@ describe('processSegmentMembershipEvents', () => {
   });
 
   describe('the events of a bulk subscription change (Plunk Lite)', () => {
-    function subscriptionJob(contactIds: string[], progress = 0) {
+    function subscriptionJob(
+      contactIds: string[],
+      progress = 0,
+      eventName: ContactSubscriptionEventsJobData['eventName'] = 'contact.subscribed',
+    ) {
       const job = createMockJob<ContactSubscriptionEventsJobData>({
         type: 'contact-subscription',
         projectId,
-        eventName: 'contact.subscribed',
+        eventName,
         contactIds,
       });
       return Object.assign(job, {progress});
@@ -174,6 +178,27 @@ describe('processSegmentMembershipEvents', () => {
       expect(await events('contact.subscribed')).toEqual([ids[0], ids[2]].sort());
       // The progress after the third contact is 3, the one left out counted as done
       expect(job.updateProgress).toHaveBeenLastCalledWith(3);
+    });
+
+    it('on a resumed run, leaves out a contact no longer subscribed and keeps counting the job', async () => {
+      const ids = (await factories.createContacts(projectId, 4)).map(c => c.id);
+      await prisma.contact.update({where: {id: ids[2]}, data: {subscribed: false}});
+      const job = subscriptionJob(ids, 1);
+
+      await processSegmentMembershipEvents(job);
+
+      expect(await events('contact.subscribed')).toEqual([ids[1], ids[3]].sort());
+      expect(job.updateProgress).toHaveBeenLastCalledWith(4);
+    });
+
+    it('tells contact.unsubscribed only to the contacts still unsubscribed', async () => {
+      const ids = (await factories.createContacts(projectId, 2, {subscribed: false})).map(c => c.id);
+      // Subscribed again while the bulk unsubscribe's events waited
+      await prisma.contact.update({where: {id: ids[0]}, data: {subscribed: true}});
+
+      await processSegmentMembershipEvents(subscriptionJob(ids, 0, 'contact.unsubscribed'));
+
+      expect(await events('contact.unsubscribed')).toEqual([ids[1]]);
     });
   });
 });

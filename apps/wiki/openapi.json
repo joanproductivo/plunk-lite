@@ -1467,7 +1467,7 @@
                   },
                   "subscribed": {
                     "type": "boolean",
-                    "description": "`true` subscribes the contact to marketing email and `false` unsubscribes it. Omitting it keeps an existing contact's state; a new contact is then created unsubscribed (Plunk Lite; Plunk creates it subscribed). With the [double opt-in](/concepts/double-opt-in) on, `true` from an API key sends a confirmation email and subscribes the contact when it confirms."
+                    "description": "`true` subscribes the contact to marketing email and `false` unsubscribes it. Omitting it keeps an existing contact's state; a new contact is then created unsubscribed (Plunk Lite; Plunk creates it subscribed). With the [double opt-in](/concepts/double-opt-in) on, `true` from an API key sends a confirmation email and subscribes the contact when it confirms. `null` is read as left out, and anything but `true`, `false` or `null` is refused with `400`."
                   },
                   "data": {
                     "type": "object",

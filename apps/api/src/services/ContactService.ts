@@ -631,15 +631,22 @@ export class ContactService {
 
   /**
    * Plunk Lite: fire `contact.subscribed` for a contact a write has just subscribed. A failure is
-   * logged, not thrown: the contact is written already, so a send must not fail for its event, and
-   * throwing would not help -- a retry finds the contact subscribed and fires nothing.
+   * not thrown: the contact is written already, so a send must not fail for its event, and throwing
+   * would not help -- a retry finds the contact subscribed and fires nothing. The event goes to the
+   * queue instead, whose worker retries while the database is out and fires it only if the contact
+   * is still subscribed. A failure after the event was recorded may tell the workflows twice, which
+   * they take better than never.
    */
   public static async trackSubscribed(projectId: string, contactId: string): Promise<void> {
     try {
       await EventService.trackEvent(projectId, 'contact.subscribed', contactId);
     } catch (error) {
       signale.error(
-        `[CONTACT] Could not track contact.subscribed for contact ${contactId}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        `[CONTACT] Could not track contact.subscribed for contact ${contactId}, queueing it: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+      await QueueService.queueWithoutWaiting(
+        QueueService.queueContactSubscriptionEvents({projectId, eventName: 'contact.subscribed', contactIds: [contactId]}),
+        `contact.subscribed of contact ${contactId}`,
       );
     }
   }
