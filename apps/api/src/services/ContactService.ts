@@ -44,11 +44,19 @@ interface UpsertOptions {
   verifySignup?: boolean;
   retried?: boolean;
   /** Plunk Lite: who stands behind a sign-up, for the double opt-in (see upsertWithOptIn) */
-  consent?: 'unconfirmed' | 'operator' | 'import' | 'none';
-  /** Plunk Lite: the key of the request; the public one sends no confirmation email */
+  consent?: 'unconfirmed' | 'operator' | 'import';
+  /**
+   * Plunk Lite: the key of the request; the public one sends no confirmation email, nor fires
+   * `contact.subscribed` for a contact it creates
+   */
   key?: OptInKey;
   /** Plunk Lite: static segments to join on confirming a sign-up */
   segmentIds?: string[];
+  /**
+   * Plunk Lite: `caller` leaves `contact.subscribed` to the caller, which fires it once the contact
+   * is in its segments (see upsertWithOptIn)
+   */
+  subscribedEvent?: 'caller';
 }
 
 export class ContactService {
@@ -455,14 +463,17 @@ export class ContactService {
    * `options.verifySignup` (Plunk Lite) refuses a new contact whose address takes no email (422).
    * With the double opt-in on (Plunk Lite), a sign-up waits for the contact to confirm: see
    * {@link upsertWithOptIn}.
+   * Plunk Lite: a new contact is created unsubscribed unless the call asks otherwise --
+   * `subscribed: true`, or `defaultSubscribed` (an import without a subscription column).
    */
   public static async upsert(
     projectId: string,
     email: string,
     data?: Record<string, unknown>,
     subscribed?: boolean,
-    defaultSubscribed: boolean = true,
-    options: UpsertOptions = {},
+    defaultSubscribed: boolean = false,
+    // Plunk Lite: without `subscribedEvent`, which leaves the event to a caller this does not answer
+    options: Omit<UpsertOptions, 'subscribedEvent'> = {},
   ): Promise<Contact> {
     return (await ContactService.upsertWithOptIn(projectId, email, data, subscribed, defaultSubscribed, options))
       .contact;
@@ -472,25 +483,28 @@ export class ContactService {
    * {@link upsert}, telling also what became of a sign-up under the double opt-in (Plunk Lite).
    *
    * `options.consent` says who stands behind a sign-up -- whatever would subscribe the contact,
-   * `subscribed: true` or a new contact subscribed by default:
+   * `subscribed: true` or an import's `defaultSubscribed`:
    * - `unconfirmed` (the default, so a new caller waits for confirmation): with the opt-in on, the
    *   contact stays as it was (a new one unsubscribed) and is emailed a link to confirm, unless
    *   `options.key` is the public one. `options.segmentIds` are joined on confirming.
    * - `operator`: the dashboard's own form; subscribed as always.
    * - `import`: with the opt-in on, a new contact is subscribed and an existing one stays as it was.
-   * - `none` (an inbound email): an existing contact is never subscribed by it, opt-in or not; a
-   *   new one, as an `import` would be with the opt-in off and unsubscribed with it on.
    *
    * `optIn` is set when the opt-in kept the contact from being subscribed.
+   *
+   * Plunk Lite: `contact.subscribed` fires whenever the write subscribes the contact, a new one
+   * included -- not for a new contact an import or the public key creates. With
+   * `options.subscribedEvent: 'caller'` it is left to the caller, which fires it once the contact
+   * is in its segments, and `becameSubscribed` says so.
    */
   public static async upsertWithOptIn(
     projectId: string,
     email: string,
     data?: Record<string, unknown>,
     subscribed?: boolean,
-    defaultSubscribed: boolean = true,
+    defaultSubscribed: boolean = false,
     options: UpsertOptions = {},
-  ): Promise<{contact: Contact; optIn?: OptInOutcome}> {
+  ): Promise<{contact: Contact; optIn?: OptInOutcome; becameSubscribed?: true}> {
     const normalizedEmail = ContactService.normalizeEmail(email);
     // What the caller asked for, before a suppression turns it down: a retry asks the same
     const requestedSubscribed = subscribed;
@@ -509,9 +523,9 @@ export class ContactService {
       await ContactService.requireValidSignup(normalizedEmail);
     }
 
-    // A suppressed address is never subscribed here. Most callers subscribe in passing -- an
-    // event, a send, an import, an inbound email -- and the contact simply stays unsubscribed;
-    // an explicit request (the dashboard's add-contact form) is refused instead.
+    // A suppressed address is never subscribed here. A sign-up that comes with something else -- an
+    // event, a send, an import -- simply leaves the contact unsubscribed; an explicit request (the
+    // dashboard's add-contact form) is refused instead.
     const subscribesNow = existing ? subscribed === true && !existing.subscribed : (subscribed ?? defaultSubscribed);
     if (subscribesNow && !(await SuppressionService.maySubscribe(projectId, normalizedEmail, options))) {
       subscribed = false;
@@ -522,9 +536,7 @@ export class ContactService {
     const consent = options.consent ?? 'unconfirmed';
     let optIn: 'request' | 'held' | undefined;
     if (subscribesNow && subscribed !== false && consent !== 'operator') {
-      if (consent === 'none' && existing) {
-        optIn = 'held';
-      } else if (await OptInService.isRequired(projectId)) {
+      if (await OptInService.isRequired(projectId)) {
         optIn = consent === 'unconfirmed' ? 'request' : consent === 'import' && !existing ? undefined : 'held';
       }
       if (optIn) {
@@ -535,6 +547,9 @@ export class ContactService {
     const mergedData = ContactService.mergeContactData(existing?.data ?? null, data ?? {});
 
     let contact: Contact;
+    // Plunk Lite: whether this write subscribes the contact, for `contact.subscribed` (fired below,
+    // unless the caller fires it)
+    let becameSubscribed = false;
     if (existing) {
       // Track subscription status change
       const isSubscriptionChanging = subscribed !== undefined && existing.subscribed !== subscribed;
@@ -559,7 +574,7 @@ export class ContactService {
         // Track subscription event if status changed
         if (isSubscriptionChanging) {
           if (subscribed && !wasSubscribed) {
-            await EventService.trackEvent(projectId, 'contact.subscribed', contact.id);
+            becameSubscribed = true;
           } else if (!subscribed && wasSubscribed) {
             await EventService.trackEvent(projectId, 'contact.unsubscribed', contact.id);
           }
@@ -597,12 +612,43 @@ export class ContactService {
           `Failed to create contact: ${error instanceof Error ? error.message : 'Unknown error'}`,
         );
       }
+      // Plunk Lite: a contact born subscribed signed up too, so the workflows on `contact.subscribed`
+      // start for it as for one that existed -- not for an import, which writes a whole list at
+      // once, nor for the public key, which anyone can read in a page
+      becameSubscribed = contact.subscribed && consent !== 'import' && options.key !== 'public';
     }
 
+    if (becameSubscribed && options.subscribedEvent !== 'caller') {
+      await ContactService.trackSubscribed(projectId, contact.id);
+    }
+
+    // A sign-up the opt-in holds back never subscribed the contact, so it has no event to tell
     if (optIn === 'request') {
       return {contact, optIn: await OptInService.request(contact, {segmentIds: options.segmentIds, key: options.key})};
     }
-    return {contact, ...(optIn ? {optIn} : {})};
+    return {contact, ...(optIn ? {optIn} : {}), ...(becameSubscribed ? {becameSubscribed: true as const} : {})};
+  }
+
+  /**
+   * Plunk Lite: fire `contact.subscribed` for a contact a write has just subscribed. A failure is
+   * not thrown: the contact is written already, so a send must not fail for its event, and throwing
+   * would not help -- a retry finds the contact subscribed and fires nothing. The event goes to the
+   * queue instead, whose worker retries while the database is out and fires it only if the contact
+   * is still subscribed. A failure after the event was recorded may tell the workflows twice, which
+   * they take better than never.
+   */
+  public static async trackSubscribed(projectId: string, contactId: string): Promise<void> {
+    try {
+      await EventService.trackEvent(projectId, 'contact.subscribed', contactId);
+    } catch (error) {
+      signale.error(
+        `[CONTACT] Could not track contact.subscribed for contact ${contactId}, queueing it: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      );
+      await QueueService.queueWithoutWaiting(
+        QueueService.queueContactSubscriptionEvents({projectId, eventName: 'contact.subscribed', contactIds: [contactId]}),
+        `contact.subscribed of contact ${contactId}`,
+      );
+    }
   }
 
   /** Plunk Lite: refuse, with the reasons and any likely correction, an address that takes no email */

@@ -725,7 +725,7 @@
                   },
                   "subscribed": {
                     "type": "boolean",
-                    "description": "Subscription state to apply to the recipient. For **new** contacts, defaults to `false` on `/v1/send`. For **existing** contacts, omitting this preserves their current state — pass `true` or `false` to explicitly change it. A change emits `contact.subscribed` or `contact.unsubscribed`. With the [double opt-in](/concepts/double-opt-in) on (Plunk Lite), `true` on a recipient not yet subscribed sends a confirmation email and subscribes them when they confirm; a marketing template is then refused with `422` `OPT_IN_NEEDS_TRANSACTIONAL`, before anything is written."
+                    "description": "Subscription state to apply to the recipient. For **new** contacts, defaults to `false` on `/v1/send`. For **existing** contacts, omitting this preserves their current state — pass `true` or `false` to explicitly change it. A change emits `contact.subscribed` or `contact.unsubscribed`. In Plunk Lite a contact created subscribed emits `contact.subscribed` too, and on `/v1/send` that event is queued after the send, for new and existing recipients alike. With the [double opt-in](/concepts/double-opt-in) on (Plunk Lite), `true` on a recipient not yet subscribed sends a confirmation email and subscribes them when they confirm; a marketing template is then refused with `422` `OPT_IN_NEEDS_TRANSACTIONAL`, before anything is written."
                   },
                   "data": {
                     "type": "object",
@@ -1467,7 +1467,7 @@
                   },
                   "subscribed": {
                     "type": "boolean",
-                    "default": true
+                    "description": "`true` subscribes the contact to marketing email and `false` unsubscribes it. Omitting it keeps an existing contact's state; a new contact is then created unsubscribed (Plunk Lite; Plunk creates it subscribed). With the [double opt-in](/concepts/double-opt-in) on, `true` from an API key sends a confirmation email and subscribes the contact when it confirms. `null` is read as left out, and anything but `true`, `false` or `null` is refused with `400`."
                   },
                   "data": {
                     "type": "object",

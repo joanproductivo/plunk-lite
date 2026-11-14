@@ -11,7 +11,7 @@ Plunk can receive emails sent to any address at your verified domain, store them
 When someone emails an address at your verified domain, Plunk:
 
 1. Parses the message and stores it as an inbound `Email` record visible in your project's Activity feed.
-2. Creates the sender as a contact in your project (or updates them if they already exist), subscribed by default.
+2. Creates the sender as a contact in your project, unsubscribed (Plunk Lite; writing in is not asking for your newsletter). A sender who is already a contact keeps their subscription.
 3. Tracks an `email.received` event on the sender contact, which any workflow can listen to.
 
 The HTML body is sanitized before being stored — scripts, iframes, event handlers, and `javascript:` URIs are stripped. Plain text is preserved as-is when no HTML part is available.
@@ -121,7 +121,7 @@ A minimal auto-reply on `support@yourdomain.com`:
    - **Subject**: `Re: {{event.subject}}`
    - **Body**: `Thanks for your message. We've received your email and will respond within one business day.`
 
-Use a `TRANSACTIONAL` template for the auto-reply so it bypasses subscription checks (the sender is auto-subscribed but you don't want to fail to reply if they later unsubscribe).
+Use a `TRANSACTIONAL` template for the auto-reply: a new sender is created unsubscribed, and a marketing email is never sent to an unsubscribed contact, so a marketing auto-reply would not go out.
 
 ### Routing by recipient
 
@@ -179,7 +179,7 @@ You can set a per-project inbound cap under **Billing → Limits**. Once the cap
 
 - **Treat the body as untrusted user input.** Plunk sanitizes HTML to prevent the obvious script-injection paths, but the message can still contain phishing links, social-engineering content, and unicode lookalikes. Don't render the body verbatim in any UI you control without re-escaping it for that context.
 - **Authentication verdicts are advisory.** Plunk records SPF / DKIM / DMARC results on the event but does not enforce them. Build your own policy: dropping unauthenticated mail at the workflow's first `CONDITION` step is a sensible default for sensitive inboxes (billing, account changes).
-- **New senders are auto-subscribed.** A sender who is not a contact yet enters your audience subscribed (unsubscribed with the [double opt-in](/concepts/double-opt-in) on). An existing contact keeps its subscription: an email in never resubscribes someone who left (Plunk Lite). If you don't want new senders subscribed, add an `UPDATE_CONTACT` step at the end of the inbound workflow to set `subscribed: false`.
+- **New senders are not subscribed.** A sender who is not a contact yet enters your audience unsubscribed, and an existing contact keeps its subscription: an email in never signs anyone up, nor resubscribes someone who left (Plunk Lite). Your workflows reach them with transactional emails; marketing waits until they sign up.
 - **Reply-loop risk.** If your auto-reply sends back to a domain you also receive on (or to a list address), you can create an infinite loop. Add a `CONDITION` that drops messages where `event.from` matches your own domain.
 
 ## Limitations

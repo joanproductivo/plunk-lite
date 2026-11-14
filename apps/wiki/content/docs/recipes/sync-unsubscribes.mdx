@@ -61,7 +61,7 @@ Enable the workflow.
 
 ## Mirroring resubscribes
 
-Build a second workflow with the same shape, triggered by `contact.subscribed`. Keep it separate from the unsubscribe flow — two short workflows are easier to monitor than one branched one.
+Build a second workflow with the same shape, triggered by `contact.subscribed`. Keep it separate from the unsubscribe flow — two short workflows are easier to monitor than one branched one. In Plunk Lite it also fires for a contact created subscribed (a new sign-up through the API with the secret key, or through the dashboard), so your system hears of new subscribers too, not only of returning ones.
 
 ## The reverse direction
 

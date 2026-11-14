@@ -404,6 +404,26 @@ describe('Webhooks - SES event notifications', () => {
       expect(await prisma.email.count({where: {projectId, sourceType: 'INBOUND'}})).toBe(1);
     });
 
+    // Plunk Lite: writing in is not asking for the newsletter
+    it('creates a new sender unsubscribed, and leaves an existing contact as it was', async () => {
+      await factories.createDomain({projectId, domain: 'acme-inbound.test'});
+      const subscribed = await factories.createContact({projectId, subscribed: true});
+      const unsubscribed = await factories.createContact({projectId, subscribed: false});
+
+      for (const [index, sender] of ['customer@example.test', subscribed.email, unsubscribed.email].entries()) {
+        const received = inbound(sender, 'hello@acme-inbound.test');
+        received.mail.messageId = `inbound-new-sender-${index}`;
+        expect((await post(received)).status).toBe(200);
+      }
+
+      const created = await prisma.contact.findFirstOrThrow({where: {projectId, email: 'customer@example.test'}});
+      expect(created.subscribed).toBe(false);
+      expect((await prisma.contact.findUniqueOrThrow({where: {id: subscribed.id}})).subscribed).toBe(true);
+      expect((await prisma.contact.findUniqueOrThrow({where: {id: unsubscribed.id}})).subscribed).toBe(false);
+      expect(await prisma.event.count({where: {projectId, name: 'contact.subscribed'}})).toBe(0);
+      expect(await prisma.email.count({where: {projectId, sourceType: 'INBOUND'}})).toBe(3);
+    });
+
     it('does not confirm a subscription to a topic in another account', async () => {
       const confirm = vi.fn().mockResolvedValue({ok: true});
       vi.stubGlobal('fetch', confirm);

@@ -105,7 +105,10 @@ describe('suppressed addresses stay unsubscribed', () => {
       const contact = await suppressedContact();
       await prisma.contact.delete({where: {id: contact.id}});
 
-      const created = await ContactService.upsert(projectId, contact.email);
+      // Plunk Lite: as an import would, which subscribes new contacts by default
+      const created = await ContactService.upsert(projectId, contact.email, undefined, undefined, true, {
+        consent: 'import',
+      });
 
       expect(created.subscribed).toBe(false);
     });

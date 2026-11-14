@@ -86,8 +86,11 @@ describe('double opt-in', () => {
 
       expect(outcome.status).toBe(200);
       expect(outcome.body!.data).toMatchObject({pendingConfirmation: true, optIn: 'sent'});
-      expect((await contactNamed('ana@plunk.test'))!.subscribed).toBe(false);
+      const pending = (await contactNamed('ana@plunk.test'))!;
+      expect(pending.subscribed).toBe(false);
       expect(await members()).toBe(0);
+      const subscribedEvents = () => prisma.event.count({where: {contactId: pending.id, name: 'contact.subscribed'}});
+      expect(await subscribedEvents()).toBe(0);
       const sent = await prisma.email.findFirstOrThrow({where: {projectId: project.id}});
       expect(sent.subject).toBe(
         `Confirma tu suscripción a ${(await prisma.project.findUniqueOrThrow({where: {id: project.id}})).name}`,
@@ -96,6 +99,7 @@ describe('double opt-in', () => {
       expect((await confirm(await tokenOf('ana@plunk.test'))).body).toEqual({status: 'confirmed'});
       expect((await contactNamed('ana@plunk.test'))!.subscribed).toBe(true);
       expect(await members()).toBe(1);
+      expect(await subscribedEvents()).toBe(1);
     });
 
     it('with the public key, sends nothing and leaves the contact unsubscribed', async () => {
@@ -173,10 +177,24 @@ describe('double opt-in', () => {
       expect(outcome.body).toMatchObject({subscribed: false, _meta: {pendingConfirmation: true, optIn: 'sent'}});
     });
 
-    it("subscribes from the dashboard's form", async () => {
-      const outcome = await create({type: 'jwt', userId, projectId: project.id}, {email: 'ana@plunk.test'});
+    it("subscribes from the dashboard's form, and tells the workflows", async () => {
+      const outcome = await create(
+        {type: 'jwt', userId, projectId: project.id},
+        {email: 'ana@plunk.test', subscribed: true},
+      );
       expect(outcome.body).toMatchObject({subscribed: true});
       expect((outcome.body!._meta as Record<string, unknown>).pendingConfirmation).toBeUndefined();
+      const contact = await contactNamed('ana@plunk.test');
+      expect(await prisma.event.count({where: {contactId: contact!.id, name: 'contact.subscribed'}})).toBe(1);
+    });
+
+    it('sends no confirmation to a contact an API key creates without subscribed', async () => {
+      const outcome = await create({...apiKey, projectId: project.id}, {email: 'ana@plunk.test'});
+
+      expect(outcome.body).toMatchObject({subscribed: false});
+      expect(outcome.body!._meta).not.toHaveProperty('pendingConfirmation');
+      expect(await prisma.email.count({where: {projectId: project.id}})).toBe(0);
+      expect(await prisma.plunkLiteOptInRequest.count()).toBe(0);
     });
   });
 

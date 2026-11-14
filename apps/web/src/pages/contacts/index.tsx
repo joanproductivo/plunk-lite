@@ -868,22 +868,32 @@ interface CreateContactDialogProps {
 
 function CreateContactDialog({open, onOpenChange, onSuccess}: CreateContactDialogProps) {
   const [email, setEmail] = useState('');
-  const [subscribed, setSubscribed] = useState(true);
+  // Plunk Lite: off until someone switches it on, so no contact is subscribed without a decision;
+  // off again whenever the dialog closes, saved or cancelled
+  const [subscribed, setSubscribed] = useState(false);
   const [customData, setCustomData] = useState<Record<string, string | number | boolean> | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setSubscribed(false);
+    }
+  }, [open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
 
     try {
+      // Plunk Lite: switched on subscribes; off is no decision, so an existing contact keeps its state
+      // (a new one is created unsubscribed) -- unsubscribing someone is done on their page
       const response = await network.fetch<
         {
           _meta?: {isNew: boolean; isUpdate: boolean};
           email: string;
         },
         typeof ContactSchemas.create
-      >('POST', '/contacts', {email, subscribed, data: customData});
+      >('POST', '/contacts', {email, ...(subscribed ? {subscribed: true} : {}), data: customData});
 
       // Show appropriate message based on whether contact was new or updated
       if (response._meta?.isUpdate) {
@@ -893,7 +903,6 @@ function CreateContactDialog({open, onOpenChange, onSuccess}: CreateContactDialo
       }
 
       setEmail('');
-      setSubscribed(true);
       setCustomData(null);
       onOpenChange(false);
       onSuccess();
@@ -934,7 +943,7 @@ function CreateContactDialog({open, onOpenChange, onSuccess}: CreateContactDialo
                 Subscribed
               </Label>
               <p className="text-xs text-neutral-500 mt-0.5">
-                Receive emails from campaigns and workflows.
+                Receive emails from campaigns and workflows. Off leaves an existing contact as it is.
               </p>
             </div>
             <Switch id="subscribed" checked={subscribed} onCheckedChange={setSubscribed} />

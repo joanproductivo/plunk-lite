@@ -23,12 +23,13 @@ The email goes to each contact in their language: their `locale` field, else the
 | `POST /v1/track` with the secret key and `subscribed: true` | Waits, and the confirmation email goes out |
 | `POST /v1/track` with the public key and `subscribed: true` | No email: the contact stays as it was (a new one unsubscribed) |
 | `POST /v1/track` without `subscribed` | Never subscribes: a new contact is created unsubscribed, and no email goes out |
-| `POST /contacts` with an API key | Waits, and the confirmation email goes out |
+| `POST /contacts` with an API key and `subscribed: true` | Waits, and the confirmation email goes out |
+| `POST /contacts` with an API key, without `subscribed` | Never subscribes: a new contact is created unsubscribed, an existing one keeps its state, and no email goes out |
 | `POST /v1/send` with `subscribed: true` | Waits, and the confirmation email goes out besides the email sent. A marketing template is refused with `422 OPT_IN_NEEDS_TRANSACTIONAL`, before anything is written |
 | The public subscribe page, without a link from an email the contact received | Only for a contact already waiting to confirm: the confirmation email goes out again and the page asks them to check their inbox. Anyone else is refused with `409` `CONFIRMATION_NEEDS_EMAIL`: the page needs only the contact's id, which the public key hands out |
 | A workflow's **Update contact** step that subscribes | Only for a contact already waiting to confirm: the confirmation email goes out again. Anyone else is left unsubscribed, and the step's result says `optIn: "held"` |
 | A CSV import | New contacts are subscribed; unsubscribed ones stay unsubscribed, with a warning. No emails |
-| An inbound email | Never subscribes an existing contact (opt-in or not); a new one is created unsubscribed |
+| An inbound email | Never subscribes, opt-in or not: a new sender is created unsubscribed and an existing contact keeps its state |
 | The dashboard's **Add contact**, a contact's switch, `PATCH /contacts/:id`, bulk subscribe, the end of a snooze | Subscribe at once: they are your own decision, or bring back a consent already given |
 | Adding to a segment (`createMissing`) | Never subscribes: new contacts are created unsubscribed |
 

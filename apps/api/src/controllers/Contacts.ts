@@ -54,6 +54,17 @@ function readSourceEmailId(req: Request): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
+const SUBSCRIBED_NOT_BOOLEAN = '`subscribed` must be true, false or left out';
+
+/**
+ * Plunk Lite: whether a body's `subscribed` is a decision or absent (`null`, an empty field from an
+ * integration, is read as absent first). Anything else -- `"false"`, `1` -- is refused, since a
+ * truthy string would read as a sign-up.
+ */
+function isSubscriptionChoice(value: unknown): value is boolean | undefined {
+  return value === undefined || typeof value === 'boolean';
+}
+
 @Controller('contacts')
 export class Contacts {
   /**
@@ -235,16 +246,23 @@ export class Contacts {
    * `_meta.suppressed` says why. A new contact whose address takes no email is refused (422,
    * Plunk Lite). With the double opt-in on (Plunk Lite), a sign-up from an API key waits for the
    * contact to confirm, and `_meta.pendingConfirmation` says so; the dashboard's form subscribes.
+   * Plunk Lite: only `subscribed: true` subscribes. Without it a new contact is created unsubscribed
+   * and an existing one keeps its state, so saving fields on a contact is never a sign-up.
    */
   @Post('')
   @Middleware([requireAuth, requireEmailVerified, contactWriteRateLimit])
   @CatchAsync
   public async create(req: Request, res: Response, _next: NextFunction) {
     const auth = res.locals.auth;
-    const {email, data, subscribed} = req.body;
+    const {email, data} = req.body;
+    // Plunk Lite: `null` leaves the subscription as it is, like leaving the field out
+    const subscribed = req.body.subscribed ?? undefined;
 
     if (!email) {
       return res.status(400).json({error: 'Email is required'});
+    }
+    if (!isSubscriptionChoice(subscribed)) {
+      return res.status(400).json({error: SUBSCRIBED_NOT_BOOLEAN});
     }
 
     // Check if contact exists before upserting
@@ -254,7 +272,7 @@ export class Contacts {
     // From the dashboard's form, subscribing a suppressed address is refused with the reason;
     // from an API key (integrations, the MCP) the contact stays unsubscribed, and the response
     // says why
-    const {contact, optIn} = await ContactService.upsertWithOptIn(auth.projectId!, email, data, subscribed, true, {
+    const {contact, optIn} = await ContactService.upsertWithOptIn(auth.projectId!, email, data, subscribed, false, {
       explicit: auth.type === 'jwt' && subscribed !== false,
       verifySignup: true,
       consent: auth.type === 'jwt' ? 'operator' : 'unconfirmed',
@@ -285,10 +303,15 @@ export class Contacts {
   public async update(req: Request, res: Response, _next: NextFunction) {
     const auth = res.locals.auth;
     const contactId = req.params.id;
-    const {email, data, subscribed} = req.body;
+    const {email, data} = req.body;
+    // Plunk Lite: `null` leaves the subscription as it is, like leaving the field out
+    const subscribed = req.body.subscribed ?? undefined;
 
     if (!contactId) {
       return res.status(400).json({error: 'Contact ID is required'});
+    }
+    if (!isSubscriptionChoice(subscribed)) {
+      return res.status(400).json({error: SUBSCRIBED_NOT_BOOLEAN});
     }
 
     const contact = await ContactService.update(auth.projectId!, contactId, {email, data, subscribed});
