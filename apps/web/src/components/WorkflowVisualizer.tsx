@@ -18,6 +18,7 @@ import type {WorkflowStep} from '@plunk/db';
 import {AlertTriangle, Clock, GitBranch, Hourglass, Link, LogOut, Mail, Maximize2, Minimize2, Timer, UserCog, Webhook} from 'lucide-react';
 import {useEffect, useMemo, useState} from 'react';
 import dagre from 'dagre';
+import {delayLabel} from './workflow-steps/shared';
 
 interface WorkflowVisualizerProps {
   steps: (WorkflowStep & {
@@ -186,13 +187,12 @@ function CustomNode({
             </div>
           </div>
         )}
-        {data.type === 'DELAY' && data.config?.amount && (
+        {/* Plunk Lite: a duration or a date (delayLabel) */}
+        {data.type === 'DELAY' && delayLabel(data.config) && (
           <div className="mt-3 pt-3 border-t border-neutral-100">
             <div className="flex items-center gap-2 text-xs text-neutral-600">
-              <Timer className="h-3 w-3" />
-              <span>
-                Wait {data.config.amount} {data.config.unit}
-              </span>
+              <Timer className="h-3 w-3 shrink-0" />
+              <span>{delayLabel(data.config)}</span>
             </div>
           </div>
         )}

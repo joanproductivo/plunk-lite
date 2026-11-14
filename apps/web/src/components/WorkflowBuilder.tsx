@@ -17,7 +17,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type {WorkflowStep} from '@plunk/db';
-import type {ParkedGroup} from '@plunk/types';
+import type {ParkedGroup, StepWait} from '@plunk/types';
 import {
   Clock,
   ExternalLink,
@@ -41,6 +41,7 @@ import {useCallback, useEffect, useMemo, useState} from 'react';
 import dagre from 'dagre';
 import {WorkflowEdge} from './WorkflowEdge';
 import {useSegmentName} from './segments/SegmentPicker';
+import {delayLabel} from './workflow-steps/shared';
 import {network} from '../lib/network';
 import {toast} from 'sonner';
 import {Button, ConfirmDialog, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle} from '@plunk/ui';
@@ -65,6 +66,8 @@ interface WorkflowBuilderProps {
   })[];
   /** Plunk Lite: contacts waiting at the end of the workflow, where they wait */
   parked?: ParkedGroup[];
+  /** Plunk Lite: contacts waiting at each step now */
+  stepWaits?: StepWait[];
   onUpdate: () => void;
 }
 
@@ -298,6 +301,7 @@ function CustomNode({
     onDelete?: () => void;
     template?: {id: string; name: string};
     config?: any;
+    waiting?: number;
     /**
      * One entry per outgoing slot. Condition steps get a handle per branch so a
      * dragged connection carries the branch it started from; everything else has
@@ -423,14 +427,19 @@ function CustomNode({
             </a>
           </div>
         )}
-        {data.type === 'DELAY' && data.config?.amount && (
+        {/* Plunk Lite: a duration or a date (delayLabel) */}
+        {data.type === 'DELAY' && delayLabel(data.config) && (
           <div className="mt-3 pt-3 border-t border-neutral-100">
             <div className="flex items-center gap-2 text-xs text-neutral-600">
-              <Timer className="h-3 w-3" />
-              <span>
-                Wait {data.config.amount} {data.config.unit}
-              </span>
+              <Timer className="h-3 w-3 shrink-0" />
+              <span>{delayLabel(data.config)}</span>
             </div>
+            {/* Plunk Lite: the contacts waiting here now */}
+            {data.waiting ? (
+              <div className="mt-1 text-xs text-neutral-500">
+                {data.waiting} {data.waiting === 1 ? 'contact' : 'contacts'} waiting
+              </div>
+            ) : null}
           </div>
         )}
         {data.type === 'CONDITION' && data.config && (
@@ -535,7 +544,7 @@ const STEP_TYPE_OPTIONS = [
   {value: 'EXIT', label: 'Exit', icon: LogOut, color: STEP_TYPE_COLORS.EXIT},
 ];
 
-export function WorkflowBuilder({workflowId, steps, parked = [], onUpdate}: WorkflowBuilderProps) {
+export function WorkflowBuilder({workflowId, steps, parked = [], stepWaits = [], onUpdate}: WorkflowBuilderProps) {
   const [pickerContext, setPickerContext] = useState<PickerContext | null>(null);
   const [transitionToDisconnect, setTransitionToDisconnect] = useState<string | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -620,6 +629,7 @@ export function WorkflowBuilder({workflowId, steps, parked = [], onUpdate}: Work
           sourceHandles,
           template: step.template,
           config: step.config,
+          waiting: stepWaits.find(wait => wait.stepId === step.id)?.waiting,
           onEdit: () => handleEditStep(step.id),
           onDelete: () => handleDeleteStepClick(step.id),
         },
@@ -670,7 +680,7 @@ export function WorkflowBuilder({workflowId, steps, parked = [], onUpdate}: Work
     });
 
     return nodes;
-  }, [steps, handleEditStep, handleDeleteStepClick]);
+  }, [steps, stepWaits, handleEditStep, handleDeleteStepClick]);
 
   // Convert transitions to React Flow edges
   const rawEdges: Edge[] = useMemo(() => {

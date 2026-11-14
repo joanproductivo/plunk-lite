@@ -25,7 +25,7 @@ import {
   Switch,
 } from '@plunk/ui';
 import type {Workflow, WorkflowStep, WorkflowTransition} from '@plunk/db';
-import type {ParkedGroup} from '@plunk/types';
+import type {ParkedGroup, StepWait} from '@plunk/types';
 import {DashboardLayout} from '../../components/DashboardLayout';
 import {network} from '../../lib/network';
 import {
@@ -49,7 +49,7 @@ import {WorkflowExecutionsTable, type PaginatedExecutions} from '../../component
 import {EditStepDialog} from '../../components/workflow-steps';
 import {hasUpdateContactAction} from '../../components/workflow-steps/shared';
 import {ReactFlowProvider} from '@xyflow/react';
-import {WorkflowSchemas} from '@plunk/shared';
+import {WorkflowSchemas, WorkflowStepConfigSchemas} from '@plunk/shared';
 
 interface WorkflowWithDetails extends Workflow {
   steps: (WorkflowStep & {
@@ -63,6 +63,8 @@ interface WorkflowWithDetails extends Workflow {
   parked?: ParkedGroup[];
   /** Plunk Lite: how fast they continue */
   continuePace?: {perRound: number; everyMinutes: number};
+  /** Plunk Lite: who waits at each step now, and when each wait until a date ends */
+  stepWaits?: StepWait[];
 }
 
 export default function WorkflowEditorPage() {
@@ -131,8 +133,9 @@ export default function WorkflowEditorPage() {
           break;
 
         case 'DELAY':
-          if (!config.amount || !config.unit) {
-            errors.push(`"${step.name}" step is missing delay configuration (amount or unit)`);
+          // Plunk Lite: or a wait until a date
+          if (!WorkflowStepConfigSchemas.delay.safeParse(config).success) {
+            errors.push(`"${step.name}" step has a missing or invalid delay (a duration, or a date and time zone)`);
           }
           break;
 
@@ -313,6 +316,10 @@ export default function WorkflowEditorPage() {
         const step = workflow.steps.find(s => s.id === stepId);
         if (step) {
           setDialog({type: 'editStep', step});
+          // Plunk Lite: who waits at a delay now, for the warning before changing its date
+          if (step.type === 'DELAY') {
+            void mutate();
+          }
         }
       }
     };
@@ -327,7 +334,7 @@ export default function WorkflowEditorPage() {
       window.removeEventListener('workflow-edit-step', handleEditStepEvent);
       window.removeEventListener('workflow-open-settings', handleOpenSettingsEvent);
     };
-  }, [workflow]);
+  }, [workflow, mutate]);
 
   if (!workflow) {
     return (
@@ -419,7 +426,8 @@ export default function WorkflowEditorPage() {
               </p>
               <ul className="list-disc list-inside space-y-1 mt-2">
                 <li>Delete steps or transitions</li>
-                <li>Change step settings, such as templates or conditions</li>
+                {/* Plunk Lite: a wait until a date can take a new date */}
+                <li>Change step settings, such as templates or conditions (except the date of a wait until a date)</li>
                 <li>Change the trigger</li>
               </ul>
               <p className="mt-2">
@@ -521,6 +529,7 @@ export default function WorkflowEditorPage() {
                   workflowId={id as string}
                   steps={workflow.steps}
                   parked={workflow.parked ?? []}
+                  stepWaits={workflow.stepWaits ?? []}
                   onUpdate={() => mutate()}
                 />
               </ReactFlowProvider>
@@ -557,6 +566,7 @@ export default function WorkflowEditorPage() {
               open={true}
               onOpenChange={open => !open && setDialog({type: 'none'})}
               onSuccess={() => mutate()}
+              waiting={workflow.stepWaits?.find(wait => wait.stepId === dialog.step.id)?.waiting ?? 0}
             />
           )}
 
