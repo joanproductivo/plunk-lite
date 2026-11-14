@@ -310,13 +310,17 @@ describe('segments on /v1/track and /v1/send', () => {
       expect(await prisma.email.count({where: {projectId: project.id}})).toBe(0);
     });
 
-    it('sends without adding anyone to a segment when none is named', async () => {
+    it.each([
+      ['a list of an empty string', ['']],
+      ['null', null],
+      ['an empty string', ''],
+    ])('sends without adding anyone to a segment when given %s', async (_label, segments) => {
       const outcome = await send({
         to: 'a@example.com',
         subject: 'Hi',
         body: '<p>Hi</p>',
         from: 'hello@example.com',
-        segments: [''],
+        segments,
       });
 
       expect(outcome.status).toBe(200);

@@ -102,6 +102,26 @@ describe('double opt-in', () => {
       expect(await subscribedEvents()).toBe(1);
     });
 
+    // Plunk Lite: a form's empty segment entries are left out of what the sign-up joins on confirming
+    it('keeps only the segments named for the confirmation, without the empty entries', async () => {
+      const outcome = await track(project.secret, {
+        event: 'signup',
+        email: 'ana@plunk.test',
+        subscribed: true,
+        segments: ['', segmentId, null],
+      });
+
+      expect(outcome.status).toBe(200);
+      expect(outcome.body!.data).toMatchObject({pendingConfirmation: true, optIn: 'sent'});
+      const contact = (await contactNamed('ana@plunk.test'))!;
+      const request = await prisma.plunkLiteOptInRequest.findUniqueOrThrow({where: {contactId: contact.id}});
+      expect(request.segmentIds).toEqual([segmentId]);
+      expect(await members()).toBe(0);
+
+      expect((await confirm(await tokenOf('ana@plunk.test'))).body).toEqual({status: 'confirmed'});
+      expect(await members()).toBe(1);
+    });
+
     it('with the public key, sends nothing and leaves the contact unsubscribed', async () => {
       const outcome = await track(project.public, {event: 'signup', email: 'ana@plunk.test', subscribed: true});
 
