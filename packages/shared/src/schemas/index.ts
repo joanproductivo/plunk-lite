@@ -189,7 +189,8 @@ const bulkAction = z.discriminatedUnion('mode', [
 export const ContactSchemas = {
   create: z.object({
     email,
-    subscribed: z.boolean().default(true),
+    // Plunk Lite: no default -- only `true` subscribes, and without it a new contact is unsubscribed
+    subscribed: z.boolean().optional(),
     data: jsonSchema.optional(),
   }),
   bulkAction,

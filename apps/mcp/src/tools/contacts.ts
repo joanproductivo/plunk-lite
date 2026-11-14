@@ -256,7 +256,7 @@ export function registerContactTools(ctx: ToolContext, client: PlunkClient): voi
         '**Purpose:** Re-subscribe an existing contact to marketing email, by email address or ID.',
         '',
         '**NOT for:** Adding someone who is not in the project yet — this fails if the contact does not',
-        'exist. Use `plunk_create_contact` to add a new contact, which subscribes them at the same time.',
+        'exist. Use `plunk_create_contact` with `subscribed: true` to add and subscribe a new contact.',
         'That distinction is deliberate: opting someone in should not silently create a record for an',
         'address nobody has consented on.',
         '',
@@ -306,6 +306,9 @@ export function registerContactTools(ctx: ToolContext, client: PlunkClient): voi
         '',
         '**Returns:** The created or updated contact, including its ID.',
         '',
+        '**To sign someone up, pass `subscribed: true`.** Without it a new contact is created unsubscribed',
+        '(Plunk Lite; Plunk itself creates it subscribed) and an existing one keeps its state.',
+        '',
         'A new contact whose domain does not exist, takes no email, is disposable or is a slip of a large',
         "provider's (gmial.com) is refused with INVALID_EMAIL and the likely correction, and is not created.",
         '',
@@ -321,7 +324,8 @@ export function registerContactTools(ctx: ToolContext, client: PlunkClient): voi
         '- Adding someone to the list',
         '- Setting custom fields on a contact you may not have seen before',
         '',
-        '**Key trigger phrases:** "add a contact", "add them to my list", "sign them up"',
+        '**Key trigger phrases:** "add a contact", "add them to my list", "sign them up". Pass `subscribed: true` only',
+        'when the person asked for marketing email; if that is unclear, ask the user before subscribing them.',
       ].join('\n'),
       inputSchema: z.object({
         email: z.string().describe('Email address of the contact.'),
@@ -330,9 +334,9 @@ export function registerContactTools(ctx: ToolContext, client: PlunkClient): voi
           .boolean()
           .optional()
           .describe(
-            '`true` subscribes the contact to marketing email and `false` unsubscribes it. Leave it out to keep ' +
-              "an existing contact's state; a new contact is then created subscribed (with the double opt-in on, " +
-              'it is sent a confirmation instead).',
+            '`true` subscribes the contact to marketing email (with the double opt-in on, it is sent a ' +
+              'confirmation instead) and `false` unsubscribes it. Leave it out to keep an existing contact as it ' +
+              'is; a new contact is then created unsubscribed (Plunk Lite).',
           ),
         data: z
           .record(z.string(), z.unknown())

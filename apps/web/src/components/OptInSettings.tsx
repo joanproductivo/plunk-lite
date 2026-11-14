@@ -60,8 +60,8 @@ export function OptInSettings(props: OptInSettingsProps) {
       <CardHeader>
         <CardTitle>Double opt-in</CardTitle>
         <CardDescription>
-          Sign-ups wait until the contact clicks the link in a confirmation email: an event, a contact created with an
-          API key, a transactional send with <code>subscribed: true</code>, the public subscribe page and a
+          Sign-ups wait until the contact clicks the link in a confirmation email: an event, a contact created or updated
+          with an API key, or a transactional send, with <code>subscribed: true</code>; the public subscribe page; and a
           workflow&apos;s subscribe step. Until then they show as “Pending confirmation”, receive no campaigns or
           marketing emails, and start no <code>contact.subscribed</code> workflows.
         </CardDescription>
