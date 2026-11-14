@@ -1207,3 +1207,120 @@ describe('workflow lifecycle', () => {
     ).toMatchObject({error: expect.stringContaining('used twice')});
   });
 });
+
+/** Plunk Lite: a DELAY that waits until a date and time in a time zone */
+describe('waits until a date', () => {
+  it('adds one, named after its date, and keeps the name in step with a new date', async () => {
+    const api = fakeApi();
+    const {client, close} = await connect();
+
+    const added = await call(client, 'plunk_add_workflow_step', {
+      workflowId: 'wf-1',
+      type: 'DELAY',
+      until: '2026-11-22T14:00',
+      timezone: 'Europe/Madrid',
+    });
+    expect(added.isError).toBeFalsy();
+    const step = api.stepNamed('Wait until 2026-11-22 14:00 Europe/Madrid (late: skip)');
+    expect(step.config).toEqual({until: '2026-11-22T14:00', timezone: 'Europe/Madrid'});
+
+    await call(client, 'plunk_update_workflow_step', {
+      workflowId: 'wf-1',
+      stepId: 's1',
+      until: '2026-11-29T18:30',
+      ifLate: 'continue',
+    });
+    expect(api.stepNamed('Wait until 2026-11-29 18:30 Europe/Madrid (late: continue)').config).toEqual({
+      until: '2026-11-29T18:30',
+      timezone: 'Europe/Madrid',
+      ifLate: 'continue',
+    });
+
+    await close();
+  });
+
+  it('turns a wait for a duration into one until a date, and back, dropping the other settings', async () => {
+    const api = fakeApi();
+    const {client, close} = await connect();
+
+    await call(client, 'plunk_add_workflow_step', {
+      workflowId: 'wf-1',
+      type: 'DELAY',
+      name: 'Wait',
+      amount: 1,
+      unit: 'days',
+    });
+    await call(client, 'plunk_update_workflow_step', {
+      workflowId: 'wf-1',
+      stepId: 's1',
+      until: '2026-11-22T14:00',
+      timezone: 'UTC',
+    });
+    expect(api.stepNamed('Wait').config).toEqual({until: '2026-11-22T14:00', timezone: 'UTC'});
+
+    await call(client, 'plunk_update_workflow_step', {workflowId: 'wf-1', stepId: 's1', amount: 2, unit: 'hours'});
+    expect(api.stepNamed('Wait').config).toEqual({amount: 2, unit: 'hours'});
+
+    await close();
+  });
+
+  it.each([
+    [{until: '2026-11-22T14:00', timezone: 'UTC', amount: 1, unit: 'days'}, 'not both'],
+    [{until: '2026-11-22T14:00'}, 'needs both `until` and `timezone`'],
+    [{until: '2026-02-31T10:00', timezone: 'UTC'}, 'not a real day'],
+    [{until: '22/11/2026 14:00', timezone: 'UTC'}, 'must look like'],
+    [{until: '2026-11-22T14:00', timezone: '+02:00'}, 'not an offset'],
+    [{until: '2026-11-22T14:00', timezone: 'Mars/Olympus'}, 'Unknown time zone'],
+  ])('refuses %o', async (params, message) => {
+    const api = fakeApi();
+    const {client, close} = await connect();
+
+    const result = await call(client, 'plunk_add_workflow_step', {workflowId: 'wf-1', type: 'DELAY', ...params});
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain(message);
+    expect(api.writes()).toHaveLength(0);
+
+    await close();
+  });
+
+  it('shows in the review when each ends, who waits, a date already past and a skip with no date after it', () => {
+    const review = reviewWorkflow({
+      id: 'wf-1',
+      stepWaits: [
+        {stepId: 'w1', waiting: 0, at: '2026-11-01T09:00:00.000Z', late: true},
+        {stepId: 'w2', waiting: 2, at: '2026-11-22T13:00:00.000Z', late: false},
+      ],
+      steps: [
+        {
+          id: 'trigger',
+          type: 'TRIGGER',
+          config: {eventName: 'x'},
+          outgoingTransitions: [{id: 't1', fromStepId: 'trigger', toStepId: 'w1'}],
+        },
+        {
+          id: 'w1',
+          type: 'DELAY',
+          config: {until: '2026-11-01T10:00', timezone: 'Europe/Madrid'},
+          outgoingTransitions: [{id: 't2', fromStepId: 'w1', toStepId: 'w2'}],
+        },
+        {
+          id: 'w2',
+          type: 'DELAY',
+          config: {until: '2026-11-22T14:00', timezone: 'Europe/Madrid'},
+          outgoingTransitions: [],
+        },
+      ],
+    });
+
+    const lines = review.outline.split('\n');
+    expect(lines[1]).toContain(
+      'wait until 2026-11-01 10:00 Europe/Madrid (late: skip) (ends 2026-11-01T09:00:00.000Z)',
+    );
+    expect(lines[2]).toContain('(ends 2026-11-22T13:00:00.000Z) — 2 waiting');
+    expect(review.issues.map((issue) => `${issue.severity}:${issue.code}:${issue.stepId}`)).toEqual([
+      'warning:date_passed:w1',
+      'warning:skips_to_end:w2',
+    ]);
+  });
+});

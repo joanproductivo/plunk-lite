@@ -36,6 +36,9 @@ export const CONDITION_OPERATORS = [
 
 export const DELAY_UNITS = ['minutes', 'hours', 'days'] as const;
 
+/** Plunk Lite: what a DELAY that waits until a date does with a contact who reaches it after the date */
+export const DATE_WAIT_IF_LATE = ['skip', 'continue'] as const;
+
 export const WEBHOOK_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 
 export const SUBSCRIPTION_ACTIONS = ['none', 'subscribe', 'unsubscribe'] as const;
@@ -86,6 +89,14 @@ export interface ParkedGroup {
   canContinue: boolean;
 }
 
+/** Plunk Lite: the contacts waiting at one step, and, for a wait until a date, when it ends */
+export interface StepWait {
+  stepId: string;
+  waiting: number;
+  at?: string;
+  late?: boolean;
+}
+
 export interface Workflow {
   id: string;
   name?: string;
@@ -97,6 +108,8 @@ export interface Workflow {
   parked?: ParkedGroup[];
   /** Plunk Lite: how fast they continue */
   continuePace?: {perRound: number; everyMinutes: number};
+  /** Plunk Lite: contacts waiting at each step, and when each wait until a date ends (`at`, ISO) */
+  stepWaits?: StepWait[];
   triggerConfig?: {eventName?: string} | null;
   steps?: WorkflowStep[];
 }
@@ -137,6 +150,33 @@ const segmentIds = z
   .max(MAX_SEGMENT_CHANGES)
   .refine(ids => new Set(ids).size === ids.length, {message: 'A segment is listed twice'});
 
+const WALL_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+
+/**
+ * Plunk Lite: what is wrong with the date and time zone of a wait until a date, if anything. The
+ * API converts the date (and refuses one more than two years ahead); this only checks it can be.
+ */
+function dateWaitParamsProblem(until: string, timezone: string): string | undefined {
+  const match = WALL_TIME.exec(until);
+  if (!match) {
+    return '`until` must look like 2026-11-22T14:00 (a date and time, without a time zone)';
+  }
+  const [year, month, day, hour, minute] = match.slice(1).map(Number) as [number, number, number, number, number];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (hour > 23 || minute > 59 || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return `${until} is not a real day and time`;
+  }
+  if (/^[+-]/.test(timezone.trim())) {
+    return '`timezone` must be a time zone name such as Europe/Madrid, not an offset';
+  }
+  try {
+    new Intl.DateTimeFormat('en-US', {timeZone: timezone});
+  } catch {
+    return `Unknown time zone "${timezone}"`;
+  }
+  return undefined;
+}
+
 const STEP_CONFIG_SCHEMAS: Record<BuildableStepType, z.ZodType> = {
   SEND_EMAIL: z.object({
     templateId: z.string().min(1),
@@ -147,9 +187,21 @@ const STEP_CONFIG_SCHEMAS: Record<BuildableStepType, z.ZodType> = {
       })
       .optional(),
   }),
-  DELAY: z
-    .object({amount: z.number().positive(), unit: z.enum(DELAY_UNITS)})
-    .refine((data) => data.amount <= MAX_DELAY[data.unit], {message: 'Delay cannot exceed 365 days'}),
+  // Plunk Lite: for a duration, or until a date and time in a time zone
+  DELAY: z.union([
+    z
+      .object({amount: z.number().positive(), unit: z.enum(DELAY_UNITS)})
+      .refine((data) => data.amount <= MAX_DELAY[data.unit], {message: 'Delay cannot exceed 365 days'}),
+    z
+      .object({until: z.string(), timezone: z.string(), ifLate: z.enum(DATE_WAIT_IF_LATE).optional()})
+      .strict()
+      .superRefine((data, ctx) => {
+        const problem = dateWaitParamsProblem(data.until, data.timezone);
+        if (problem) {
+          ctx.addIssue({code: z.ZodIssueCode.custom, message: problem});
+        }
+      }),
+  ]),
   WAIT_FOR_EVENT: z.object({
     scope: z.enum(['contact', 'execution']).optional(),
     eventName: z.string().min(1),
@@ -241,6 +293,9 @@ export interface StepParams {
   recipientEmail?: string;
   amount?: number;
   unit?: (typeof DELAY_UNITS)[number];
+  until?: string;
+  timezone?: string;
+  ifLate?: (typeof DATE_WAIT_IF_LATE)[number];
   eventName?: string;
   field?: string;
   operator?: (typeof CONDITION_OPERATORS)[number];
@@ -259,7 +314,7 @@ export interface StepParams {
 /** Arguments that belong to each step type, used to reject ones that would be silently ignored. */
 const PARAMS_BY_TYPE: Record<BuildableStepType, (keyof StepParams)[]> = {
   SEND_EMAIL: ['templateId', 'recipientEmail'],
-  DELAY: ['amount', 'unit'],
+  DELAY: ['amount', 'unit', 'until', 'timezone', 'ifLate'],
   WAIT_FOR_EVENT: ['eventName', 'amount', 'unit'],
   CONDITION: ['field', 'operator', 'value', 'branches'],
   UPDATE_CONTACT: ['updates', 'subscriptionAction', 'segments'],
@@ -375,6 +430,31 @@ export function buildStepConfig(
     }
 
     case 'DELAY': {
+      // Plunk Lite: a wait until a date. Passing one form drops the other's settings
+      const date = params.until !== undefined || params.timezone !== undefined || params.ifLate !== undefined;
+      const duration = params.amount !== undefined || params.unit !== undefined;
+      if (date && duration) {
+        return {
+          error: 'A DELAY waits for a duration (`amount` + `unit`) or until a date (`until` + `timezone`), not both.',
+        };
+      }
+      if (date || (!duration && 'until' in config)) {
+        delete config.amount;
+        delete config.unit;
+        for (const key of ['until', 'timezone', 'ifLate'] as const) {
+          if (params[key] !== undefined) {
+            config[key] = params[key];
+          }
+        }
+        if (typeof config.until !== 'string' || typeof config.timezone !== 'string') {
+          return {error: 'A DELAY until a date needs both `until` and `timezone`.'};
+        }
+        return finish(type, config);
+      }
+      delete config.until;
+      delete config.timezone;
+      delete config.ifLate;
+
       if (params.amount !== undefined) {
         config.amount = params.amount;
       }
@@ -383,7 +463,7 @@ export function buildStepConfig(
       }
 
       if (config.amount === undefined || !config.unit) {
-        return {error: 'A DELAY step needs both `amount` and `unit`.'};
+        return {error: 'A DELAY step needs both `amount` and `unit`, or `until` and `timezone`.'};
       }
 
       const unit = config.unit as (typeof DELAY_UNITS)[number];
@@ -724,6 +804,10 @@ export function stepSummary(step: WorkflowStep): string {
       return `send ${template}${recipient.type === 'CUSTOM' ? ` to ${String(recipient.customEmail)}` : ''}`;
     }
     case 'DELAY':
+      if (typeof config.until === 'string') {
+        const late = config.ifLate === 'continue' ? 'continue' : 'skip';
+        return `wait until ${config.until.replace('T', ' ')} ${String(config.timezone ?? '?')} (late: ${late})`;
+      }
       return `wait ${String(config.amount ?? '?')} ${unitLabel(config.amount, config.unit)}`;
     case 'WAIT_FOR_EVENT': {
       const timeout =
@@ -788,7 +872,15 @@ function humanSeconds(seconds: number): string {
 export interface WorkflowIssue {
   severity: 'error' | 'warning';
   /** `unreachable` marks a step no path from the trigger leads to. */
-  code: 'missing_trigger' | 'unreachable' | 'invalid_config' | 'missing_template' | 'bad_connection';
+  code:
+    | 'missing_trigger'
+    | 'unreachable'
+    | 'invalid_config'
+    | 'missing_template'
+    | 'bad_connection'
+    // Plunk Lite: a wait until a date already past, and one that skips to the end when late
+    | 'date_passed'
+    | 'skips_to_end';
   stepId?: string;
   message: string;
 }
@@ -872,9 +964,15 @@ export function reviewWorkflow(workflow: Workflow): WorkflowReview {
     }
 
     const label = step.name && step.name !== stepSummary(step) ? ` "${step.name}"` : '';
-    lines.push(`#${n} ${step.type}${label}: ${stepSummary(step)}${exits ? `  ${exits}` : ''}  [id ${step.id}]`);
+    const wait = workflow.stepWaits?.find((entry) => entry.stepId === step.id);
+    const ends = wait?.at ? ` (ends ${wait.at})` : '';
+    const waiting = wait?.waiting ? ` — ${wait.waiting} waiting` : '';
+    lines.push(
+      `#${n} ${step.type}${label}: ${stepSummary(step)}${ends}${waiting}${exits ? `  ${exits}` : ''}  [id ${step.id}]`,
+    );
 
     checkStep(step, issues, n);
+    checkDateWait(step, wait, byId, issues, n);
   }
 
   return {outline: lines.join('\n'), issues};
@@ -966,6 +1064,61 @@ function checkStep(step: WorkflowStep, issues: WorkflowIssue[], n: number): void
       code: 'bad_connection',
       stepId: step.id,
       message: `${name} leads to ${outgoing.length} steps; only the first is ever followed. Use a CONDITION to branch.`,
+    });
+  }
+}
+
+/** Plunk Lite: whether a wait until a date can be reached from `step` (any branch) */
+function dateWaitAhead(step: WorkflowStep, byId: Map<string, WorkflowStep>): boolean {
+  const seen = new Set<string>([step.id]);
+  const queue = (step.outgoingTransitions ?? []).map((transition) => transition.toStepId);
+  for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+    const next = byId.get(id);
+    if (!next || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    if (next.type === 'DELAY' && typeof asRecord(next.config).until === 'string') {
+      return true;
+    }
+    queue.push(...(next.outgoingTransitions ?? []).map((transition) => transition.toStepId));
+  }
+  return false;
+}
+
+/** Plunk Lite: a wait until a date whose date has passed, or that skips everything after it when late */
+function checkDateWait(
+  step: WorkflowStep,
+  wait: StepWait | undefined,
+  byId: Map<string, WorkflowStep>,
+  issues: WorkflowIssue[],
+  n: number,
+): void {
+  const config = asRecord(step.config);
+  if (step.type !== 'DELAY' || typeof config.until !== 'string') {
+    return;
+  }
+  const name = `#${n} "${step.name ?? step.type}"`;
+  const skip = config.ifLate !== 'continue';
+
+  if (wait?.late) {
+    issues.push({
+      severity: 'warning',
+      code: 'date_passed',
+      stepId: step.id,
+      message: skip
+        ? `${name} waits until a date that has passed: contacts who reach it now skip to the next date wait.`
+        : `${name} waits until a date that has passed: contacts who reach it now continue right away.`,
+    });
+  }
+  if (skip && !dateWaitAhead(step, byId)) {
+    issues.push({
+      severity: 'warning',
+      code: 'skips_to_end',
+      stepId: step.id,
+      message:
+        `${name} skips when a contact arrives late, and no date wait follows it: a late contact skips every ` +
+        'step after it (emails, webhooks, contact updates) and finishes the workflow.',
     });
   }
 }

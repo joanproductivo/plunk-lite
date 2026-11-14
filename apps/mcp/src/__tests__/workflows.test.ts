@@ -214,6 +214,30 @@ describe('workflow reads', () => {
   });
 });
 
+// Plunk Lite: waits until a date
+describe('plunk_check_workflow with contacts waiting', () => {
+  it('returns who waits at each step, and when each wait until a date ends', async () => {
+    const stepWaits = [{stepId: 'step-delay', waiting: 3, at: '2026-11-22T13:00:00.000Z', late: false}];
+    const workflow = {
+      ...workflowWithEmail,
+      stepWaits,
+      steps: workflowWithEmail.steps.map((step) =>
+        step.id === 'step-delay' ? {...step, config: {until: '2026-11-22T14:00', timezone: 'Europe/Madrid'}} : step,
+      ),
+    };
+    mockApi(() => json(workflow));
+    const {client, close} = await connect();
+
+    const result = await client.callTool({name: 'plunk_check_workflow', arguments: {id: 'wf-1'}});
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({stepWaits});
+    expect(JSON.stringify(result.content)).toContain('(ends 2026-11-22T13:00:00.000Z) — 3 waiting');
+
+    await close();
+  });
+});
+
 describe('plunk_create_workflow', () => {
   it('creates the workflow disabled and returns its trigger step', async () => {
     const calls = mockApi((call) =>
