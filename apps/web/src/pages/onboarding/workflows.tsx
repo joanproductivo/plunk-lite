@@ -64,6 +64,8 @@ function buildTrackSnippets(apiUrl: string, secretKey: string): CodeSnippet[] {
   const body = {
     event: 'user.signed-up',
     email: 'user@example.com',
+    // Plunk Lite: /v1/track subscribes a new contact only when the call says so
+    subscribed: true,
     data: {plan: 'pro'},
   };
 
@@ -86,7 +88,9 @@ function buildTrackSnippets(apiUrl: string, secretKey: string): CodeSnippet[] {
 requests.post(
     "${apiUrl}/v1/track",
     headers={"Authorization": "Bearer ${secretKey}"},
-    json=${JSON.stringify(body, null, 4).replace(/\n/g, '\n    ')},
+    json=${JSON.stringify(body, null, 4)
+      .replace(/: true\b/g, ': True')
+      .replace(/\n/g, '\n    ')},
 )`;
 
   const php = `$ch = curl_init("${apiUrl}/v1/track");

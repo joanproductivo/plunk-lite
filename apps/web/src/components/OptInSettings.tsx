@@ -156,8 +156,9 @@ function OptInForm({
             </Label>
             <p className="text-xs text-neutral-500 mt-0.5">
               With the public key (<code>pk_</code>), <code>/v1/track</code> sends no confirmation and leaves the
-              contact unsubscribed: sign up from your server with the secret key. Contacts you add or subscribe yourself
-              are subscribed at once; an import subscribes new contacts only, and adding to a segment subscribes no one.
+              contact unsubscribed: sign up from your server with the secret key and <code>subscribed: true</code>.
+              Contacts you add or subscribe yourself are subscribed at once; an import subscribes new contacts only, and
+              adding to a segment subscribes no one.
             </p>
           </div>
           <Switch
