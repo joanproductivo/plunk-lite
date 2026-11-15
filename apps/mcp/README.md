@@ -169,6 +169,11 @@ agent can build and edit a branching workflow without opening the builder.
   same rules first, including condition fields the executor cannot resolve.
 - `plunk_check_workflow` prints the flow as numbered lines in the order a contact walks it and lists
   problems; `plunk_set_workflow_enabled` refuses to enable a workflow while any are errors.
+- A `DELAY` waits for a duration (`amount` + `unit`) or until a date (`until` + `timezone`, Plunk Lite),
+  with `ifLate` for contacts who reach it after the date: `skip` (default) runs nothing up to the next
+  wait until a date, `continue` goes on at once. Its date can change while contacts wait there: they
+  move to the new date. `plunk_check_workflow` shows how many contacts wait at each step and when each
+  wait until a date ends.
 
 ### Addressing contacts by email
 

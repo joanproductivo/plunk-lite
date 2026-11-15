@@ -183,7 +183,8 @@ async function parkBeforeGoneSteps(
       JOIN "workflow_step_executions" se ON se."executionId" = q."executionId"
       JOIN "workflow_steps" s ON s."id" = se."stepId"
       WHERE q."workflowId" = ${workflowId} AND ${gone(Prisma.sql`q."stepId"`)}
-        AND se."status" = 'COMPLETED' AND NOT ${gone(Prisma.sql`se."stepId"`)}
+        -- Plunk Lite: or skipped by a late date wait, so that a run never goes back before what it skipped
+        AND se."status" IN ('COMPLETED', 'SKIPPED') AND NOT ${gone(Prisma.sql`se."stepId"`)}
       ORDER BY se."executionId", se."completedAt" DESC NULLS LAST, se."createdAt" DESC, se."id" DESC
     ) last
     WHERE p."executionId" = last."executionId"

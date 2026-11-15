@@ -24,6 +24,7 @@ import type {
   MembershipEventsJobData,
   MeterEventJobData,
   PlunkLiteChecksJobData,
+  RescheduleDateWaitJobData,
   ScheduledCampaignJobData,
   SecurityCheckJobData,
   SegmentCountJobData,
@@ -513,6 +514,46 @@ export class QueueService {
     }
     await workflowQueue.add(type, {executionId, stepId, stepExecutionId, type}, {jobId});
     return true;
+  }
+
+  /**
+   * Plunk Lite: make the job that ends a date wait run in `delayMs`, after its date changed. A
+   * delayed job gets its delay changed; a missing or finished one is queued again with it; one
+   * waiting to run is left alone (it runs now, and processDelayEnd holds it back if the date is
+   * later). Throws for one running now (it may be holding itself back to the old date) and if Redis
+   * does, so that the caller leaves the run to be tried again.
+   */
+  public static async rescheduleWorkflowDelayEnd(
+    executionId: string,
+    stepId: string,
+    stepExecutionId: string,
+    delayMs: number,
+  ): Promise<void> {
+    const jobId = workflowJobId('delay-end', stepExecutionId);
+    const job = await workflowQueue.getJob(jobId);
+    if (job && (await job.getState()) === 'delayed') {
+      await job.changeDelay(Math.max(0, delayMs));
+      return;
+    }
+    const state = job ? await job.getState() : 'unknown';
+    if (state === 'active') {
+      throw new Error(`Job ${jobId} is running; try again once it has settled`);
+    }
+    if (job && (await isStillToRun(job))) {
+      return;
+    }
+    if (!(await this.clearFinishedJob(workflowQueue, jobId))) {
+      throw new Error(`Could not queue again job ${jobId}`);
+    }
+    await this.queueWorkflowDelayEnd(executionId, stepId, stepExecutionId, Math.max(0, delayMs));
+  }
+
+  /** Plunk Lite: a round of moving the contacts waiting at a date wait to its new date */
+  public static async queueDateWaitReschedule(data: RescheduleDateWaitJobData, delayMs = 0): Promise<Job> {
+    return workflowQueue.add('reschedule-date-wait', data, {
+      delay: delayMs,
+      jobId: `workflow-reschedule-date-wait-${data.stepId}-${data.passId}-${data.after ?? 'start'}`,
+    });
   }
 
   /**

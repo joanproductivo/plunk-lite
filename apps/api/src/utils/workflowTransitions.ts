@@ -23,6 +23,19 @@ export function pickTransition<T extends {condition: Prisma.JsonValue}>(
   });
 }
 
+/**
+ * Plunk Lite: the transition a wait for an event follows when it times out: its `timeout` branch, or
+ * one marked `fallback`. Undefined when it has none (it then follows its first transition). One rule
+ * for the engine and for a wait skipped by a late date wait.
+ */
+export function timeoutTransition<T extends {condition: Prisma.JsonValue}>(transitions: readonly T[]): T | undefined {
+  return transitions.find(
+    ({condition}) =>
+      transitionBranch(condition) === 'timeout' ||
+      (!!condition && typeof condition === 'object' && !Array.isArray(condition) && condition.fallback === true),
+  );
+}
+
 /** The branch a transition belongs to (one out of a CONDITION step), if any */
 function transitionBranch(condition: Prisma.JsonValue): string | null {
   return condition && typeof condition === 'object' && !Array.isArray(condition) && typeof condition.branch === 'string'

@@ -182,6 +182,37 @@ describe('WorkflowRecoveryService.recoverWaits', () => {
     expect(await prisma.plunkLiteFailure.count({where: {projectId}})).toBe(3);
   });
 
+  // Plunk Lite: waits until a date read their end from resumeAt, never from the date itself
+  it('leaves a date wait moved later, and queues again a late one whose job was lost without failing it', async () => {
+    const tenDaysAgo = minutesAgo(10 * 24 * 60);
+    const dateWait = {until: tenDaysAgo.toISOString().slice(0, 16), timezone: 'UTC', at: tenDaysAgo.toISOString()};
+    const moved = await waitingOn(WorkflowStepType.DELAY, {status: StepExecutionStatus.COMPLETED});
+    await prisma.workflowStepExecution.update({
+      where: {id: moved.stepExecutionId},
+      data: {output: {...dateWait, at: minutesAgo(-600).toISOString(), resumeAt: minutesAgo(-600).toISOString()}},
+    });
+    const late = await waitingOn(WorkflowStepType.DELAY, {status: StepExecutionStatus.COMPLETED});
+    await prisma.workflowStepExecution.update({
+      where: {id: late.stepExecutionId},
+      data: {output: {...dateWait, resumeAt: minutesAgo(40).toISOString(), late: 'continue'}},
+    });
+    for (const {executionId} of [moved, late]) {
+      await prisma.$executeRaw`UPDATE "workflow_executions" SET "updatedAt" = ${minutesAgo(60)} WHERE "id" = ${executionId}`;
+    }
+
+    expect(await WorkflowRecoveryService.recoverWaits()).toBe(1);
+
+    expect(QueueService.ensureWorkflowWaitEnd).toHaveBeenCalledTimes(1);
+    expect(QueueService.ensureWorkflowWaitEnd).toHaveBeenCalledWith(
+      'delay-end',
+      late.executionId,
+      late.stepId,
+      late.stepExecutionId,
+    );
+    expect((await runOf(late.executionId)).status).toBe(WorkflowExecutionStatus.WAITING);
+    expect((await runOf(moved.executionId)).status).toBe(WorkflowExecutionStatus.WAITING);
+  });
+
   it('leaves a wait a week overdue whose job is still queued: the worker was stopped, it is late', async () => {
     const late = await waitingOn(WorkflowStepType.DELAY, {
       status: StepExecutionStatus.COMPLETED,

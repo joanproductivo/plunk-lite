@@ -1,5 +1,7 @@
 import {Controller, Get, Middleware} from '@overnightjs/core';
 import type {AnalyticsLeaderboardKind, AnalyticsStream} from '@plunk/types';
+// Plunk Lite: shared with the waits until a date of workflows
+import {isValidTimezone} from '@plunk/shared';
 import type {NextFunction, Request, Response} from 'express';
 
 import {type FieldError, ValidationError} from '../exceptions/index.js';
@@ -66,15 +68,6 @@ async function parseQuery(req: Request, res: Response): Promise<AnalyticsQuery> 
 
   const projectId: string = res.locals.auth.projectId;
   return {projectId, from, to, tz, stream, trackedStreams: await EmailService.trackedStreams(projectId)};
-}
-
-function isValidTimezone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', {timeZone: tz});
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 @Controller('analytics')

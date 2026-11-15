@@ -17,6 +17,9 @@ import {
   renderSubjectTemplate,
   renderTemplate,
   renderTextTemplate,
+  type DateWaitConfig,
+  hasDateWaitShape,
+  wallTimeToInstant,
   WorkflowStepConfigSchemas,
 } from '@plunk/shared';
 import dns from 'node:dns/promises';
@@ -30,9 +33,11 @@ import {DASHBOARD_URI} from '../app/constants.js';
 import {POOL_WAIT_TRANSACTION} from '../utils/database.js';
 import {getDateRange, isDateString} from '../utils/dates.js';
 import {readCapped} from '../utils/readCapped.js';
+import {stepOutput} from '../utils/stepOutput.js';
 import {signWebhook, WEBHOOK_SIGNATURE_HEADER} from '../utils/webhookSignature.js';
-import {pickTransition} from '../utils/workflowTransitions.js';
+import {pickTransition, timeoutTransition} from '../utils/workflowTransitions.js';
 
+import {DateWaits} from './DateWaits.js';
 import {RECIPIENT_OVERRIDE_HEADER} from './EmailHeaderService.js';
 import {EmailService} from './EmailService.js';
 import {NtfyService} from './NtfyService.js';
@@ -190,7 +195,7 @@ export class WorkflowExecutionService {
       if (step.type === 'DELAY' || step.type === 'WAIT_FOR_EVENT') {
         return;
       }
-      await this.processNextSteps(execution, step, this.storedResult(previous.output));
+      await this.processNextSteps(execution, step, stepOutput(previous.output));
       return;
     }
 
@@ -245,9 +250,13 @@ export class WorkflowExecutionService {
       signale.info(`[WORKFLOW] Step ${stepId} executed successfully`);
 
       // Plunk Lite: a wait or a delay never moves on from here -- the event, its timeout or the
-      // delay's job does. Reading the state back raced with an event that claimed the wait in
+      // delay's job does (except a late date wait that skips, through skipLate). Reading the state back raced with an event that claimed the wait in
       // between, and the run moved on twice.
       if (step.type === 'WAIT_FOR_EVENT' || step.type === 'DELAY') {
+        // Plunk Lite: a contact that reached a date wait after its date, skipping to the next one
+        if (result.late === 'skip') {
+          await this.skipLate(execution, step);
+        }
         return;
       }
 
@@ -310,19 +319,8 @@ export class WorkflowExecutionService {
       }
 
       // Mark workflow execution as failed (Plunk Lite: unless it was stopped meanwhile -- a run the
-      // brake cancelled stays cancelled, one the sweep failed is not alerted twice)
-      const failed = await WorkflowRecoveryService.failRun(execution, {error: message});
-
-      // Send notification about workflow execution failure
-      if (failed) {
-        await NtfyService.notifyWorkflowExecutionFailed(
-          execution.workflow.name,
-          execution.workflow.project.name,
-          execution.workflow.project.id,
-          execution.contact.email,
-          message,
-        );
-      }
+      // brake cancelled stays cancelled, one the sweep failed is not alerted twice), and notify
+      await this.failAndNotify(execution, message);
 
       throw error;
     }
@@ -381,14 +379,8 @@ export class WorkflowExecutionService {
 
     // Continue workflow - find transitions with timeout/fallback logic
     const transitions = stepExecution.step.outgoingTransitions || [];
-    const fallbackTransition = transitions.find(
-      t =>
-        (t.condition &&
-          typeof t.condition === 'object' &&
-          'branch' in t.condition &&
-          t.condition.branch === 'timeout') ||
-        (t.condition && typeof t.condition === 'object' && 'fallback' in t.condition && t.condition.fallback === true),
-    );
+    // Plunk Lite: the rule lives in timeoutTransition, shared with a wait skipped by a late date wait
+    const fallbackTransition = timeoutTransition(transitions);
 
     if (fallbackTransition) {
       // Follow timeout branch
@@ -420,21 +412,31 @@ export class WorkflowExecutionService {
   /**
    * End a DELAY step: move on to the step connected after it now -- one connected, removed or
    * replaced while the contact waited included -- or complete the run if there is none
-   * Called by BullMQ worker when the delay-end job executes
+   * Called by BullMQ worker when the delay-end job executes. Plunk Lite: returns the ms still to
+   * wait when it holds back a wait until a date moved later (see DateWaits.heldBack), else 0
    */
-  public static async processDelayEnd(executionId: string, stepId: string): Promise<void> {
+  public static async processDelayEnd(executionId: string, stepId: string): Promise<number> {
     const execution = await prisma.workflowExecution.findUnique({where: {id: executionId}});
 
     // Cancelled, deleted, or already moved on: nothing left to end
     if (execution?.status !== WorkflowExecutionStatus.WAITING) {
-      return;
+      return 0;
     }
 
     // Plunk Lite: the delay itself was deleted while the run waited on it (its current step became
     // null): the rest of the route went with it, so the run fails rather than completing quietly
     if (execution.currentStepId === null) {
       await WorkflowRecoveryService.failDeletedStep(executionId);
-      return;
+      return 0;
+    }
+
+    // Plunk Lite: a wait until a date whose date was moved later meanwhile ends then, not now. The
+    // caller waits the time left (returned) and ends it again
+    if (execution.currentStepId === stepId) {
+      const left = await DateWaits.heldBack(executionId, stepId);
+      if (left > 0) {
+        return left;
+      }
     }
 
     // A step may have been connected after the delay while the contact was waiting
@@ -455,7 +457,7 @@ export class WorkflowExecutionService {
       if (count > 0) {
         await this.processStepExecution(executionId, firstTransition.toStepId);
       }
-      return;
+      return 0;
     }
 
     // Nothing is connected after the delay now, so the workflow is done (claimed like the move above)
@@ -464,6 +466,7 @@ export class WorkflowExecutionService {
       completedAt: new Date(),
       currentStepId: null,
     });
+    return 0;
   }
 
   /**
@@ -495,13 +498,17 @@ export class WorkflowExecutionService {
       orderBy: {createdAt: 'desc'},
       select: {id: true, output: true},
     });
-    const resumeAt = delay ? this.storedResult(delay.output).resumeAt : undefined;
+    const resumeAt = delay ? stepOutput(delay.output).resumeAt : undefined;
     const left = typeof resumeAt === 'string' ? Date.parse(resumeAt) - Date.now() : Number.NaN;
     if (delay && left > 0) {
       await QueueService.queueWorkflowDelayEnd(executionId, execution.currentStepId, delay.id, left);
       return;
     }
-    await this.processDelayEnd(executionId, execution.currentStepId);
+    const heldBack = await this.processDelayEnd(executionId, execution.currentStepId);
+    if (delay && heldBack > 0) {
+      // A date wait whose date moved later: its end, for then
+      await QueueService.rescheduleWorkflowDelayEnd(executionId, execution.currentStepId, delay.id, heldBack);
+    }
   }
 
   /**
@@ -779,15 +786,22 @@ export class WorkflowExecutionService {
   }
 
   /**
-   * DELAY step - Wait for a specified duration
+   * DELAY step - Wait for a specified duration (Plunk Lite: or until a date, see DateWaits)
    */
   private static async executeDelay(
-    _step: WorkflowStep,
-    _execution: WorkflowExecutionWithRelations,
+    step: WorkflowStep,
+    execution: WorkflowExecutionWithRelations,
     stepExecution: WorkflowStepExecution,
     config: StepConfig,
   ): Promise<StepResult> {
-    const {amount, unit} = WorkflowStepConfigSchemas.delay.parse(config);
+    // Plunk Lite: a configuration with `until` is read as a wait until a date, never as a duration
+    const parsed = hasDateWaitShape(config)
+      ? WorkflowStepConfigSchemas.delay.options[1].parse(config)
+      : WorkflowStepConfigSchemas.delay.parse(config);
+    if ('until' in parsed) {
+      return this.executeDateWait(step, execution, stepExecution, parsed);
+    }
+    const {amount, unit} = parsed;
 
     // Calculate delay in milliseconds
     let delayMs = 0;
@@ -825,7 +839,7 @@ export class WorkflowExecutionService {
         },
       }),
       prisma.workflowExecution.updateMany({
-        where: {id: _execution.id, status: {notIn: STOPPED_STATUSES}},
+        where: {id: execution.id, status: {notIn: STOPPED_STATUSES}},
         data: {status: WorkflowExecutionStatus.WAITING},
       }),
     ]);
@@ -834,7 +848,7 @@ export class WorkflowExecutionService {
     // it when it runs out. Queuing the step connected now failed the run if that step was deleted
     // meanwhile, and skipped one inserted after the delay. If the server stops before it is queued,
     // the recovery sweep queues it.
-    await QueueService.queueWorkflowDelayEnd(_execution.id, _step.id, stepExecution.id, Math.max(0, delayMs));
+    await QueueService.queueWorkflowDelayEnd(execution.id, step.id, stepExecution.id, Math.max(0, delayMs));
 
     return {
       delayAmount: amount,
@@ -842,6 +856,117 @@ export class WorkflowExecutionService {
       resumeAt: resumeAt.toISOString(),
       queued: true,
     };
+  }
+
+  /**
+   * Plunk Lite: a DELAY until a date and time. Before it, the run waits until then, like a delay.
+   * After it, with `ifLate: 'continue'`, it ends right away; with `skip`, the step completes and the
+   * run stays running at it, for skipLate to walk past what follows.
+   */
+  private static async executeDateWait(
+    step: WorkflowStep,
+    execution: WorkflowExecutionWithRelations,
+    stepExecution: WorkflowStepExecution,
+    {until, timezone, ifLate}: DateWaitConfig,
+  ): Promise<StepResult> {
+    const at = wallTimeToInstant(until, timezone);
+    if (!at) {
+      throw new Error(`${until} in ${timezone} is not a real date and time`);
+    }
+    const now = Date.now();
+    const late = at.getTime() <= now ? ifLate : undefined;
+    // The sweep reads resumeAt: never in the past, so a late wait is not taken for one stuck
+    const output = {
+      until,
+      timezone,
+      at: at.toISOString(),
+      resumeAt: new Date(Math.max(now, at.getTime())).toISOString(),
+      ...(late ? {late} : {}),
+    };
+    const completed = {status: StepExecutionStatus.COMPLETED, completedAt: new Date(), output};
+
+    if (late === 'skip') {
+      // Only once: a copy of this step running at the same time does not walk the skip again
+      const {count} = await prisma.workflowStepExecution.updateMany({
+        where: {id: stepExecution.id, status: StepExecutionStatus.RUNNING},
+        data: completed,
+      });
+      return count > 0 ? output : {...output, late: undefined};
+    }
+
+    await prisma.$transaction([
+      prisma.workflowStepExecution.update({where: {id: stepExecution.id}, data: completed}),
+      prisma.workflowExecution.updateMany({
+        where: {id: execution.id, status: {notIn: STOPPED_STATUSES}},
+        data: {status: WorkflowExecutionStatus.WAITING},
+      }),
+    ]);
+    await QueueService.queueWorkflowDelayEnd(execution.id, step.id, stepExecution.id, Math.max(0, at.getTime() - now));
+    return {...output, queued: true};
+  }
+
+  /**
+   * Plunk Lite: a run that reached the date wait `step` after its date, with `ifLate: 'skip'`. It
+   * goes on from the next date wait or Exit (as if it had arrived there), or ends, without running
+   * anything in between: those steps are recorded as SKIPPED, and conditions are evaluated to pick
+   * the branch. The run stays at the date wait meanwhile, so nothing (a retry) can resume it from a
+   * step it skipped. Any error fails the run here, with its cause.
+   */
+  private static async skipLate(execution: RunWithSteps, step: WorkflowStep): Promise<void> {
+    try {
+      const {visited, end} = await DateWaits.lateRoute(execution.workflow.steps, step.id, condition =>
+        this.executeCondition(condition, execution, null, condition.config),
+      );
+
+      await DateWaits.recordLateRoute(execution.id, step.id, visited);
+      signale.info(`[WORKFLOW] Execution ${execution.id} reached ${step.name} late: skipped ${visited.length} step(s)`);
+
+      if ('end' in end) {
+        await this.completeRun(
+          execution,
+          end.lastStep,
+          end.branch,
+          {status: {notIn: UNMOVABLE_STATUSES}},
+          {status: WorkflowExecutionStatus.COMPLETED, completedAt: new Date(), currentStepId: null},
+        );
+        return;
+      }
+      const next = 'dateWait' in end ? end.dateWait : end.exit;
+      if (await this.moveRun(execution.id, next.id)) {
+        await this.processStepExecution(execution.id, next.id);
+      }
+    } catch (error) {
+      // A step it went on to handled its own failure
+      if (typeof error === 'object' && error !== null && handledFailures.has(error)) {
+        return;
+      }
+      const message = errorMessage(error);
+      signale.error(`[WORKFLOW] Skipping past ${step.name} failed for execution ${execution.id}:`, error);
+      try {
+        // The cause stays with the date wait, as with a step whose moving on failed
+        await prisma.workflowStepExecution.updateMany({
+          where: {executionId: execution.id, stepId: step.id, status: StepExecutionStatus.COMPLETED},
+          data: {error: message},
+        });
+        await this.failAndNotify(execution, message, `Skipping past "${step.name}" failed`);
+      } catch (failError) {
+        signale.error(`[WORKFLOW] Could not fail execution ${execution.id}:`, failError);
+      }
+    }
+  }
+
+  /** Fail a run (unless it was stopped meanwhile) and, if this failed it, notify the project */
+  private static async failAndNotify(execution: RunWithSteps, message: string, exitReason?: string): Promise<void> {
+    const failed = await WorkflowRecoveryService.failRun(execution, {error: message, exitReason});
+    if (failed) {
+      await NtfyService.notifyWorkflowExecutionFailed(
+        execution.workflow.name,
+        execution.workflow.project.name,
+        execution.workflow.project.id,
+        execution.contact.email,
+        message,
+      );
+    }
   }
 
   /**
@@ -903,7 +1028,7 @@ export class WorkflowExecutionService {
   private static async executeCondition(
     _step: WorkflowStep,
     execution: WorkflowExecutionWithRelations,
-    _stepExecution: WorkflowStepExecution,
+    _stepExecution: WorkflowStepExecution | null,
     config: StepConfig,
   ): Promise<StepResult> {
     const parsed = WorkflowStepConfigSchemas.condition.parse(config);
@@ -1379,7 +1504,7 @@ export class WorkflowExecutionService {
     stepExecution: WorkflowStepExecution,
     error: WebhookTransientError,
   ): Promise<boolean> {
-    const {webhookAttempts, webhookManual} = this.storedResult(stepExecution.output);
+    const {webhookAttempts, webhookManual} = stepOutput(stepExecution.output);
     const attempt = typeof webhookAttempts === 'number' ? webhookAttempts : 0;
     const delayMs = WEBHOOK_RETRY_DELAYS_MS[attempt];
     if (webhookManual === true || delayMs === undefined) {
@@ -1788,13 +1913,6 @@ export class WorkflowExecutionService {
       // The database is out too: the run stays as it was, and the alert of the failure is lost
       signale.error(`[WORKFLOW] Could not fail execution ${execution.id}:`, failError);
     }
-  }
-
-  /**
-   * Plunk Lite: what a step stored as its output, to carry on from it without running it again
-   */
-  private static storedResult(output: Prisma.JsonValue): StepResult {
-    return output && typeof output === 'object' && !Array.isArray(output) ? (output as StepResult) : {};
   }
 
   /**

@@ -128,7 +128,7 @@ describe('WorkflowExecutionService - a delay with no step after it', () => {
     await run.start();
     await prisma.workflowExecution.delete({where: {id: run.executionId}});
 
-    await expect(run.endDelay()).resolves.toBeUndefined();
+    await expect(run.endDelay()).resolves.toBe(0);
   });
 });
 

@@ -1,6 +1,6 @@
 import {Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input, Label} from '@plunk/ui';
 import type {WorkflowStep} from '@plunk/db';
-import {WorkflowSchemas} from '@plunk/shared';
+import {WALL_TIME, WorkflowSchemas} from '@plunk/shared';
 import type {UpdateContactSegmentChanges} from '@plunk/types';
 import {useState} from 'react';
 import {toast} from 'sonner';
@@ -21,7 +21,8 @@ export const STEP_TYPE_LABELS: Record<WorkflowStep['type'], string> = {
 export const STEP_TYPE_DESCRIPTIONS: Record<WorkflowStep['type'], string> = {
   TRIGGER:        'Starts the workflow when a specific event is received.',
   SEND_EMAIL:     'Sends an email to the contact using a template you choose.',
-  DELAY:          'Pauses the workflow for a set amount of time before continuing.',
+  // Plunk Lite: also until a date and time
+  DELAY:          'Pauses the workflow for a set amount of time, or until a date and time, before continuing.',
   WAIT_FOR_EVENT: 'Waits until the contact triggers a specific event, then continues.',
   CONDITION:      'Splits the flow based on contact data or segment membership — each path leads to different steps.',
   EXIT:           'Ends the workflow for the contact.',
@@ -39,6 +40,31 @@ export interface EditStepDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
+  /** Plunk Lite: contacts waiting at this step now (a delay's dialog warns before moving them) */
+  waiting?: number;
+}
+
+/**
+ * Plunk Lite: what a delay step waits for, as its node shows it: "Wait 2 days", or "Wait until
+ * 22 Nov 2026, 14:00 (Europe/Madrid)" -- the date as written, in its time zone. Null if not set up.
+ */
+export function delayLabel(config: unknown): string | null {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    return null;
+  }
+  const {amount, unit, until, timezone} = config as Record<string, unknown>;
+  if (typeof until === 'string' && typeof timezone === 'string') {
+    const match = WALL_TIME.exec(until);
+    if (!match) {
+      return null;
+    }
+    const [year, month, day, hour, minute] = match.slice(1).map(Number) as [number, number, number, number, number];
+    const written = new Intl.DateTimeFormat('en-GB', {dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC'}).format(
+      Date.UTC(year, month - 1, day, hour, minute),
+    );
+    return `Wait until ${written} (${timezone})`;
+  }
+  return amount && typeof unit === 'string' ? `Wait ${String(amount)} ${unit}` : null;
 }
 
 export interface UpdateStepInput {

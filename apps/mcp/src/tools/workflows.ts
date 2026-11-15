@@ -17,6 +17,7 @@ import {
   branchProblem,
   buildStepConfig,
   CONDITION_OPERATORS,
+  DATE_WAIT_IF_LATE,
   defaultAppendPoint,
   defaultStepName,
   DELAY_UNITS,
@@ -108,6 +109,27 @@ const stepConfigShape = {
     .optional()
     .describe('DELAY: how long to wait. WAIT_FOR_EVENT: timeout length (omit amount and unit to wait indefinitely).'),
   unit: z.enum(DELAY_UNITS).optional().describe('Unit for `amount`. At most 365 days.'),
+  until: z
+    .string()
+    .optional()
+    .describe(
+      'DELAY until a date (instead of amount + unit): the local date and time to wait for, as ' +
+        '2026-11-22T14:00, read in `timezone`. At most two years ahead. A time skipped by a clock change ' +
+        'moves to the next valid one; a time that happens twice is the first.',
+    ),
+  timezone: z
+    .string()
+    .optional()
+    .describe('DELAY until a date: time zone name for `until`, such as Europe/Madrid or America/New_York.'),
+  ifLate: z
+    .enum(DATE_WAIT_IF_LATE)
+    .optional()
+    .describe(
+      'DELAY until a date: what happens to a contact who reaches it after the date. `skip` (default) runs ' +
+        'nothing up to the next wait until a date (no emails, webhooks or contact updates; conditions still ' +
+        'pick the path and an EXIT still ends the run) and goes on from there, or finishes the workflow if ' +
+        'there is none. `continue` goes on to the next step right away.',
+    ),
   eventName: z.string().min(1).optional().describe('WAIT_FOR_EVENT: the event to wait for.'),
   field: z
     .string()
@@ -493,8 +515,10 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
         'condition fields that never resolve, connections on branches a condition no longer has, steps',
         'with more than one exit, and steps not connected to the trigger.',
         '',
-        '**Returns:** `outline` (one line per step with its exits and id) and `issues[]` with',
-        '`severity` error | warning. `plunk_set_workflow_enabled` refuses to enable while errors remain.',
+        '**Returns:** `outline` (one line per step with its exits and id, the contacts waiting at it, and',
+        'when each DELAY until a date ends), `stepWaits[]` (`stepId`, `waiting`, and `at` / `late` for',
+        'a wait until a date) and `issues[]` with `severity` error | warning.',
+        '`plunk_set_workflow_enabled` refuses to enable while errors remain.',
         '',
         '**Key trigger phrases:** "is the workflow ok", "review the automation", "check before enabling"',
       ].join('\n'),
@@ -514,7 +538,13 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
         return jsonResult(
           `Workflow "${workflow.name ?? id}": ${errors} error(s), ${warnings} warning(s).\n\n${review.outline}` +
             (issueLines ? `\n\n${issueLines}` : ''),
-          {id: workflow.id, name: workflow.name, enabled: workflow.enabled, ...review},
+          {
+            id: workflow.id,
+            name: workflow.name,
+            enabled: workflow.enabled,
+            stepWaits: workflow.stepWaits ?? [],
+            ...review,
+          },
         );
       }),
   );
@@ -868,7 +898,8 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
         '',
         "**Step types** (pass only that type's arguments):",
         '- `SEND_EMAIL` — `templateId`; optional `recipientEmail` for a fixed address.',
-        '- `DELAY` — `amount` + `unit` (at most 365 days).',
+        '- `DELAY` — `amount` + `unit` (at most 365 days), or `until` + `timezone` (optional `ifLate`)',
+        '  to wait until a date and time.',
         '- `WAIT_FOR_EVENT` — `eventName`; optional timeout via `amount` + `unit`. The flow continues',
         '  on the same path whether the event arrives or the timeout passes.',
         '- `CONDITION` — `field` + `operator` (+ `value`) for yes/no, or `field` + `branches` for',
@@ -1013,8 +1044,10 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
         '**NOT for:** Changing the trigger event (use `plunk_update_workflow` with `eventName`) or the',
         'step type (add a new step and delete this one).',
         '',
-        '**Note:** settings cannot change while an enabled workflow has runs in progress; disable it',
-        'first. A condition cannot drop a branch that still leads somewhere; disconnect it first.',
+        '**Note:** settings cannot change while an enabled workflow has runs in progress (disable it',
+        'first), except the date, time zone and `ifLate` of a DELAY until a date: the contacts waiting',
+        'there move to a new date, or continue right away if it has passed. A condition cannot drop a',
+        'branch that still leads somewhere; disconnect it first.',
         '',
         '**Returns:** The updated step.',
       ].join('\n'),

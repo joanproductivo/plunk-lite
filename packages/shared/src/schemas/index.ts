@@ -3,6 +3,7 @@ import type {FilterCondition, FilterGroup, OptInTexts, RequestedSegment} from '@
 import {CONTACT_SUBSCRIPTION_STATUSES, SNOOZE_DURATIONS} from '@plunk/types';
 import {z} from 'zod';
 
+import {DATE_WAIT_IF_LATE, dateWaitProblem} from '../dateWait.js';
 import {
   CAMPAIGN_EXCLUDED_SEGMENTS_MAX,
   REQUEST_SEGMENTS_MAX,
@@ -414,27 +415,41 @@ export const WorkflowStepConfigSchemas = {
       )
       .optional(),
   }),
-  delay: z
-    .object({
-      amount: z.number().positive(),
-      unit: z.enum(['minutes', 'hours', 'days']),
-    })
-    .refine(
-      data => {
-        // Max 365 days
-        const maxMinutes = 365 * 24 * 60;
-        const maxHours = 365 * 24;
-        const maxDays = 365;
+  // Plunk Lite: a wait for a duration, or until a date and time in a time zone (dateWait.ts)
+  delay: z.union([
+    z
+      .object({
+        amount: z.number().positive(),
+        unit: z.enum(['minutes', 'hours', 'days']),
+      })
+      .refine(
+        data => {
+          // Max 365 days
+          const maxMinutes = 365 * 24 * 60;
+          const maxHours = 365 * 24;
+          const maxDays = 365;
 
-        if (data.unit === 'minutes') return data.amount <= maxMinutes;
-        if (data.unit === 'hours') return data.amount <= maxHours;
-        if (data.unit === 'days') return data.amount <= maxDays;
-        return true;
-      },
-      {
-        message: 'Delay cannot exceed 365 days',
-      },
-    ),
+          if (data.unit === 'minutes') return data.amount <= maxMinutes;
+          if (data.unit === 'hours') return data.amount <= maxHours;
+          if (data.unit === 'days') return data.amount <= maxDays;
+          return true;
+        },
+        {
+          message: 'Delay cannot exceed 365 days',
+        },
+      ),
+    z
+      .object({
+        until: z.string(),
+        timezone: z.string(),
+        ifLate: z.enum(DATE_WAIT_IF_LATE).default('skip'),
+      })
+      .strict()
+      .superRefine((data, ctx) => {
+        const problem = dateWaitProblem(data);
+        if (problem) ctx.addIssue({code: z.ZodIssueCode.custom, message: problem});
+      }),
+  ]),
   waitForEvent: z.object({
     // "execution": count only emails this execution sent, for the events canScopeWaitToExecution accepts
     scope: z.enum(['contact', 'execution']).optional(),

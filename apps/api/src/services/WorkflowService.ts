@@ -2,7 +2,7 @@ import type {Workflow, WorkflowExecution, WorkflowStep, WorkflowTransition} from
 import {Prisma, StepExecutionStatus, WorkflowExecutionStatus} from '@plunk/db';
 import type {AvailableField, PaginatedResponse, WorkflowExecutionWithDetails, WorkflowWithDetails} from '@plunk/types';
 import {toPrismaJson} from '@plunk/types';
-import {canRetryStepType} from '@plunk/shared';
+import {canRetryStepType, dateWaitProblem, hasDateWaitShape, isDateWait} from '@plunk/shared';
 import signale from 'signale';
 
 import {prisma} from '../database/prisma.js';
@@ -11,6 +11,7 @@ import {LONG_TRANSACTION, POOL_WAIT_TRANSACTION} from '../utils/database.js';
 import type {ListSort} from '../utils/listSort.js';
 
 import {ContactService} from './ContactService.js';
+import {DateWaits} from './DateWaits.js';
 import {EventService} from './EventService.js';
 import {NtfyService} from './NtfyService.js';
 import {ParkedRuns} from './ParkedRuns.js';
@@ -34,6 +35,21 @@ export class WorkflowService {
 
     if (!template) {
       throw new HttpException(404, 'Template not found');
+    }
+  }
+
+  /**
+   * Plunk Lite: a DELAY configured to wait until a date must be one that can be waited for (a real
+   * day and time, a time zone name, not more than two years ahead). An empty configuration (a step
+   * just added from the dashboard) or a wait for a duration is not checked here.
+   */
+  private static validateDateWait(type: WorkflowStep['type'], config: Prisma.JsonValue | undefined): void {
+    if (type !== 'DELAY' || !hasDateWaitShape(config)) {
+      return;
+    }
+    const problem = dateWaitProblem(config, new Date());
+    if (problem) {
+      throw new HttpException(400, problem);
     }
   }
 
@@ -583,6 +599,7 @@ export class WorkflowService {
     }
 
     await this.validateStepTemplate(projectId, data.templateId);
+    this.validateDateWait(data.type, data.config);
 
     // Create the new step
     const newStep = await prisma.workflowStep.create({
@@ -650,20 +667,28 @@ export class WorkflowService {
       throw new HttpException(404, 'Workflow step not found');
     }
 
+    // Plunk Lite: a date that cannot be waited for is a 400, before whether it may change now
+    this.validateDateWait(step.type, data.config);
+
     // Check if workflow is enabled and has active executions
     if (workflow.enabled) {
       const activeExecutions = await this.hasActiveExecutions(workflowId);
 
       if (activeExecutions > 0) {
-        // Only allow safe changes: name and position updates
-        const hasCriticalChanges = data.config !== undefined || data.templateId !== undefined;
+        // Only allow safe changes: name and position updates. Plunk Lite: and a new date, time zone
+        // or late option for a wait until a date (a new date moves the contacts waiting there, below)
+        const newDate =
+          step.type === 'DELAY' && isDateWait(step.config) && isDateWait(data.config) && data.templateId === undefined;
+        const hasCriticalChanges = !newDate && (data.config !== undefined || data.templateId !== undefined);
 
         if (hasCriticalChanges) {
           throw new HttpException(
             409,
             `Cannot modify step configuration while workflow has ${activeExecutions} active execution(s). ` +
               'Please disable the workflow first or wait for executions to complete. ' +
-              'You can still update the step name and position.',
+              // Plunk Lite: and the date of a wait until a date
+              'You can still update the step name and position, and the date, time zone or late option ' +
+              'of a wait until a date.',
           );
         }
       }
@@ -684,10 +709,22 @@ export class WorkflowService {
       }
     }
 
-    return prisma.workflowStep.update({
+    const updated = await prisma.workflowStep.update({
       where: {id: stepId},
       data: updateData,
     });
+
+    // Plunk Lite: a date wait whose date or time zone changed moves the contacts waiting there
+    if (
+      isDateWait(updated.config) &&
+      (!isDateWait(step.config) ||
+        step.config.until !== updated.config.until ||
+        step.config.timezone !== updated.config.timezone)
+    ) {
+      await QueueService.queueWithoutWaiting(DateWaits.queueReschedule(stepId), `the new date of step ${stepId}`);
+    }
+
+    return updated;
   }
 
   /**
@@ -966,6 +1003,7 @@ export class WorkflowService {
     }
 
     await this.validateStepTemplate(projectId, data.templateId);
+    this.validateDateWait(data.type, data.config);
 
     return prisma.$transaction(async tx => {
       const newStep = await tx.workflowStep.create({
