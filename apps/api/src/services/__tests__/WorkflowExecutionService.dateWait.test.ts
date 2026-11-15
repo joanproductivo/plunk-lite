@@ -205,12 +205,16 @@ describe('WorkflowExecutionService - waiting until a date', () => {
     expect(await emails(executionId)).toBe(0);
   });
 
-  it('walks the skip once when two copies of the late date wait run at the same time', async () => {
+  it('walks the skip once when two copies of the late date wait share its step execution', async () => {
     const workflow = await createWorkflow();
     const wait = await workflow.add(workflow.triggerId, WorkflowStepType.DELAY, until(-10 * MINUTE));
     const send = await workflow.add(wait, WorkflowStepType.SEND_EMAIL);
     const execution = await prisma.workflowExecution.create({
       data: {workflowId: workflow.id, contactId, status: WorkflowExecutionStatus.RUNNING, currentStepId: wait},
+    });
+    // A job retried while the first copy still runs finds the step execution that copy started
+    await prisma.workflowStepExecution.create({
+      data: {executionId: execution.id, stepId: wait, status: StepExecutionStatus.RUNNING, startedAt: new Date()},
     });
 
     await Promise.all([
@@ -220,6 +224,26 @@ describe('WorkflowExecutionService - waiting until a date', () => {
 
     const skipped = await prisma.workflowStepExecution.findMany({where: {executionId: execution.id, stepId: send}});
     expect(skipped.map(row => row.status)).toEqual([StepExecutionStatus.SKIPPED]);
+    expect(await emails(execution.id)).toBe(0);
+  });
+
+  it('sends nothing it skips when two copies of the late date wait start at the same time', async () => {
+    const workflow = await createWorkflow();
+    const wait = await workflow.add(workflow.triggerId, WorkflowStepType.DELAY, until(-10 * MINUTE));
+    const send = await workflow.add(wait, WorkflowStepType.SEND_EMAIL);
+    const execution = await prisma.workflowExecution.create({
+      data: {workflowId: workflow.id, contactId, status: WorkflowExecutionStatus.RUNNING, currentStepId: wait},
+    });
+
+    // Each copy may start its own step execution (as with any step), and then walk the skip
+    await Promise.all([
+      WorkflowExecutionService.processStepExecution(execution.id, wait),
+      WorkflowExecutionService.processStepExecution(execution.id, wait),
+    ]);
+
+    const rows = await prisma.workflowStepExecution.findMany({where: {executionId: execution.id, stepId: send}});
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every(row => row.status === StepExecutionStatus.SKIPPED)).toBe(true);
     expect(await emails(execution.id)).toBe(0);
   });
 
