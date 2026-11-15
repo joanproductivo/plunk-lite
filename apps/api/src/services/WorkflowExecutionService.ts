@@ -35,7 +35,7 @@ import {getDateRange, isDateString} from '../utils/dates.js';
 import {readCapped} from '../utils/readCapped.js';
 import {stepOutput} from '../utils/stepOutput.js';
 import {signWebhook, WEBHOOK_SIGNATURE_HEADER} from '../utils/webhookSignature.js';
-import {pickTransition} from '../utils/workflowTransitions.js';
+import {pickTransition, timeoutTransition} from '../utils/workflowTransitions.js';
 
 import {DateWaits} from './DateWaits.js';
 import {RECIPIENT_OVERRIDE_HEADER} from './EmailHeaderService.js';
@@ -379,14 +379,8 @@ export class WorkflowExecutionService {
 
     // Continue workflow - find transitions with timeout/fallback logic
     const transitions = stepExecution.step.outgoingTransitions || [];
-    const fallbackTransition = transitions.find(
-      t =>
-        (t.condition &&
-          typeof t.condition === 'object' &&
-          'branch' in t.condition &&
-          t.condition.branch === 'timeout') ||
-        (t.condition && typeof t.condition === 'object' && 'fallback' in t.condition && t.condition.fallback === true),
-    );
+    // Plunk Lite: the rule lives in timeoutTransition, shared with a wait skipped by a late date wait
+    const fallbackTransition = timeoutTransition(transitions);
 
     if (fallbackTransition) {
       // Follow timeout branch

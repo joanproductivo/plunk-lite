@@ -9,7 +9,7 @@ import signale from 'signale';
 import {prisma} from '../database/prisma.js';
 import {errorMessage} from '../database/redis.js';
 import {stepOutput} from '../utils/stepOutput.js';
-import {pickTransition} from '../utils/workflowTransitions.js';
+import {pickTransition, timeoutTransition} from '../utils/workflowTransitions.js';
 
 import {QueueService} from './QueueService.js';
 
@@ -71,7 +71,12 @@ export const DateWaits = {
     let result: Record<string, unknown> = {};
 
     for (;;) {
-      const nextId = pickTransition(current.outgoingTransitions ?? [], result)?.toStepId;
+      const transitions = current.outgoingTransitions ?? [];
+      // A skipped wait for an event goes on as when it times out (see processTimeout)
+      const nextId =
+        current.type === 'WAIT_FOR_EVENT'
+          ? (timeoutTransition(transitions) ?? transitions[0])?.toStepId
+          : pickTransition(transitions, result)?.toStepId;
       if (!nextId) {
         return {
           visited,
@@ -97,8 +102,7 @@ export const DateWaits = {
         result = await branchOf(next);
         visited.push({step: next, condition: result});
       } else {
-        // A skipped wait for an event goes on as if it had timed out (its timeout branch, if any)
-        result = next.type === 'WAIT_FOR_EVENT' ? {branch: 'timeout'} : {};
+        result = {};
         visited.push({step: next, skipped: true});
       }
       current = next;
@@ -108,7 +112,9 @@ export const DateWaits = {
   /**
    * Record what a late contact's skip walked through, after the date wait `dateWaitStepId`: skipped
    * steps as SKIPPED, conditions as COMPLETED with their branch, each a millisecond after the one
-   * before, so the run's history keeps the order it was walked in
+   * before, so the run's history keeps the order it was walked in. It returns once the clock has
+   * passed the last of those times, so that nothing written after (the next date wait's row, or a
+   * second skip's) is dated before them: parking reads the last step done by that order.
    */
   async recordLateRoute(
     executionId: string,
@@ -133,6 +139,10 @@ export const DateWaits = {
         };
       }),
     });
+    const last = base + visited.length;
+    while (Date.now() <= last) {
+      await new Promise(resolve => setTimeout(resolve, last + 1 - Date.now()));
+    }
   },
 
   /** After the date of `stepId` changed: a round now and another in a while (for late arrivals) */

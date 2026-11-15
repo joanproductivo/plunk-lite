@@ -380,11 +380,6 @@ export class FailureAlertService {
   }
 
   /**
-   * A workflow job that ran out of attempts. An execution that failed in a step was recorded
-   * there; this catches the ones that failed before a step could run (a missing step, the
-   * database), which leave the execution as it was.
-   */
-  /**
    * Plunk Lite: a round that moves the contacts waiting at a wait until a date to its new date
    * failed for good: some may end at the old date. Recorded against the step's workflow.
    */
@@ -406,6 +401,11 @@ export class FailureAlertService {
     }
   }
 
+  /**
+   * A workflow job that ran out of attempts. An execution that failed in a step was recorded
+   * there; this catches the ones that failed before a step could run (a missing step, the
+   * database), which leave the execution as it was.
+   */
   public static async recordWorkflowJob(executionId: string, error: string): Promise<void> {
     try {
       const execution = await prisma.workflowExecution.findUnique({

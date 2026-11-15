@@ -218,9 +218,8 @@ describe('WorkflowExecutionService - waiting until a date', () => {
       WorkflowExecutionService.processStepExecution(execution.id, wait),
     ]);
 
-    expect(
-      await prisma.workflowStepExecution.count({where: {executionId: execution.id, stepId: send}}),
-    ).toBeLessThanOrEqual(1);
+    const skipped = await prisma.workflowStepExecution.findMany({where: {executionId: execution.id, stepId: send}});
+    expect(skipped.map(row => row.status)).toEqual([StepExecutionStatus.SKIPPED]);
     expect(await emails(execution.id)).toBe(0);
   });
 

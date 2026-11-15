@@ -103,6 +103,52 @@ describe('DateWaits.lateRoute', () => {
     expect((await DateWaits.lateRoute(steps, 'w1', never)).end).toEqual({end: true, lastStep: steps[2], branch: null});
   });
 
+  it('follows the timeout rule of a wait for an event: its timeout or fallback branch, else its first', async () => {
+    const route = (to: [string, string?][], fallback = false) => {
+      const wait = step('ev', 'WAIT_FOR_EVENT', to);
+      if (fallback) {
+        wait.outgoingTransitions![1]!.condition = {fallback: true};
+      }
+      return [step('w1', 'DELAY', [['ev']], dateWait(-MINUTE)), wait, step('a', 'SEND_EMAIL'), step('b', 'SEND_EMAIL')];
+    };
+    const endsAt = async (steps: RouteStep[]) => {
+      const {end} = await DateWaits.lateRoute(steps, 'w1', never);
+      return 'lastStep' in end ? end.lastStep.id : null;
+    };
+
+    expect(await endsAt(route([['a'], ['b', 'timeout']]))).toBe('b');
+    expect(await endsAt(route([['a'], ['b']], true))).toBe('b');
+    expect(await endsAt(route([['a'], ['b', 'other']]))).toBe('a');
+  });
+
+  it('records the skipped steps in order, all dated before whatever is written after it returns', async () => {
+    const {project} = await factories.createUserWithProject();
+    const workflow = await factories.createWorkflow({projectId: project.id});
+    const contact = await factories.createContact({projectId: project.id});
+    const execution = await getPrismaClient().workflowExecution.create({
+      data: {workflowId: workflow.id, contactId: contact.id, status: WorkflowExecutionStatus.RUNNING},
+    });
+    const steps = await Promise.all(
+      Array.from({length: 30}, () =>
+        factories.createWorkflowStep({workflowId: workflow.id, type: WorkflowStepType.SEND_EMAIL}),
+      ),
+    );
+
+    await DateWaits.recordLateRoute(
+      execution.id,
+      'wait',
+      steps.map(s => ({step: s, skipped: true as const})),
+    );
+    const after = Date.now();
+
+    const rows = await getPrismaClient().workflowStepExecution.findMany({
+      where: {executionId: execution.id},
+      orderBy: {createdAt: 'asc'},
+    });
+    expect(rows.map(row => row.stepId)).toEqual(steps.map(s => s.id));
+    expect(rows.every(row => row.createdAt.getTime() < after)).toBe(true);
+  });
+
   it('throws on a step missing from the workflow', async () => {
     await expect(DateWaits.lateRoute([step('w1', 'DELAY', [['gone']])], 'w1', never)).rejects.toThrow(/not in/);
   });

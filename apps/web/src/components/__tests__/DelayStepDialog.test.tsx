@@ -84,7 +84,7 @@ describe('DelayStepDialog - waiting until a date', () => {
 
     await submit();
     expect(network.fetch).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('3 contacts are waiting here and move to the new date.');
+    expect(document.body.textContent).toContain('3 contacts waiting here will move to the new date.');
 
     const confirm = [...document.querySelectorAll('button')].find(button => button.textContent === 'Save new date')!;
     await act(async () => confirm.click());
@@ -100,7 +100,7 @@ describe('DelayStepDialog - waiting until a date', () => {
 
     await submit();
 
-    expect(document.body.textContent).toContain('1 contact is waiting here and continue right away.');
+    expect(document.body.textContent).toContain('1 contact waiting here will continue right away.');
   });
 
   it('saves a new date without asking when nobody waits', async () => {

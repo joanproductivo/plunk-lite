@@ -85,7 +85,7 @@ export function DelayStepDialog({step, workflowId, open, onOpenChange, onSuccess
     await save();
   };
 
-  const contacts = `${waiting} ${waiting === 1 ? 'contact is' : 'contacts are'} waiting here`;
+  const contacts = `${waiting} ${waiting === 1 ? 'contact' : 'contacts'} waiting here`;
 
   return (
     <>
@@ -152,7 +152,7 @@ export function DelayStepDialog({step, workflowId, open, onOpenChange, onSuccess
         icon={CalendarClock}
         title="Move the waiting contacts?"
         description={
-          confirming?.past ? `${contacts} and continue right away.` : `${contacts} and move to the new date.`
+          confirming?.past ? `${contacts} will continue right away.` : `${contacts} will move to the new date.`
         }
         confirmText="Save new date"
         status={isSubmitting ? 'loading' : 'idle'}
