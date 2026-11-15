@@ -205,26 +205,29 @@ describe('WorkflowExecutionService - waiting until a date', () => {
     expect(await emails(executionId)).toBe(0);
   });
 
-  it('walks the skip once when two copies of the late date wait share its step execution', async () => {
+  it('lets only the first of two copies of a late date wait on one step execution walk the skip', async () => {
     const workflow = await createWorkflow();
     const wait = await workflow.add(workflow.triggerId, WorkflowStepType.DELAY, until(-10 * MINUTE));
-    const send = await workflow.add(wait, WorkflowStepType.SEND_EMAIL);
-    const execution = await prisma.workflowExecution.create({
+    const step = await prisma.workflowStep.findUniqueOrThrow({where: {id: wait}});
+    const run = await prisma.workflowExecution.create({
       data: {workflowId: workflow.id, contactId, status: WorkflowExecutionStatus.RUNNING, currentStepId: wait},
+      include: {contact: true, workflow: true},
     });
-    // A job retried while the first copy still runs finds the step execution that copy started
-    await prisma.workflowStepExecution.create({
-      data: {executionId: execution.id, stepId: wait, status: StepExecutionStatus.RUNNING, startedAt: new Date()},
+    const row = await prisma.workflowStepExecution.create({
+      data: {executionId: run.id, stepId: wait, status: StepExecutionStatus.RUNNING, startedAt: new Date()},
     });
+    const executeDateWait = (
+      WorkflowExecutionService as unknown as {
+        executeDateWait: (...args: unknown[]) => Promise<Record<string, unknown>>;
+      }
+    ).executeDateWait.bind(WorkflowExecutionService);
+    const config = {...until(-10 * MINUTE), ifLate: 'skip'};
 
-    await Promise.all([
-      WorkflowExecutionService.processStepExecution(execution.id, wait),
-      WorkflowExecutionService.processStepExecution(execution.id, wait),
-    ]);
+    const first = await executeDateWait(step, run, row, config);
+    const second = await executeDateWait(step, run, row, config);
 
-    const skipped = await prisma.workflowStepExecution.findMany({where: {executionId: execution.id, stepId: send}});
-    expect(skipped.map(row => row.status)).toEqual([StepExecutionStatus.SKIPPED]);
-    expect(await emails(execution.id)).toBe(0);
+    expect(first.late).toBe('skip');
+    expect(second.late).toBeUndefined();
   });
 
   it('sends nothing it skips when two copies of the late date wait start at the same time', async () => {
