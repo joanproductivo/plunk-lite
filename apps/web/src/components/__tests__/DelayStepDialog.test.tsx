@@ -214,6 +214,38 @@ describe('DelayStepDialog - waiting until a date', () => {
     expect(network.fetch).toHaveBeenCalledTimes(1);
   });
 
+  it('refuses a new date that comes inside the spread of a date wait before it', async () => {
+    const config = {until: wall(86_400_000 + 6 * 60 * 60_000), timezone: 'UTC', ifLate: 'skip'};
+    const steps = [
+      {
+        id: 'before',
+        name: 'Morning live',
+        type: 'DELAY',
+        config: {until: wall(86_400_000), timezone: 'UTC', spreadMinutes: 240},
+        outgoingTransitions: [{toStepId: 'step'}],
+      },
+      {id: 'step', type: 'DELAY', config},
+    ];
+    await open(config, 0, steps);
+
+    await setDate(wall(86_400_000 + 3 * 60 * 60_000));
+    await submit();
+
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('The spread of "Morning live" reaches this date'));
+    expect(network.fetch).not.toHaveBeenCalled();
+  });
+
+  it('says nobody leaves earlier when a spread that has started grows', async () => {
+    await open({until: wall(-60 * 60_000), timezone: 'UTC', ifLate: 'skip', spreadMinutes: 180}, 2);
+    await setSpread(240);
+
+    await submit();
+
+    expect(document.body.textContent).toMatch(
+      /2 contacts waiting here will move to later times, by .+; nobody leaves earlier\./,
+    );
+  });
+
   it('still saves a rename when the saved spread already reaches the next date wait', async () => {
     const config = {until: wall(86_400_000), timezone: 'UTC', ifLate: 'skip', spreadMinutes: 240};
     const steps = [

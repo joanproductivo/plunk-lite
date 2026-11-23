@@ -453,6 +453,32 @@ export default function WorkflowEditorPage() {
           />
         )}
 
+        {/* Plunk Lite: a spread that reaches the next date wait, however it came about */}
+        {(() => {
+          const overlaps = (workflow.stepWaits ?? []).filter(wait => wait.spreadOverlap?.severity === 'error');
+          if (overlaps.length === 0) {
+            return null;
+          }
+          const stepName = (stepId: string) => workflow.steps.find(s => s.id === stepId)?.name ?? 'Wait';
+          return (
+            <Alert variant="warning">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>A spread reaches the next date wait</AlertTitle>
+              <AlertDescription>
+                <ul className="list-disc list-inside space-y-1">
+                  {overlaps.map(wait => (
+                    <li key={wait.stepId}>
+                      The last contacts of &quot;{stepName(wait.stepId)}&quot; would reach &quot;
+                      {stepName(wait.spreadOverlap?.stepId ?? '')}&quot; after its date and skip it. Shorten the spread
+                      or move that date later.
+                    </li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          );
+        })()}
+
         {/* Validation Warning Banner / Ready-to-enable Banner */}
         {!workflow.enabled &&
           (() => {

@@ -300,6 +300,39 @@ describe('DateWaits.rescheduleRound', () => {
     expect(output).toMatchObject({resumeAt: at.toISOString(), spreadMinutes: 0});
   });
 
+  it('inside a spread that has started, lets go only those whose new time has passed, and none when it grows', async () => {
+    const runs = await waiting(20, {queued: false});
+    const at = new Date(Date.now() - 60 * MINUTE);
+    const start = {until: at.toISOString().slice(0, 16), timezone: 'UTC'};
+    const startAt = new Date(instant(start));
+    const due = async () => Promise.all(runs.map(run => dueIn(run.rowId)));
+
+    await prisma.workflowStep.update({where: {id: stepId}, data: {config: {...start, spreadMinutes: 240}}});
+    await round();
+    const wide = await due();
+    runs.forEach((run, i) => {
+      const passed = DateWaits.slotOf(run.executionId, stepId, startAt, 240 * MINUTE).getTime() <= Date.now();
+      expect(wide[i]! <= 0).toBe(passed);
+    });
+
+    // Growing it moves nobody earlier
+    await prisma.workflowStep.update({where: {id: stepId}, data: {config: {...start, spreadMinutes: 480}}});
+    await round();
+    const wider = await due();
+    runs.forEach((_, i) => {
+      if (wide[i]! > 0) expect(wider[i]!).toBeGreaterThanOrEqual(wide[i]! - 5000);
+    });
+
+    // Shortening it lets go exactly those whose new time has passed
+    await prisma.workflowStep.update({where: {id: stepId}, data: {config: {...start, spreadMinutes: 90}}});
+    await round();
+    const short = await due();
+    runs.forEach((run, i) => {
+      const passed = DateWaits.slotOf(run.executionId, stepId, startAt, 90 * MINUTE).getTime() <= Date.now();
+      expect(short[i]! <= 0).toBe(passed);
+    });
+  }, 30_000);
+
   it('leaves the runs stored before spreads existed, at the date in force with none', async () => {
     await waiting(2);
     const reschedule = vi.spyOn(QueueService, 'rescheduleWorkflowDelayEnd');

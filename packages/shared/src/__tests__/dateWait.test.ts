@@ -245,6 +245,25 @@ describe('nextDateWaitInstants and spreadOverlap', () => {
     });
   });
 
+  it('is only a warning when contacts would reach the next wait late even without a spread', () => {
+    // A wait for an event of up to two days between the 25th and the 26th
+    const steps = link(
+      [
+        wait('a', first.until),
+        step('w', 'WAIT_FOR_EVENT', {eventName: 'x', timeout: 2 * 86_400}),
+        wait('b', '2026-11-26T14:00'),
+      ],
+      [
+        ['a', 'w'],
+        ['w', 'b'],
+      ],
+    );
+    expect(spreadOverlap(steps, 'a', {...first, spreadMinutes: 1})?.severity).toBe('warning');
+    // A next wait whose date comes before this one
+    const before = link([wait('a', first.until), wait('b', '2026-11-25T10:00')], [['a', 'b']]);
+    expect(spreadOverlap(before, 'a', {...first, spreadMinutes: 30})?.severity).toBe('warning');
+  });
+
   it('puts an error before a warning', () => {
     const steps = link(
       [

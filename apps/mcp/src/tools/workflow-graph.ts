@@ -1158,8 +1158,8 @@ function checkDateWait(
         overlap.severity === 'error'
           ? `${name}'s spread reaches the next date wait ${where}: the last contacts would arrive late and skip ` +
             'it. Use a shorter spreadMinutes.'
-          : `${name}'s spread may reach the next date wait ${where}: it goes on right away when late, or a ` +
-            'WAIT_FOR_EVENT with no timeout lies between them.',
+          : `${name}'s spread may reach the next date wait ${where}: it goes on right away when late, a ` +
+            'WAIT_FOR_EVENT with no timeout lies between them, or some contacts reach it late even without a spread.',
     });
   }
 }

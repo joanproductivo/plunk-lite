@@ -260,8 +260,9 @@ export interface SpreadOverlap {
   stepId: string;
   at: Date;
   /**
-   * `error`: late contacts skip that wait's email. `warning`: the next wait goes on when late, or a
-   * wait for an event with no time limit lies between them
+   * `error`: the spread makes contacts late for that wait, so they skip its email. `warning`: the next
+   * wait goes on when late, a wait for an event with no time limit lies between them, or some
+   * contacts would reach it late even without a spread
    */
   severity: 'error' | 'warning';
 }
@@ -269,7 +270,8 @@ export interface SpreadOverlap {
 /**
  * The date wait after `stepId` that its spread (`config`, as it is or is about to be saved) reaches,
  * if any: one whose date comes before the end of the spread plus the waits in between plus 15
- * minutes. An error comes before a warning, and the earlier date first
+ * minutes. It is an error only when the spread is what makes contacts late for it (a route late even
+ * without one is a warning). An error comes before a warning, and the earlier date first
  */
 export function spreadOverlap(
   steps: readonly DateWaitRouteStep[],
@@ -282,8 +284,10 @@ export function spreadOverlap(
   if (spreadMs === 0 || !at) return null;
 
   const overlaps = nextDateWaitInstants(steps, stepId).flatMap((next): SpreadOverlap[] => {
-    const reaches = at.getTime() + spreadMs + next.travelMs + SPREAD_SLACK_MS > next.at.getTime();
-    if (reaches && next.ifLate === 'skip') {
+    const arrival = at.getTime() + next.travelMs + SPREAD_SLACK_MS;
+    const reaches = arrival + spreadMs > next.at.getTime();
+    const lateAnyway = arrival > next.at.getTime();
+    if (reaches && !lateAnyway && next.ifLate === 'skip') {
       return [{stepId: next.stepId, at: next.at, severity: 'error'}];
     }
     if (reaches || next.unbounded) {

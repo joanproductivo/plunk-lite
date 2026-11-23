@@ -109,12 +109,32 @@ export function DelayStepDialog({
     if (end <= now) {
       return `${contacts} will continue right away.`;
     }
+    const widened =
+      savedDate !== null &&
+      savedDate.until === dateWait.until &&
+      savedDate.timezone === dateWait.timezone &&
+      (dateWait.spreadMinutes ?? 0) > (savedDate.spreadMinutes ?? 0);
+    if (at <= now && widened) {
+      return `${contacts} will move to later times, by ${timeHere(new Date(end))}; nobody leaves earlier.`;
+    }
     if (at <= now) {
       return `${contacts}: those whose time has passed continue right away, the rest by ${timeHere(new Date(end))}.${shortened}`;
     }
     return dateWait.spreadMinutes
       ? `${contacts} will move to their new times.`
       : `${contacts} will move to the new date.`;
+  };
+
+  /** A date wait before this one whose spread would make contacts late for it, with the new date here */
+  const spreadReachingHere = () => {
+    const withThis = steps.map(other => (other.id === step.id ? {...other, config: dateWait} : other));
+    return steps.find(other => {
+      if (other.id === step.id || other.type !== 'DELAY' || !isDateWait(other.config)) {
+        return false;
+      }
+      const overlap = dateWaitSpreadMs(other.config) > 0 ? spreadOverlap(withThis, other.id, other.config) : null;
+      return overlap?.stepId === step.id && overlap.severity === 'error';
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -139,9 +159,18 @@ export function DelayStepDialog({
           return;
         }
         toast.warning(
-          `The spread may reach the next date wait ${where}, which goes on right away when late, or a wait for ` +
-            'an event with no time limit lies before it.',
+          `The spread may reach the next date wait ${where}: it goes on right away when late, a wait for an ` +
+            'event with no time limit lies before it, or some contacts reach it late even without a spread.',
         );
+      }
+      // And a new date here may come inside the spread of a date wait before it
+      const earlier = timesChange ? spreadReachingHere() : null;
+      if (earlier) {
+        toast.error(
+          `The spread of "${earlier.name ?? 'Wait'}" reaches this date: late contacts would skip it. ` +
+            'Move this date later or shorten that spread.',
+        );
+        return;
       }
       if (movesWaiting) {
         setConfirming({description: moveDescription()});
