@@ -83,9 +83,9 @@ Some keys are reserved by Plunk and managed at the contact level (not inside `da
 
 The following keys are also **silently filtered out** of any `data` payload — sending them through `/v1/track`, `POST /contacts`, or `PATCH /contacts/:id` will not store them and will not return an error:
 
-`id`, `plunk_id`, `plunk_email`, `unsubscribeUrl`, `subscribeUrl`, `manageUrl`
+`id`, `plunk_id`, `plunk_email`, `unsubscribeUrl`, `subscribeUrl`, `manageUrl`, `optOutUrl`
 
-The last three are auto-generated per-recipient at send time and exposed as template variables (see [Templates](/concepts/templates)).
+The last four are auto-generated per-recipient at send time and exposed as template variables (see [Templates](/concepts/templates)).
 
 ### Special keys
 

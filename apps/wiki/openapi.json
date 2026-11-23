@@ -105,6 +105,12 @@
             "type": "string",
             "enum": ["TRANSACTIONAL", "MARKETING", "HEADLESS"]
           },
+          "optOutSegmentId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Plunk Lite: the template's opt-out topic, a static segment (TRANSACTIONAL templates only). Its emails carry a one-click `List-Unsubscribe` that puts the contact in that segment, and a notices footer linking to the page where they can do the same, and are not sent to its members. The segment cannot be deleted while a template uses it."
+          },
           "projectId": {
             "type": "string"
           },
@@ -603,7 +609,7 @@
       "post": {
         "tags": ["Public API"],
         "summary": "Send transactional email",
-        "description": "Send a transactional email via the public API. Automatically creates or updates the recipient contact.\n\n**Required content:** either a `template` ID, **or** both `subject` and `body`. Template fields can be overridden by explicit request fields.\n\n**Sender:** `from` is required unless using a template that already has a `from` configured. The sender's domain must be verified.\n\n**Multiple recipients:** `to` takes 1 to 50 recipients. Each is processed in turn with its own contact upsert and rendered email — there is no batch-send semantics. A recipient that is refused (a client error) does not stop the others: the answer is `207` with `data.failed` listing `{email, code, message, suggestedEmail?}` for those not sent. An unexpected error stops the ones after it, which are listed with `NOT_ATTEMPTED`. A request that sent nothing answers with the error. A `207` keeps its `Idempotency-Key`, so retrying it gives `409` and never sends the others twice. Sending is always immediate; for scheduled sends, use a Campaign.\n\n**New recipients:** a recipient that is not a contact yet is refused with `422 INVALID_EMAIL` when its domain does not exist, takes no email, is disposable or is a slip of a large provider's (`gmial.com`); `error.details` has `reasons` and any `suggestedEmail`. No contact is created for it.\n\n**Attachments:** up to 10 attachments per email and 10 MB total by default. A request can be at most 10 MB, so attachments, which travel base64-encoded, can add up to about 7 MB.\n\n**Message format:** `body` is your HTML. Plunk generates a plain text alternative from it and sends both, which avoids the spam penalties that apply to HTML-only mail. There is no plain text field to set.",
+        "description": "Send a transactional email via the public API. Automatically creates or updates the recipient contact.\n\n**Required content:** either a `template` ID, **or** both `subject` and `body`. Template fields can be overridden by explicit request fields.\n\n**Sender:** `from` is required unless using a template that already has a `from` configured. The sender's domain must be verified.\n\n**Multiple recipients:** `to` takes 1 to 50 recipients. Each is processed in turn with its own contact upsert and rendered email — there is no batch-send semantics. A recipient that is refused (a client error) does not stop the others: the answer is `207` with `data.failed` listing `{email, code, message, suggestedEmail?}` for those not sent. An unexpected error stops the ones after it, which are listed with `NOT_ATTEMPTED`. A request that sent nothing answers with the error. A `207` keeps its `Idempotency-Key`, so retrying it gives `409` and never sends the others twice. Sending is always immediate; for scheduled sends, use a Campaign.\n\n**New recipients:** a recipient that is not a contact yet is refused with `422 INVALID_EMAIL` when its domain does not exist, takes no email, is disposable or is a slip of a large provider's (`gmial.com`); `error.details` has `reasons` and any `suggestedEmail`. No contact is created for it.\n\n**Attachments:** up to 10 attachments per email and 10 MB total by default. A request can be at most 10 MB, so attachments, which travel base64-encoded, can add up to about 7 MB.\n\n**Message format:** `body` is your HTML. Plunk generates a plain text alternative from it and sends both, which avoids the spam penalties that apply to HTML-only mail. There is no plain text field to set.\n\n**Opt-out topics (Plunk Lite):** a `template` with an opt-out topic is not sent to a recipient who joined its segment: that recipient is refused with `422` `CONTACT_OPTED_OUT` (in `data.failed` with others, or as the answer to a single recipient), even when the request passes its own `body`. The contact is still created or updated first, and `subscribed: true` still applies (with the double opt-in on, it waits for confirmation and gets the confirmation email), but it does not join the call's `segments`. Other transactional templates still reach it. In the template, `{{optOutUrl}}` is the recipient's opt-out page.",
         "operationId": "sendEmail",
         "requestBody": {
           "required": true,
@@ -732,7 +738,7 @@
                   "data": {
                     "type": "object",
                     "additionalProperties": true,
-                    "description": "Variables for template rendering and contact data updates. Each value can be:\n- A primitive (string, number, boolean) — saved on the contact and available as a template variable.\n- `null` — deletes the field from the contact.\n- An empty string — skipped (does not overwrite existing data).\n- An object `{ value, persistent: false }` — used for this send only, not stored on the contact (good for one-shot password reset codes, magic links).\n\nReserved keys (`id`, `plunk_id`, `plunk_email`, `email`, `unsubscribeUrl`, `subscribeUrl`, `manageUrl`) are silently filtered out."
+                    "description": "Variables for template rendering and contact data updates. Each value can be:\n- A primitive (string, number, boolean) — saved on the contact and available as a template variable.\n- `null` — deletes the field from the contact.\n- An empty string — skipped (does not overwrite existing data).\n- An object `{ value, persistent: false }` — used for this send only, not stored on the contact (good for one-shot password reset codes, magic links).\n\nReserved keys (`id`, `plunk_id`, `plunk_email`, `email`, `unsubscribeUrl`, `subscribeUrl`, `manageUrl`, `optOutUrl`) are silently filtered out."
                   },
                   "headers": {
                     "type": "object",
@@ -1839,6 +1845,12 @@
                     "enum": ["TRANSACTIONAL", "MARKETING", "HEADLESS"],
                     "default": "MARKETING",
                     "description": "Optional. Defaults to `MARKETING` when omitted."
+                  },
+                  "optOutSegmentId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "nullable": true,
+                    "description": "Plunk Lite: the opt-out topic, a static segment of the project, on a `TRANSACTIONAL` template only; anything else answers `400` (`field: optOutSegmentId`). Updating the template (`PATCH /templates/{id}`) to another type needs `optOutSegmentId: null` in the same request, and `null` removes the topic, so the contacts who opted out get the template again."
                   }
                 }
               },

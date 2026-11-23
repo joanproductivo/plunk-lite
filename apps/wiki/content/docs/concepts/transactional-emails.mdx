@@ -17,6 +17,11 @@ You can also send transactional emails using a [template](/concepts/templates) y
 ## Adding recipients to segments
 Pass `segments`, a list of up to 20 entries with static segment ids, and every recipient an email is created for joins them in the same call — for example, the people a signup form sends a welcome email to. `null`, an empty string, and blank or `null` entries (`[""]`) name none. The ids are checked before anything is sent, so one that is not a static segment of the project answers `422`, naming its place in the list. A recipient whose email is refused is not added. Adding a current member counts as a new entry, which fires the segment's `entry` event again when it tracks membership. See [Segments](/concepts/segments).
 
+## Opt-out topics (Plunk Lite)
+A transactional template can have an **opt-out topic**: a static segment, chosen in the template's settings (or with `optOutSegmentId`). Use it for notices that go to many people, never for receipts or access emails. Its emails then carry a one-click unsubscribe header (`List-Unsubscribe`, RFC 8058) and the notices footer, set by language in **Settings → Brand**, which lead to the opt-out page. A contact who opts out joins that segment and stops getting the templates of that topic, from workflows and from `/v1/send`; every other transactional email still reaches them.
+
+`/v1/send` with such a template to a contact who opted out answers `422` `CONTACT_OPTED_OUT` for that recipient and sends nothing to them, even if the request passes its own `body`. The contact is still created or updated, and `subscribed: true` still applies, but it does not join the call's `segments`. A workflow step completes, with an email marked failed: "Contact opted out of this kind of email". See [Unsubscribe pages](/guides/unsubscribe-pages#opt-out-topics-plunk-lite).
+
 ## What's next
 
 <Cards>
