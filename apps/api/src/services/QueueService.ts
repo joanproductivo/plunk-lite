@@ -517,7 +517,7 @@ export class QueueService {
   }
 
   /**
-   * Plunk Lite: make the job that ends a date wait run in `delayMs`, after its date changed. A
+   * Plunk Lite: make the job that ends a date wait run in `delayMs`, after its date or spread changed. A
    * delayed job gets its delay changed; a missing or finished one is queued again with it; one
    * waiting to run is left alone (it runs now, and processDelayEnd holds it back if the date is
    * later). Throws for one running now (it may be holding itself back to the old date) and if Redis
@@ -548,7 +548,7 @@ export class QueueService {
     await this.queueWorkflowDelayEnd(executionId, stepId, stepExecutionId, Math.max(0, delayMs));
   }
 
-  /** Plunk Lite: a round of moving the contacts waiting at a date wait to its new date */
+  /** Plunk Lite: a round of moving the contacts waiting at a date wait to its new date or spread */
   public static async queueDateWaitReschedule(data: RescheduleDateWaitJobData, delayMs = 0): Promise<Job> {
     return workflowQueue.add('reschedule-date-wait', data, {
       delay: delayMs,

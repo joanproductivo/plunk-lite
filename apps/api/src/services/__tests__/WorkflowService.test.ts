@@ -801,6 +801,26 @@ describe('WorkflowService', () => {
         reschedule.mockRestore();
       });
 
+      it('moves the contacts waiting when only the spread changes, and not when it stays', async () => {
+        const reschedule = vi.spyOn(DateWaits, 'queueReschedule').mockResolvedValue();
+        const {workflow, step} = await busyDelay();
+        const same = step.config as {until: string; timezone: string};
+
+        await WorkflowService.updateStep(projectId, workflow.id, step.id, {config: {...same, spreadMinutes: 240}});
+        expect(reschedule).toHaveBeenCalledTimes(1);
+        await WorkflowService.updateStep(projectId, workflow.id, step.id, {config: {...same, spreadMinutes: 240}});
+        expect(reschedule).toHaveBeenCalledTimes(1);
+        // Removing it, or saving 0 where there was none, compare as no spread
+        await WorkflowService.updateStep(projectId, workflow.id, step.id, {config: same});
+        expect(reschedule).toHaveBeenCalledTimes(2);
+        await WorkflowService.updateStep(projectId, workflow.id, step.id, {config: {...same, spreadMinutes: 0}});
+        expect(reschedule).toHaveBeenCalledTimes(2);
+        await expect(
+          WorkflowService.updateStep(projectId, workflow.id, step.id, {config: {...same, spreadMinutes: 1441}}),
+        ).rejects.toMatchObject({code: 400});
+        reschedule.mockRestore();
+      });
+
       it('still refuses changing it to a duration, or its template, while contacts wait', async () => {
         const {workflow, step} = await busyDelay();
         const template = await factories.createTemplate({projectId});
