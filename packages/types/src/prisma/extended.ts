@@ -109,11 +109,14 @@ export type StepResult = Record<string, unknown>;
 
 /**
  * Plunk Lite: the contacts waiting at one step of a workflow, and, for a wait until a date, the
- * instant it ends (ISO) and whether that has passed
+ * instant it ends (ISO) and whether that has passed. With a spread, when the last contact leaves
+ * (`spreadUntil`), and the next date wait it reaches, if any (`spreadOverlap`)
  */
 export interface StepWait {
   stepId: string;
   waiting: number;
   at?: string;
   late?: boolean;
+  spreadUntil?: string;
+  spreadOverlap?: {stepId: string; at: string; severity: 'error' | 'warning'};
 }

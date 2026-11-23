@@ -3,7 +3,7 @@ import type {FilterCondition, FilterGroup, OptInTexts, RequestedSegment} from '@
 import {CONTACT_SUBSCRIPTION_STATUSES, SNOOZE_DURATIONS} from '@plunk/types';
 import {z} from 'zod';
 
-import {DATE_WAIT_IF_LATE, dateWaitProblem} from '../dateWait.js';
+import {DATE_WAIT_IF_LATE, DATE_WAIT_MAX_SPREAD_MINUTES, dateWaitProblem} from '../dateWait.js';
 import {
   CAMPAIGN_EXCLUDED_SEGMENTS_MAX,
   REQUEST_SEGMENTS_MAX,
@@ -443,6 +443,7 @@ export const WorkflowStepConfigSchemas = {
         until: z.string(),
         timezone: z.string(),
         ifLate: z.enum(DATE_WAIT_IF_LATE).default('skip'),
+        spreadMinutes: z.number().int().min(0).max(DATE_WAIT_MAX_SPREAD_MINUTES).optional(),
       })
       .strict()
       .superRefine((data, ctx) => {
