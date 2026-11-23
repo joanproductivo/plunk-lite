@@ -241,6 +241,21 @@ export function ResultState({
   );
 }
 
+/**
+ * Plunk Lite: a link that loaded but can no longer do what it offered (a replaced confirmation, an
+ * opt-out whose template lost its topic). Amber, between the green outcome and the red error.
+ */
+export function NoticeState({title, children}: {title: string; children: React.ReactNode}) {
+  return (
+    <div className="flex flex-col gap-4 p-6 sm:p-8">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-600/20 ring-inset">
+        <AlertCircle className="h-5 w-5" aria-hidden="true" />
+      </div>
+      <CardIntro title={title}>{children}</CardIntro>
+    </div>
+  );
+}
+
 /** Error card for a link that could not be resolved. */
 export function ErrorCard({translator, message}: {translator: Translator; message: string}) {
   return (

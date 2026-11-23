@@ -20,7 +20,11 @@ let root: Root;
 let container: HTMLDivElement;
 const fetcher = vi.fn(
   async (url: string): Promise<unknown> =>
-    url.endsWith('/footers') ? SAVED : {...BRAND_DEFAULTS, button: BUTTON_DEFAULTS},
+    url.endsWith('/footers')
+      ? SAVED
+      : url.endsWith('/opt-out-footers')
+        ? {}
+        : {...BRAND_DEFAULTS, button: BUTTON_DEFAULTS},
 );
 
 async function render(canEdit = true) {
@@ -131,5 +135,33 @@ describe('FooterSettings', () => {
     expect(container.textContent).toContain('Only admins can change the footer.');
     expect(text().disabled).toBe(true);
     expect(link().disabled).toBe(true);
+  });
+
+  // Plunk Lite: the notices footer of transactional templates with an opt-out topic
+  it("edits the notices footer on its own endpoint, from Plunk's notices text", async () => {
+    vi.mocked(network.fetch).mockImplementationOnce(async (_method, _url, body) => body);
+    await act(async () => {
+      root.render(
+        <SWRConfig value={{fetcher, provider: () => new Map(), dedupingInterval: 0}}>
+          <FooterSettings kind="optOut" projectId="project-1" projectName="Acme" language="es" canEdit />
+        </SWRConfig>,
+      );
+    });
+
+    expect(fetcher).toHaveBeenCalledWith('/projects/project-1/opt-out-footers');
+    expect(document.body.textContent).toContain('Notices footer');
+    const notices = document.querySelector<HTMLTextAreaElement>('#optout-footer-text')!;
+    expect(notices.value).toBe('Recibes estos avisos de {projectName}. {link}.');
+    expect(document.querySelector<HTMLInputElement>('#optout-footer-link')!.value).toBe(
+      'No quiero más avisos como este',
+    );
+    expect(preview()).toContain('Recibes estos avisos de Acme.');
+
+    await type(notices, 'Avisos de {projectName}. {link}.');
+    await act(async () => buttonNamed('Save')!.click());
+
+    expect(network.fetch).toHaveBeenCalledWith('PUT', '/projects/project-1/opt-out-footers', {
+      es: {text: 'Avisos de {projectName}. {link}.', linkText: 'No quiero más avisos como este'},
+    });
   });
 });

@@ -12,6 +12,7 @@ import {NextSeo} from 'next-seo';
 import {DashboardLayout} from '../../components/DashboardLayout';
 import {EmailSettings} from '../../components/EmailSettings';
 import {EmailEditor} from '../../components/EmailEditor';
+import {OptOutTopicField, templateTypeDescription} from '../../components/templates/OptOutTopicField';
 import {network} from '../../lib/network';
 import {EmailFormValidator} from '../../lib/validation';
 import {ArrowLeft, TriangleAlert} from 'lucide-react';
@@ -33,6 +34,9 @@ export default function CreateTemplatePage() {
   const [fromName, setFromName] = useState('');
   const [replyTo, setReplyTo] = useState('');
   const [type, setType] = useState<'MARKETING' | 'TRANSACTIONAL' | 'HEADLESS'>('MARKETING');
+  // Plunk Lite: the opt-out topic, kept only while the type is TRANSACTIONAL
+  const [topic, setTopic] = useState<string | null>(null);
+  const optOutSegmentId = type === 'TRANSACTIONAL' ? topic : null;
   const [saving, setSaving] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -56,6 +60,7 @@ export default function CreateTemplatePage() {
         fromName: fromName || null,
         replyTo: replyTo || null,
         type,
+        optOutSegmentId,
       });
 
       toast.success('Template created');
@@ -133,7 +138,7 @@ export default function CreateTemplatePage() {
                   <Card className="xl:order-3">
                     <CardHeader>
                       <CardTitle>Template type</CardTitle>
-                      <CardDescription>Transactional templates skip the subscription check and the footer.</CardDescription>
+                      <CardDescription>{templateTypeDescription(Boolean(optOutSegmentId))}</CardDescription>
                     </CardHeader>
                     <CardContent>
                       <div className="flex flex-col gap-2">
@@ -178,6 +183,7 @@ export default function CreateTemplatePage() {
                           </div>
                         </div>
                       )}
+                      <OptOutTopicField type={type} value={optOutSegmentId} body={body} onChange={setTopic} />
                     </CardContent>
                   </Card>
                 </div>
@@ -227,6 +233,7 @@ export default function CreateTemplatePage() {
                     from={from}
                     replyTo={replyTo}
                     fillHeight
+                    optOutVariable
                   />
                 </CardContent>
               </Card>

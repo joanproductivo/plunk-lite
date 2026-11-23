@@ -250,7 +250,12 @@ function nearest(name: string, candidates: string[]): string | undefined {
  * Returns nothing when `fields` is empty: that means the field list has not loaded (or
  * the project has no contacts yet), and every reference would look like a mistake.
  */
-export function lintTemplateFields(source: string, fields: ContactField[]): TemplateFieldWarning[] {
+export function lintTemplateFields(
+  source: string,
+  fields: ContactField[],
+  /** Plunk Lite: whether `optOutUrl` is in scope, as in templates (a campaign's is always empty) */
+  optOutVariable = false,
+): TemplateFieldWarning[] {
   if (fields.length === 0 || !source) {
     return [];
   }
@@ -259,7 +264,7 @@ export function lintTemplateFields(source: string, fields: ContactField[]): Temp
   // The endpoint names custom fields by their path (`data.plan`), while references are
   // reduced to their root (`plan`) by `rootOf`. Key by the same root so the two meet.
   const byName = new Map(fields.map(field => [rootOf(field.field) ?? field.field, field]));
-  const known = [...RUNTIME_NAMES, ...byName.keys()];
+  const known = [...RUNTIME_NAMES, ...(optOutVariable ? ['optOutUrl'] : []), ...byName.keys()];
   const knownSet = new Set(known);
 
   const warnings: TemplateFieldWarning[] = [];

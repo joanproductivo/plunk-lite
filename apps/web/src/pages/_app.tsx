@@ -32,6 +32,8 @@ const PUBLIC_ROUTES = [
   '/manage',
   // Plunk Lite: the double opt-in's confirmation page
   '/confirm',
+  // Plunk Lite: the opt-out page of a transactional template's opt-out topic
+  '/opt-out',
 ];
 
 // Routes that don't require a project. /account has to be here: deleting your account is

@@ -844,6 +844,14 @@ export default function Settings() {
                   language={activeProject.language}
                   canEdit={currentUserRole !== 'MEMBER'}
                 />
+                {/* Plunk Lite: the footer of transactional templates with an opt-out topic */}
+                <FooterSettings
+                  kind="optOut"
+                  projectId={activeProject.id}
+                  projectName={activeProject.name}
+                  language={activeProject.language}
+                  canEdit={currentUserRole !== 'MEMBER'}
+                />
                 <OptInSettings
                   projectId={activeProject.id}
                   projectName={activeProject.name}

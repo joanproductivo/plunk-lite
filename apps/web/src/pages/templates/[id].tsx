@@ -15,6 +15,7 @@ import type {Template} from '@plunk/db';
 import {DashboardLayout} from '../../components/DashboardLayout';
 import {EmailSettings} from '../../components/EmailSettings';
 import {EmailEditor} from '../../components/EmailEditor';
+import {OptOutTopicField, templateTypeDescription} from '../../components/templates/OptOutTopicField';
 import {network} from '../../lib/network';
 import {useChangeTracking} from '../../lib/hooks/useChangeTracking';
 import {ArrowLeft, Save, Trash2, TriangleAlert} from 'lucide-react';
@@ -59,9 +60,13 @@ function TemplateEditor() {
         fromName: template.fromName || '',
         replyTo: template.replyTo || '',
         type: template.type,
+        optOutSegmentId: template.optOutSegmentId ?? null,
       });
     }
   }, [template, editedTemplate]);
+
+  // Plunk Lite: only a TRANSACTIONAL template keeps its opt-out topic; any other type saves without it
+  const optOutSegmentId = editedTemplate.type === 'TRANSACTIONAL' ? (editedTemplate.optOutSegmentId ?? null) : null;
 
   const hasChanges = useMemo(() => {
     if (!template || Object.keys(editedTemplate).length === 0) return false;
@@ -73,9 +78,10 @@ function TemplateEditor() {
       editedTemplate.from !== template.from ||
       (editedTemplate.fromName || '') !== (template.fromName || '') ||
       (editedTemplate.replyTo || '') !== (template.replyTo || '') ||
-      editedTemplate.type !== template.type
+      editedTemplate.type !== template.type ||
+      optOutSegmentId !== (template.optOutSegmentId ?? null)
     );
-  }, [editedTemplate, template]);
+  }, [editedTemplate, template, optOutSegmentId]);
 
   // Warn before leaving page with unsaved changes
   useChangeTracking(hasChanges);
@@ -94,6 +100,7 @@ function TemplateEditor() {
         fromName: editedTemplate.fromName || null,
         replyTo: editedTemplate.replyTo || null,
         type: editedTemplate.type,
+        optOutSegmentId,
       });
 
       // Silent save - no toast notification
@@ -185,7 +192,7 @@ function TemplateEditor() {
                 <Card>
                   <CardHeader>
                     <CardTitle>Template type</CardTitle>
-                    <CardDescription>Transactional templates skip the subscription check and the footer.</CardDescription>
+                    <CardDescription>{templateTypeDescription(Boolean(optOutSegmentId))}</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="flex flex-col gap-2">
@@ -230,6 +237,13 @@ function TemplateEditor() {
                         </div>
                       </div>
                     )}
+                    <OptOutTopicField
+                      type={editedTemplate.type}
+                      value={optOutSegmentId}
+                      saved={template.optOutSegmentId}
+                      body={editedTemplate.body ?? ''}
+                      onChange={id => setEditedTemplate({...editedTemplate, optOutSegmentId: id})}
+                    />
                   </CardContent>
                 </Card>
               </div>
@@ -279,6 +293,7 @@ function TemplateEditor() {
                   from={editedTemplate.from || ''}
                   replyTo={editedTemplate.replyTo || ''}
                   fillHeight
+                  optOutVariable
                 />
               </CardContent>
             </Card>
