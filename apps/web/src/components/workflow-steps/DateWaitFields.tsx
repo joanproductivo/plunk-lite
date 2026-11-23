@@ -1,9 +1,11 @@
 import type {DateWaitConfig, DateWaitIfLate} from '@plunk/shared';
-import {wallTimeToInstant} from '@plunk/shared';
+import {dateWaitSpreadMs, wallTimeToInstant} from '@plunk/shared';
 import {Input, Label, RadioGroup, RadioGroupItem} from '@plunk/ui';
 import {useMemo} from 'react';
 
 import {formatDateTimeLocal, getUserTimezone} from '../../lib/dateUtils';
+
+import {spreadLabel} from './shared';
 
 const IF_LATE_OPTIONS: {value: DateWaitIfLate; label: string; description: string}[] = [
   {
@@ -20,6 +22,9 @@ const IF_LATE_OPTIONS: {value: DateWaitIfLate; label: string; description: strin
     description: 'The contact goes on to the next step at once, as if the wait had just ended.',
   },
 ];
+
+/** Plunk Lite: the spreads to choose from, in minutes (0: all leave at the date) */
+const SPREAD_OPTIONS = [0, 30, 60, 120, 180, 240, 360, 480, 720];
 
 /** The time zones to choose from: every one the browser knows, UTC, and the one saved if missing */
 function timezoneOptions(current: string): string[] {
@@ -39,11 +44,22 @@ export function defaultDateWait(): DateWaitConfig {
   return {until: formatDateTimeLocal(tomorrow), timezone: getUserTimezone(), ifLate: 'skip'};
 }
 
-/** Plunk Lite: the date, the time zone, what happens to a contact who arrives late, and the time it stands for here */
+/**
+ * Plunk Lite: the date, the time zone, the spread, what happens to a contact who arrives late, and
+ * the time it stands for here
+ */
 export function DateWaitFields({value, onChange}: {value: DateWaitConfig; onChange: (value: DateWaitConfig) => void}) {
   const zones = useMemo(() => timezoneOptions(value.timezone), [value.timezone]);
   const at = value.until ? wallTimeToInstant(value.until, value.timezone) : null;
   const browserZone = getUserTimezone();
+  const spread = value.spreadMinutes ?? 0;
+  // A spread saved through the API that is not in the list still shows
+  const spreads = SPREAD_OPTIONS.includes(spread) ? SPREAD_OPTIONS : [...SPREAD_OPTIONS, spread].sort((a, b) => a - b);
+  const when = at
+    ? spread > 0
+      ? `Contacts leave between ${formatHere(at)} and ${formatHere(new Date(at.getTime() + dateWaitSpreadMs(value)))}`
+      : `That is ${formatHere(at)}`
+    : null;
 
   return (
     <div className="space-y-4">
@@ -76,16 +92,37 @@ export function DateWaitFields({value, onChange}: {value: DateWaitConfig; onChan
         </div>
       </div>
 
-      {at && (
+      <div>
+        <Label htmlFor="editDateWaitSpread">Spread sends over</Label>
+        <select
+          id="editDateWaitSpread"
+          value={spread}
+          onChange={e => onChange({...value, spreadMinutes: Number(e.target.value)})}
+          className="mt-1.5 flex h-9 w-full rounded-md border border-neutral-200 bg-transparent px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {spreads.map(minutes => (
+            <option key={minutes} value={minutes}>
+              {minutes === 0 ? "Don't spread" : spreadLabel(minutes)}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1.5 text-xs text-neutral-500">
+          Each contact leaves at a time of its own within this window, instead of all at once.
+        </p>
+      </div>
+
+      {when && (
         <p className="text-xs text-neutral-500" data-testid="dateWaitEquivalent">
-          {value.timezone === browserZone
-            ? `That is ${formatHere(at)}, your time.`
-            : `That is ${formatHere(at)} in your time zone (${browserZone}).`}
+          {value.timezone === browserZone ? `${when}, your time.` : `${when} in your time zone (${browserZone}).`}
         </p>
       )}
 
       <div className="space-y-2">
-        <Label>If a contact arrives after this date</Label>
+        <Label>
+          {at && spread > 0
+            ? `If a contact arrives after the start (${formatHere(at)})`
+            : 'If a contact arrives after this date'}
+        </Label>
         <RadioGroup
           value={value.ifLate}
           onValueChange={ifLate => onChange({...value, ifLate: ifLate as DateWaitIfLate})}
@@ -110,6 +147,7 @@ export function DateWaitFields({value, onChange}: {value: DateWaitConfig; onChan
   );
 }
 
-function formatHere(at: Date): string {
+/** An instant as a date and time in the browser's time zone */
+export function formatHere(at: Date): string {
   return new Intl.DateTimeFormat(undefined, {dateStyle: 'medium', timeStyle: 'short'}).format(at);
 }

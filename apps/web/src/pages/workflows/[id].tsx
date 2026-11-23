@@ -426,8 +426,11 @@ export default function WorkflowEditorPage() {
               </p>
               <ul className="list-disc list-inside space-y-1 mt-2">
                 <li>Delete steps or transitions</li>
-                {/* Plunk Lite: a wait until a date can take a new date */}
-                <li>Change step settings, such as templates or conditions (except the date of a wait until a date)</li>
+                {/* Plunk Lite: a wait until a date can take a new date or spread */}
+                <li>
+                  Change step settings, such as templates or conditions (except the date, time zone, late option or
+                  spread of a wait until a date)
+                </li>
                 <li>Change the trigger</li>
               </ul>
               <p className="mt-2">
@@ -567,6 +570,7 @@ export default function WorkflowEditorPage() {
               onOpenChange={open => !open && setDialog({type: 'none'})}
               onSuccess={() => mutate()}
               waiting={workflow.stepWaits?.find(wait => wait.stepId === dialog.step.id)?.waiting ?? 0}
+              steps={workflow.steps}
             />
           )}
 

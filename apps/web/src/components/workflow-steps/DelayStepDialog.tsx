@@ -1,10 +1,17 @@
-import {type DateWaitConfig, dateWaitProblem, isDateWait, wallTimeToInstant} from '@plunk/shared';
+import {
+  type DateWaitConfig,
+  dateWaitProblem,
+  dateWaitSpreadMs,
+  isDateWait,
+  spreadOverlap,
+  wallTimeToInstant,
+} from '@plunk/shared';
 import {ConfirmDialog, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue} from '@plunk/ui';
 import {CalendarClock} from 'lucide-react';
 import {useState} from 'react';
 import {toast} from 'sonner';
 
-import {DateWaitFields, defaultDateWait} from './DateWaitFields';
+import {DateWaitFields, defaultDateWait, formatHere} from './DateWaitFields';
 import {type EditStepDialogProps, getStepConfig, StepDialogShell, useStepUpdate} from './shared';
 
 type DelayUnit = 'minutes' | 'hours' | 'days';
@@ -20,7 +27,21 @@ function isDelayUnit(value: unknown): value is DelayUnit {
   return value === 'minutes' || value === 'hours' || value === 'days';
 }
 
-export function DelayStepDialog({step, workflowId, open, onOpenChange, onSuccess, waiting = 0}: EditStepDialogProps) {
+/** An instant here: only its time if it is today */
+const timeHere = (at: Date) =>
+  at.toDateString() === new Date().toDateString()
+    ? new Intl.DateTimeFormat(undefined, {timeStyle: 'short'}).format(at)
+    : formatHere(at);
+
+export function DelayStepDialog({
+  step,
+  workflowId,
+  open,
+  onOpenChange,
+  onSuccess,
+  waiting = 0,
+  steps = [],
+}: EditStepDialogProps) {
   const config = getStepConfig(step);
   // Plunk Lite: a wait for a duration, or until a date and time in a time zone
   const savedDate = isDateWait(step.config) ? step.config : null;
@@ -31,11 +52,17 @@ export function DelayStepDialog({step, workflowId, open, onOpenChange, onSuccess
   const [delayUnit, setDelayUnit] = useState<DelayUnit>(isDelayUnit(config.unit) ? config.unit : 'hours');
   const [dateWait, setDateWait] = useState<DateWaitConfig>(
     savedDate
-      ? {until: savedDate.until, timezone: savedDate.timezone, ifLate: savedDate.ifLate ?? 'skip'}
+      ? {
+          until: savedDate.until,
+          timezone: savedDate.timezone,
+          ifLate: savedDate.ifLate ?? 'skip',
+          // Kept, or saving a rename would drop it and let everyone still waiting go at once
+          spreadMinutes: savedDate.spreadMinutes ?? 0,
+        }
       : defaultDateWait(),
   );
-  // Plunk Lite: asking before moving the contacts waiting here; `past` if the new date has passed
-  const [confirming, setConfirming] = useState<{past: boolean} | null>(null);
+  // Plunk Lite: asking before moving the contacts waiting here, saying what happens to them
+  const [confirming, setConfirming] = useState<{description: string} | null>(null);
 
   const {update, isSubmitting} = useStepUpdate(workflowId, step.id);
 
@@ -44,7 +71,12 @@ export function DelayStepDialog({step, workflowId, open, onOpenChange, onSuccess
       name,
       config:
         mode === 'date'
-          ? {until: dateWait.until, timezone: dateWait.timezone, ifLate: dateWait.ifLate}
+          ? {
+              until: dateWait.until,
+              timezone: dateWait.timezone,
+              ifLate: dateWait.ifLate,
+              ...(dateWait.spreadMinutes ? {spreadMinutes: dateWait.spreadMinutes} : {}),
+            }
           : {amount: parseInt(delayAmount, 10), unit: delayUnit},
     });
     if (ok) {
@@ -54,12 +86,36 @@ export function DelayStepDialog({step, workflowId, open, onOpenChange, onSuccess
     }
   };
 
-  // Contacts waiting here move with a new date: they are told so before it is saved
-  const movesWaiting =
-    mode === 'date' &&
-    savedDate !== null &&
-    waiting > 0 &&
-    (savedDate.until !== dateWait.until || savedDate.timezone !== dateWait.timezone);
+  // Whether the date or spread differs from the saved one (or there was no date wait)
+  const timesChange =
+    savedDate === null ||
+    savedDate.until !== dateWait.until ||
+    savedDate.timezone !== dateWait.timezone ||
+    (savedDate.spreadMinutes ?? 0) !== (dateWait.spreadMinutes ?? 0);
+  // Contacts waiting here move with a new date or spread: they are told so before it is saved
+  const movesWaiting = mode === 'date' && savedDate !== null && waiting > 0 && timesChange;
+
+  const contacts = `${waiting} ${waiting === 1 ? 'contact' : 'contacts'} waiting here`;
+
+  /** What happens to the contacts waiting here with the new date and spread */
+  const moveDescription = (): string => {
+    const at = wallTimeToInstant(dateWait.until, dateWait.timezone)?.getTime() ?? 0;
+    const end = at + dateWaitSpreadMs(dateWait);
+    const now = Date.now();
+    const shortened =
+      at <= now && end > now && (dateWait.spreadMinutes ?? 0) < (savedDate?.spreadMinutes ?? 0)
+        ? ' The spread has started: shortening it lets everyone whose new time has passed go at once.'
+        : '';
+    if (end <= now) {
+      return `${contacts} will continue right away.`;
+    }
+    if (at <= now) {
+      return `${contacts}: those whose time has passed continue right away, the rest by ${timeHere(new Date(end))}.${shortened}`;
+    }
+    return dateWait.spreadMinutes
+      ? `${contacts} will move to their new times.`
+      : `${contacts} will move to the new date.`;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,8 +126,25 @@ export function DelayStepDialog({step, workflowId, open, onOpenChange, onSuccess
         toast.error(problem);
         return;
       }
+      // A spread that reaches the next date wait would make some contacts late for it. Checked when
+      // the date or spread changes, so that a rename still saves
+      const overlap = timesChange ? spreadOverlap(steps, step.id, dateWait) : null;
+      if (overlap) {
+        const next = steps.find(other => other.id === overlap.stepId);
+        const where = `("${next?.name ?? 'Wait'}" at ${formatHere(overlap.at)})`;
+        if (overlap.severity === 'error') {
+          toast.error(
+            `The spread reaches the next date wait ${where}: late contacts would skip it. Use a shorter spread.`,
+          );
+          return;
+        }
+        toast.warning(
+          `The spread may reach the next date wait ${where}, which goes on right away when late, or a wait for ` +
+            'an event with no time limit lies before it.',
+        );
+      }
       if (movesWaiting) {
-        setConfirming({past: (wallTimeToInstant(dateWait.until, dateWait.timezone)?.getTime() ?? 0) <= Date.now()});
+        setConfirming({description: moveDescription()});
         return;
       }
     } else {
@@ -84,8 +157,6 @@ export function DelayStepDialog({step, workflowId, open, onOpenChange, onSuccess
 
     await save();
   };
-
-  const contacts = `${waiting} ${waiting === 1 ? 'contact' : 'contacts'} waiting here`;
 
   return (
     <>
@@ -151,10 +222,8 @@ export function DelayStepDialog({step, workflowId, open, onOpenChange, onSuccess
         onConfirm={save}
         icon={CalendarClock}
         title="Move the waiting contacts?"
-        description={
-          confirming?.past ? `${contacts} will continue right away.` : `${contacts} will move to the new date.`
-        }
-        confirmText="Save new date"
+        description={confirming?.description ?? ''}
+        confirmText="Save changes"
         status={isSubmitting ? 'loading' : 'idle'}
       />
     </>

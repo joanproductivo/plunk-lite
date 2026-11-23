@@ -1,6 +1,6 @@
 import {Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, Input, Label} from '@plunk/ui';
 import type {WorkflowStep} from '@plunk/db';
-import {WALL_TIME, WorkflowSchemas} from '@plunk/shared';
+import {type DateWaitRouteStep, WALL_TIME, WorkflowSchemas} from '@plunk/shared';
 import type {UpdateContactSegmentChanges} from '@plunk/types';
 import {useState} from 'react';
 import {toast} from 'sonner';
@@ -42,17 +42,27 @@ export interface EditStepDialogProps {
   onSuccess: () => void;
   /** Plunk Lite: contacts waiting at this step now (a delay's dialog warns before moving them) */
   waiting?: number;
+  /** Plunk Lite: the steps of the workflow (a delay's dialog checks its spread against the next date wait) */
+  steps?: readonly DateWaitRouteStep[];
+}
+
+/** Plunk Lite: a date wait's spread as people read it: "30 min", "4 h", "1 h 30 min" */
+export function spreadLabel(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return [hours > 0 ? `${hours} h` : '', rest > 0 || hours === 0 ? `${rest} min` : ''].filter(Boolean).join(' ');
 }
 
 /**
  * Plunk Lite: what a delay step waits for, as its node shows it: "Wait 2 days", or "Wait until
- * 22 Nov 2026, 14:00 (Europe/Madrid)" -- the date as written, in its time zone. Null if not set up.
+ * 22 Nov 2026, 14:00 (Europe/Madrid)" -- the date as written, in its time zone -- with ", spread
+ * over 4 h" if it has a spread. Null if not set up.
  */
 export function delayLabel(config: unknown): string | null {
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
     return null;
   }
-  const {amount, unit, until, timezone} = config as Record<string, unknown>;
+  const {amount, unit, until, timezone, spreadMinutes} = config as Record<string, unknown>;
   if (typeof until === 'string' && typeof timezone === 'string') {
     const match = WALL_TIME.exec(until);
     if (!match) {
@@ -62,7 +72,9 @@ export function delayLabel(config: unknown): string | null {
     const written = new Intl.DateTimeFormat('en-GB', {dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC'}).format(
       Date.UTC(year, month - 1, day, hour, minute),
     );
-    return `Wait until ${written} (${timezone})`;
+    const spread =
+      typeof spreadMinutes === 'number' && spreadMinutes > 0 ? `, spread over ${spreadLabel(spreadMinutes)}` : '';
+    return `Wait until ${written} (${timezone})${spread}`;
   }
   return amount && typeof unit === 'string' ? `Wait ${String(amount)} ${unit}` : null;
 }
