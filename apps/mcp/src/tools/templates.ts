@@ -149,7 +149,7 @@ export function registerTemplateTools(ctx: ToolContext, client: PlunkClient): vo
         '**Key trigger phrases:** "edit the template", "change the subject of", "add an unsubscribe to"',
       ].join('\n'),
       inputSchema: z.object({
-        id: z.string().describe('The template ID.'),
+        id: z.string().min(1).describe('The template ID.'),
         name: z.string().min(1).max(100).optional().describe('New internal name.'),
         description: z.string().max(500).optional().describe('New internal note.'),
         subject: z.string().min(1).optional().describe('New subject line. May contain {{variable}} placeholders.'),

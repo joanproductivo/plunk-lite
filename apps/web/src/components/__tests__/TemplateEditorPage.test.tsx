@@ -72,6 +72,17 @@ const TEMPLATES: Record<string, object> = {
     type: 'TRANSACTIONAL',
     optOutSegmentId: null,
   },
+  // A topic left on a MARKETING template (two edits at once, or a type changed by an earlier image)
+  e: {
+    id: 'e',
+    name: 'E',
+    subject: 'Subject E',
+    body: '<p>E</p>',
+    from: 'e@example.com',
+    replyTo: 'e@other.example.org',
+    type: 'MARKETING',
+    optOutSegmentId: 's1',
+  },
   segments: [{id: 's1', name: 'EXCLUIR', type: 'STATIC'}] as unknown as object,
 };
 
@@ -160,6 +171,13 @@ describe('TemplateEditorPage', () => {
         '/templates/c',
         expect.objectContaining({type: 'MARKETING', optOutSegmentId: null}),
       );
+    });
+
+    it('opens a template that is not transactional with a topic left on it as unchanged, without warning', async () => {
+      await open('e', 'e@other.example.org');
+
+      expect(text()).toContain('All changes saved');
+      expect(text()).not.toContain('will get this template again');
     });
 
     it('warns when removing the topic, and when {{optOutUrl}} has no topic to fill it', async () => {

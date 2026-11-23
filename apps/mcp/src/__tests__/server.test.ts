@@ -799,11 +799,13 @@ describe('template tools', () => {
         client.callTool({name: 'plunk_update_template', arguments: {id: 'tpl-1', ...fields}}),
       ),
     );
+    const noId = await client.callTool({name: 'plunk_update_template', arguments: {id: '', optOutSegmentId: TOPIC}});
 
     expect(old.isError).toBe(true);
     expect(JSON.stringify(old.content)).toContain('does not support opt-out topics');
     expect(nothing.isError).toBe(true);
     expect(invalid.every((result) => result.isError)).toBe(true);
+    expect(noId.isError).toBe(true);
     expect(methods).toEqual(['GET']);
     await close();
   });

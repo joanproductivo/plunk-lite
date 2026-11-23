@@ -65,8 +65,10 @@ function TemplateEditor() {
     }
   }, [template, editedTemplate]);
 
-  // Plunk Lite: only a TRANSACTIONAL template keeps its opt-out topic; any other type saves without it
+  // Plunk Lite: only a TRANSACTIONAL template keeps its opt-out topic; any other type saves without it.
+  // A topic saved on another type does nothing, so opening that template is not a change
   const optOutSegmentId = editedTemplate.type === 'TRANSACTIONAL' ? (editedTemplate.optOutSegmentId ?? null) : null;
+  const savedOptOutSegmentId = template?.type === 'TRANSACTIONAL' ? (template.optOutSegmentId ?? null) : null;
 
   const hasChanges = useMemo(() => {
     if (!template || Object.keys(editedTemplate).length === 0) return false;
@@ -79,9 +81,9 @@ function TemplateEditor() {
       (editedTemplate.fromName || '') !== (template.fromName || '') ||
       (editedTemplate.replyTo || '') !== (template.replyTo || '') ||
       editedTemplate.type !== template.type ||
-      optOutSegmentId !== (template.optOutSegmentId ?? null)
+      optOutSegmentId !== savedOptOutSegmentId
     );
-  }, [editedTemplate, template, optOutSegmentId]);
+  }, [editedTemplate, template, optOutSegmentId, savedOptOutSegmentId]);
 
   // Warn before leaving page with unsaved changes
   useChangeTracking(hasChanges);
@@ -240,7 +242,7 @@ function TemplateEditor() {
                     <OptOutTopicField
                       type={editedTemplate.type}
                       value={optOutSegmentId}
-                      saved={template.optOutSegmentId}
+                      saved={savedOptOutSegmentId}
                       body={editedTemplate.body ?? ''}
                       onChange={id => setEditedTemplate({...editedTemplate, optOutSegmentId: id})}
                     />
