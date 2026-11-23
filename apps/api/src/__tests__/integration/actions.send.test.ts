@@ -1,6 +1,6 @@
 import {promises as dns} from 'node:dns';
 import {EventEmitter} from 'node:events';
-import {TemplateType} from '@plunk/db';
+import {SegmentType, TemplateType} from '@plunk/db';
 import type {Request, Response} from 'express';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -211,5 +211,76 @@ describe('POST /v1/send with several recipients', () => {
       expect(outcome.status).toBe(422);
       expect(await prisma.email.count({where: {projectId}})).toBe(0);
     });
+  });
+});
+
+/**
+ * Plunk Lite: /v1/send with a transactional template whose opt-out topic a recipient joined says
+ * so (422 CONTACT_OPTED_OUT) and sends the others; {{optOutUrl}} is its opt-out page.
+ */
+describe('POST /v1/send with an opt-out topic', () => {
+  const prisma = getPrismaClient();
+  let projectId: string;
+  let segmentId: string;
+  let templateId: string;
+
+  beforeEach(async () => {
+    const {project} = await factories.createUserWithProject();
+    projectId = project.id;
+    await factories.createDomain({projectId, domain: 'example.com', verified: true});
+    segmentId = (await factories.createSegment(projectId, {type: SegmentType.STATIC})).id;
+    templateId = (
+      await factories.createTemplate({
+        projectId,
+        type: TemplateType.TRANSACTIONAL,
+        optOutSegmentId: segmentId,
+        body: '<p><a href="{{optOutUrl}}">Stop</a></p>',
+      })
+    ).id;
+  });
+
+  async function optedOut(email: string) {
+    const contact = await factories.createContact({projectId, email});
+    await prisma.segmentMembership.create({data: {segmentId, contactId: contact.id}});
+    return contact;
+  }
+
+  it('answers 207 with CONTACT_OPTED_OUT for the one who opted out, and sends the other', async () => {
+    await optedOut('out@example.com');
+    const inside = await factories.createContact({projectId, email: 'in@example.com'});
+
+    const outcome = await send(projectId, {to: ['out@example.com', 'in@example.com'], template: templateId});
+
+    expect(outcome.status).toBe(207);
+    const data = outcome.body!.data as {failed: {email: string; code: string}[]};
+    expect(data.failed).toEqual([expect.objectContaining({email: 'out@example.com', code: 'CONTACT_OPTED_OUT'})]);
+    const [email] = await prisma.email.findMany({where: {projectId}});
+    expect(email?.contactId).toBe(inside.id);
+    expect(email?.body).toContain(`/opt-out/${inside.id}?t=${templateId}`);
+  });
+
+  it('answers 422 to a single recipient who opted out, even with its own body', async () => {
+    await optedOut('out@example.com');
+
+    const outcome = await send(projectId, {to: 'out@example.com', template: templateId, body: '<p>Custom</p>'});
+
+    expect(outcome.status).toBe(422);
+    expect((outcome.error as HttpException).errorCode).toBe('CONTACT_OPTED_OUT');
+    expect(await prisma.email.count({where: {projectId}})).toBe(0);
+  });
+
+  it('renders {{optOutUrl}} empty with a template without a topic', async () => {
+    const plain = await factories.createTemplate({
+      projectId,
+      type: TemplateType.TRANSACTIONAL,
+      body: '<p>[{{optOutUrl}}]</p>',
+    });
+    await factories.createContact({projectId, email: 'a@example.com'});
+
+    const outcome = await send(projectId, {to: 'a@example.com', template: plain.id});
+
+    expect(outcome.status).toBe(200);
+    const [email] = await prisma.email.findMany({where: {projectId}});
+    expect(email?.body).toContain('<p>[]</p>');
   });
 });

@@ -31,6 +31,16 @@
       "invalidTitle": "此連結已失效",
       "invalidDescription": "它已被較新的郵件取代，或地址已變更。請重新訂閱以取得新連結。"
     },
+    "optOut": {
+      "title": "停止接收來自 {projectName} 的此類通知",
+      "description": "你仍會在 {email} 收到帳戶所需的郵件，例如存取連結或收據。",
+      "button": "停止接收此類通知",
+      "buttonLoading": "正在儲存...",
+      "successTitle": "已完成",
+      "successDescription": "你將不再收到來自 {projectName} 的此類通知。",
+      "unavailableTitle": "此連結已失效",
+      "unavailableDescription": "此類通知已無法在此處停止。如不想再收到，請回覆其中任何一封。"
+    },
     "manage": {
       "title": "管理偏好設定",
       "description": "管理 {projectName} 寄送至 {email} 的郵件。",
@@ -68,7 +78,9 @@
   "email": {
     "footer": {
       "unsubscribeText": "你收到這封信是因為你訂閱了 {projectName} 的郵件。如果你不想再收到這類郵件，請",
-      "updatePreferences": "更新你的偏好設定"
+      "updatePreferences": "更新你的偏好設定",
+      "optOutText": "你收到的是來自 {projectName} 的通知。",
+      "optOutLink": "我不想再收到此類通知"
     },
     "optin": {
       "subject": "確認訂閱 {projectName}",

@@ -31,6 +31,16 @@
       "invalidTitle": "Nid yw'r ddolen hon yn gweithio mwyach",
       "invalidDescription": "Mae e-bost mwy diweddar wedi cymryd ei lle, neu mae'r cyfeiriad wedi newid. Cofrestrwch eto i gael dolen newydd."
     },
+    "optOut": {
+      "title": "Peidio â chael yr hysbysiadau hyn gan {projectName}",
+      "description": "Byddwch yn dal i gael yn {email} yr e-byst sydd eu hangen ar eich cyfrif, fel dolenni mynediad neu dderbynebau.",
+      "button": "Peidio â chael yr hysbysiadau hyn",
+      "buttonLoading": "Yn cadw...",
+      "successTitle": "Wedi'i wneud",
+      "successDescription": "Ni fyddwch yn cael rhagor o hysbysiadau fel hwn gan {projectName}.",
+      "unavailableTitle": "Nid yw'r ddolen hon yn gweithio mwyach",
+      "unavailableDescription": "Nid oes modd atal yr hysbysiadau hyn o'r fan hon mwyach. Atebwch un ohonynt os nad ydych am eu cael."
+    },
     "manage": {
       "title": "Rheoli dewisiadau",
       "description": "Rheoli'r negeseuon e-bost y mae {projectName} yn eu hanfon i {email}.",
@@ -68,7 +78,9 @@
   "email": {
     "footer": {
       "unsubscribeText": "Rwyt ti wedi cael yr e-bost hwn oherwydd dy fod wedi cytuno i dderbyn negeseuon e-bost gan {projectName}. Os nad wyt ti am dderbyn negeseuon e-bost fel hyn mwyach, gelli di",
-      "updatePreferences": "ddiweddaru dy ddewisiadau"
+      "updatePreferences": "ddiweddaru dy ddewisiadau",
+      "optOutText": "Rydych yn cael yr hysbysiadau hyn gan {projectName}.",
+      "optOutLink": "Nid wyf eisiau rhagor o hysbysiadau fel hwn"
     },
     "optin": {
       "subject": "Cadarnhewch eich tanysgrifiad i {projectName}",

@@ -31,6 +31,16 @@
       "invalidTitle": "このリンクは無効です",
       "invalidDescription": "新しいメールに置き換えられたか、アドレスが変更されました。新しいリンクを受け取るには、もう一度登録してください。"
     },
+    "optOut": {
+      "title": "{projectName} からのこのお知らせを停止",
+      "description": "{email} には、アクセス用リンクや領収書など、アカウントに必要なメールが引き続き届きます。",
+      "button": "このお知らせを停止",
+      "buttonLoading": "保存しています...",
+      "successTitle": "完了しました",
+      "successDescription": "{projectName} からこのようなお知らせは今後届きません。",
+      "unavailableTitle": "このリンクは無効になりました",
+      "unavailableDescription": "このお知らせはここから停止できなくなりました。停止したい場合は、いずれかのお知らせに返信してください。"
+    },
     "manage": {
       "title": "配信設定の管理",
       "description": "{projectName} から {email} に届くメールの配信設定を管理します。",
@@ -68,7 +78,9 @@
   "email": {
     "footer": {
       "unsubscribeText": "このメールは、{projectName} からのメール配信に同意いただいたため送信されています。今後このようなメールを受け取りたくない場合は、",
-      "updatePreferences": "配信設定を変更してください"
+      "updatePreferences": "配信設定を変更してください",
+      "optOutText": "{projectName} からのお知らせです。",
+      "optOutLink": "このようなお知らせを今後受け取らない"
     },
     "optin": {
       "subject": "{projectName} の購読を確認してください",

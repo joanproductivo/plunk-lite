@@ -353,4 +353,45 @@ describe('buildEmailHeaders', () => {
       );
     });
   });
+
+  // Plunk Lite: a transactional template with an opt-out topic
+  describe('with an opt-out link', () => {
+    const oneClickOptOutUrl = `${API_URI}/opt-out/contact-123?t=template-1`;
+
+    it('points the pair at it and adds the bulk headers to a transactional send', () => {
+      const headers = buildEmailHeaders({emailClass: 'transactional', unsubscribeId: 'contact-123', oneClickOptOutUrl});
+
+      expect(headers).toEqual({
+        'List-Unsubscribe': `<${oneClickOptOutUrl}>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        'Precedence': 'bulk',
+        'Auto-Submitted': 'auto-generated',
+        'X-Auto-Response-Suppress': 'All',
+      });
+    });
+
+    it('wins over the marketing unsubscribe link in the body', () => {
+      const headers = buildEmailHeaders({
+        emailClass: 'transactional',
+        hasListManagementLink: true,
+        unsubscribeId: 'contact-123',
+        sourceEmailId: 'email-1',
+        oneClickOptOutUrl,
+      });
+
+      expect(headers['List-Unsubscribe']).toBe(`<${oneClickOptOutUrl}>`);
+    });
+
+    it("leaves the caller's own List-Unsubscribe in charge of the pair", () => {
+      const headers = buildEmailHeaders({
+        emailClass: 'transactional',
+        unsubscribeId: 'contact-123',
+        oneClickOptOutUrl,
+        customHeaders: {'List-Unsubscribe': '<mailto:out@example.com>'},
+      });
+
+      expect(headers['List-Unsubscribe']).toBe('<mailto:out@example.com>');
+      expect(headers).not.toHaveProperty('List-Unsubscribe-Post');
+    });
+  });
 });

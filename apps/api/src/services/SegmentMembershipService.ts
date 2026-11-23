@@ -64,18 +64,20 @@ export class SegmentMembershipService {
   }
 
   /**
-   * Add contacts to a static segment. `added` counts the contacts that entered it.
+   * Add contacts to a static segment. `added` counts the contacts that entered it. `reenter`
+   * (Plunk Lite; by default, outside `silent`) makes a current member enter again, with its event;
+   * without it, current members are left as they are.
    */
   public static async addMembers(
     projectId: string,
     segmentId: string,
     contactIds: string[],
-    {mode}: {mode: MembershipMode},
+    {mode, reenter = mode !== 'silent'}: {mode: MembershipMode; reenter?: boolean},
   ): Promise<{added: number}> {
     const segment = await this.getStaticSegment(projectId, segmentId, 'add contacts to');
     const ids = await this.projectContactIds(projectId, contactIds);
 
-    const entered = await this.enter(segment, ids, {reenter: mode !== 'silent'});
+    const entered = await this.enter(segment, ids, {reenter});
     await this.trackMembershipEvents(projectId, segment, entered, 'entry', mode);
 
     return {added: entered.length};

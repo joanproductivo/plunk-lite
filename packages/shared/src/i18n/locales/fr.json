@@ -31,6 +31,16 @@
       "invalidTitle": "Ce lien ne fonctionne plus",
       "invalidDescription": "Il a été remplacé par un e-mail plus récent, ou l'adresse a changé. Inscrivez-vous à nouveau pour recevoir un nouveau lien."
     },
+    "optOut": {
+      "title": "Ne plus recevoir ces avis de {projectName}",
+      "description": "Vous continuerez à recevoir à {email} les e-mails nécessaires à votre compte, comme les accès ou les reçus.",
+      "button": "Ne plus recevoir ces avis",
+      "buttonLoading": "Enregistrement...",
+      "successTitle": "C'est fait",
+      "successDescription": "Vous ne recevrez plus d'avis comme celui-ci de {projectName}.",
+      "unavailableTitle": "Ce lien ne fonctionne plus",
+      "unavailableDescription": "Ces avis ne peuvent plus être arrêtés ici. Répondez à l'un d'eux si vous ne voulez plus les recevoir."
+    },
     "manage": {
       "title": "Gérer les préférences",
       "description": "Gérez les e-mails que {projectName} envoie à {email}.",
@@ -68,7 +78,9 @@
   "email": {
     "footer": {
       "unsubscribeText": "Vous recevez cet e-mail parce que vous avez accepté de recevoir des e-mails de la part de {projectName}. Si vous ne souhaitez plus recevoir d’e-mails de ce type, veuillez",
-      "updatePreferences": "mettre à jour vos préférences"
+      "updatePreferences": "mettre à jour vos préférences",
+      "optOutText": "Vous recevez ces avis de {projectName}.",
+      "optOutLink": "Je ne veux plus d'avis comme celui-ci"
     },
     "optin": {
       "subject": "Confirmez votre abonnement à {projectName}",

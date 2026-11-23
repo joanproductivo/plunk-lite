@@ -31,6 +31,16 @@
       "invalidTitle": "Tento odkaz už nefunguje",
       "invalidDescription": "Nahradil ho novější e-mail, nebo se adresa změnila. Přihlaste se znovu a dostanete nový odkaz."
     },
+    "optOut": {
+      "title": "Přestat dostávat tato upozornění od {projectName}",
+      "description": "Na {email} budete dál dostávat e-maily potřebné pro váš účet, například přístupy nebo potvrzení plateb.",
+      "button": "Přestat dostávat tato upozornění",
+      "buttonLoading": "Ukládání...",
+      "successTitle": "Hotovo",
+      "successDescription": "Od {projectName} už nebudete dostávat další upozornění jako toto.",
+      "unavailableTitle": "Tento odkaz už nefunguje",
+      "unavailableDescription": "Tato upozornění už zde nelze zrušit. Odpovězte na některé z nich, pokud je už nechcete dostávat."
+    },
     "manage": {
       "title": "Správa předvoleb",
       "description": "Spravujte e-maily, které odesílatel {projectName} posílá na adresu {email}.",
@@ -68,7 +78,9 @@
   "email": {
     "footer": {
       "unsubscribeText": "Tento e-mail jste obdrželi, protože jste souhlasili se zasíláním e-mailů od {projectName}. Pokud si již nepřejete dostávat tyto e-maily, můžete",
-      "updatePreferences": "změnit své předvolby"
+      "updatePreferences": "změnit své předvolby",
+      "optOutText": "Tato upozornění dostáváte od {projectName}.",
+      "optOutLink": "Nechci další upozornění jako toto"
     },
     "optin": {
       "subject": "Potvrďte odběr od {projectName}",

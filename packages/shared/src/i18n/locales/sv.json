@@ -31,6 +31,16 @@
       "invalidTitle": "Den här länken fungerar inte längre",
       "invalidDescription": "Den har ersatts av ett nyare mejl, eller så har adressen ändrats. Anmäl dig igen för att få en ny länk."
     },
+    "optOut": {
+      "title": "Sluta ta emot dessa meddelanden från {projectName}",
+      "description": "Du får fortfarande de e-postmeddelanden ditt konto behöver till {email}, som åtkomstlänkar eller kvitton.",
+      "button": "Sluta ta emot dessa meddelanden",
+      "buttonLoading": "Sparar...",
+      "successTitle": "Klart",
+      "successDescription": "Du får inga fler meddelanden som detta från {projectName}.",
+      "unavailableTitle": "Den här länken fungerar inte längre",
+      "unavailableDescription": "Dessa meddelanden kan inte längre stoppas här. Svara på ett av dem om du inte vill få dem längre."
+    },
     "manage": {
       "title": "Hantera inställningar",
       "description": "Hantera e-posten som {projectName} skickar till {email}.",
@@ -68,7 +78,9 @@
   "email": {
     "footer": {
       "unsubscribeText": "Du fick det här e-postmeddelandet eftersom du anmält dig till att ta emot e-post från {projectName}. Om du inte längre vill ha den här typen av e-post kan du",
-      "updatePreferences": "uppdatera dina inställningar"
+      "updatePreferences": "uppdatera dina inställningar",
+      "optOutText": "Du får dessa meddelanden från {projectName}.",
+      "optOutLink": "Jag vill inte ha fler meddelanden som detta"
     },
     "optin": {
       "subject": "Bekräfta din prenumeration på {projectName}",

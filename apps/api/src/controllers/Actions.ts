@@ -13,6 +13,7 @@ import {EventService} from '../services/EventService.js';
 import {OptInService} from '../services/OptInService.js';
 import {QueueService} from '../services/QueueService.js';
 import {SegmentMembershipService} from '../services/SegmentMembershipService.js';
+import {type OptOutTemplate, optOutUrl} from '../services/TemplateOptOut.js';
 import {describeError, ErrorCode, HttpException, NotAllowed, NotFound, ValidationError} from '../exceptions/index.js';
 import {CatchAsync} from '../utils/asyncHandler.js';
 import {logger} from '../utils/logger.js';
@@ -291,6 +292,8 @@ export class Actions {
     let emailReplyTo = reply;
     let templateId: string | undefined;
     let templateType: string | undefined;
+    // Plunk Lite: what decides its opt-out topic, for each recipient's {{optOutUrl}}
+    let optOutTemplate: OptOutTemplate | undefined;
 
     if (template) {
       const templateRecord = await prisma.template.findUnique({
@@ -319,6 +322,7 @@ export class Actions {
       emailReplyTo = reply || templateRecord.replyTo || undefined;
       templateId = templateRecord.id;
       templateType = templateRecord.type;
+      optOutTemplate = templateRecord;
     }
 
     if (!emailFrom) {
@@ -421,6 +425,8 @@ export class Actions {
           unsubscribeUrl: `${DASHBOARD_URI}/unsubscribe/${contact.id}`,
           subscribeUrl: `${DASHBOARD_URI}/subscribe/${contact.id}`,
           manageUrl: `${DASHBOARD_URI}/manage/${contact.id}`,
+          // Plunk Lite: the opt-out page of the template's topic; empty without one
+          optOutUrl: optOutUrl(contact.id, optOutTemplate, false),
         };
 
         // Render template placeholders against the contact/request data.

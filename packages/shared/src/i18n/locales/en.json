@@ -31,6 +31,16 @@
       "invalidTitle": "This link no longer works",
       "invalidDescription": "It was replaced by a newer email, or the address changed. Sign up again to get a new link."
     },
+    "optOut": {
+      "title": "Stop these notices from {projectName}",
+      "description": "You'll still get the emails your account needs at {email}, like access links or receipts.",
+      "button": "Stop these notices",
+      "buttonLoading": "Saving...",
+      "successTitle": "Done",
+      "successDescription": "You won't get any more notices like this from {projectName}.",
+      "unavailableTitle": "This link no longer works",
+      "unavailableDescription": "These notices can't be stopped from here anymore. Reply to one of them if you want to stop getting them."
+    },
     "manage": {
       "title": "Manage Preferences",
       "description": "Manage the emails {projectName} sends to {email}.",
@@ -68,7 +78,9 @@
   "email": {
     "footer": {
       "unsubscribeText": "You received this email because you agreed to receive emails from {projectName}. If you no longer wish to receive emails like this, please",
-      "updatePreferences": "update your preferences"
+      "updatePreferences": "update your preferences",
+      "optOutText": "You get these notices from {projectName}.",
+      "optOutLink": "I don't want any more notices like this"
     },
     "optin": {
       "subject": "Confirm your subscription to {projectName}",

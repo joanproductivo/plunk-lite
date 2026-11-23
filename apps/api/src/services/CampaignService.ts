@@ -848,6 +848,8 @@ export class CampaignService {
           unsubscribeUrl: withSourceEmail(`${DASHBOARD_URI}/unsubscribe/${contact.id}`, id),
           subscribeUrl: withSourceEmail(`${DASHBOARD_URI}/subscribe/${contact.id}`, id),
           manageUrl: withSourceEmail(`${DASHBOARD_URI}/manage/${contact.id}`, id),
+          // Plunk Lite: campaigns have no template, so no opt-out topic; set so contact data cannot fill it
+          optOutUrl: '',
         };
 
         const renderedSubject = subjectTemplate.render(variables);

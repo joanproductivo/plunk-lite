@@ -23,6 +23,7 @@ import {BillingLimitService} from './BillingLimitService.js';
 import {RECIPIENT_OVERRIDE_HEADER, withSourceEmail} from './EmailHeaderService.js';
 import {ProjectService} from './ProjectService.js';
 import {QueueService} from './QueueService.js';
+import {isOptedOut, OPTED_OUT_EMAIL_ERROR, optedOutError, optOutTopic} from './TemplateOptOut.js';
 
 interface Attachment {
   filename: string;
@@ -115,7 +116,7 @@ export class EmailService {
     if (params.templateId) {
       const template = await prisma.template.findUnique({
         where: {id: params.templateId},
-        select: {type: true},
+        select: {type: true, optOutSegmentId: true},
       });
 
       // If using a marketing template, check subscription status
@@ -137,6 +138,13 @@ export class EmailService {
             `Cannot send marketing template to unsubscribed contact ${contact?.email || params.contactId}. Use a transactional template or send without a template.`,
           );
         }
+      }
+
+      // Plunk Lite: a contact who opted out of the template's topic is told so, and nothing is created
+      const topic = optOutTopic(template, false);
+      if (topic && (await isOptedOut(params.projectId, topic, params.contactId))) {
+        const contact = await prisma.contact.findUnique({where: {id: params.contactId}, select: {email: true}});
+        throw optedOutError(contact?.email ?? params.contactId);
       }
     }
 
@@ -281,11 +289,12 @@ export class EmailService {
   public static async sendWorkflowEmail(params: SendEmailParams): Promise<Email> {
     // Check if template is transactional to determine source type
     let sourceType: EmailSourceType = EmailSourceType.WORKFLOW;
+    let topic: string | null = null;
 
     if (params.templateId) {
       const template = await prisma.template.findUnique({
         where: {id: params.templateId},
-        select: {type: true},
+        select: {type: true, optOutSegmentId: true},
       });
 
       // If template is marked as TRANSACTIONAL, use TRANSACTIONAL sourceType
@@ -293,6 +302,7 @@ export class EmailService {
       if (template?.type === 'TRANSACTIONAL') {
         sourceType = EmailSourceType.TRANSACTIONAL;
       }
+      topic = optOutTopic(template, Boolean(params.recipientEmail));
     }
 
     // Check subscription status for marketing emails
@@ -309,27 +319,16 @@ export class EmailService {
           `[WORKFLOW] Skipping marketing email to unsubscribed contact ${params.contactId} in workflow execution ${params.workflowExecutionId}`,
         );
         // For workflows, we silently skip sending to unsubscribed contacts for marketing emails
-        // Return a placeholder email record that won't be sent
-        return await prisma.email.create({
-          data: {
-            projectId: params.projectId,
-            contactId: params.contactId,
-            subject: params.subject,
-            body: params.body,
-            from: params.from,
-            fromName: params.fromName,
-            replyTo: params.replyTo,
-            headers: params.headers ? toPrismaJson(params.headers) : undefined,
-            attachments: params.attachments ? toPrismaJson(params.attachments) : undefined,
-            sourceType,
-            templateId: params.templateId,
-            workflowExecutionId: params.workflowExecutionId,
-            workflowStepExecutionId: params.workflowStepExecutionId,
-            status: EmailStatus.FAILED,
-            error: 'Contact is unsubscribed from marketing emails',
-          },
-        });
+        return this.skippedWorkflowEmail(params, sourceType, 'Contact is unsubscribed from marketing emails');
       }
+    }
+
+    // Plunk Lite: likewise for a contact who opted out of the template's topic
+    if (topic && (await isOptedOut(params.projectId, topic, params.contactId))) {
+      signale.info(
+        `[WORKFLOW] Skipping email to contact ${params.contactId}, who opted out of its topic, in workflow execution ${params.workflowExecutionId}`,
+      );
+      return this.skippedWorkflowEmail(params, sourceType, OPTED_OUT_EMAIL_ERROR);
     }
 
     // Check billing limit before sending
@@ -447,8 +446,35 @@ export class EmailService {
   }
 
   /**
+   * The placeholder of a workflow email that is skipped: a FAILED record with the reason, which is
+   * never sent. The step completes with it, and a retry of the step finds it rather than sending.
+   */
+  private static skippedWorkflowEmail(params: SendEmailParams, sourceType: EmailSourceType, error: string) {
+    return prisma.email.create({
+      data: {
+        projectId: params.projectId,
+        contactId: params.contactId,
+        subject: params.subject,
+        body: params.body,
+        from: params.from,
+        fromName: params.fromName,
+        replyTo: params.replyTo,
+        headers: params.headers ? toPrismaJson(params.headers) : undefined,
+        attachments: params.attachments ? toPrismaJson(params.attachments) : undefined,
+        sourceType,
+        templateId: params.templateId,
+        workflowExecutionId: params.workflowExecutionId,
+        workflowStepExecutionId: params.workflowStepExecutionId,
+        status: EmailStatus.FAILED,
+        error,
+      },
+    });
+  }
+
+  /**
    * Compile HTML email with optional unsubscribe footer and badge
    * Adds unsubscribe link and Plunk badge for free tier users (only when billing is enabled)
+   * Plunk Lite: and the notices footer of an email with an opt-out topic (`optOutHref`)
    */
   public static compile({
     content,
@@ -457,6 +483,8 @@ export class EmailService {
     includeUnsubscribe = true,
     sourceEmailId,
     footers,
+    optOutHref,
+    optOutFooters,
   }: {
     content: string;
     contact: Contact;
@@ -464,6 +492,13 @@ export class EmailService {
     includeUnsubscribe?: boolean;
     /** The project's own footers by language (ProjectFooterService); Plunk's for the rest. */
     footers?: ProjectFooters;
+    /**
+     * Plunk Lite: the opt-out page of a transactional email with an opt-out topic. With it, the
+     * notices footer goes at the end, unless the content already links that contact's opt-out page.
+     */
+    optOutHref?: string;
+    /** Plunk Lite: the project's own notices footers by language; Plunk's for the rest. */
+    optOutFooters?: ProjectFooters;
     /**
      * Id of the email this footer is being rendered into, so an opt-out from the
      * footer link can be attributed to it. See {@link withSourceEmail}.
@@ -483,6 +518,19 @@ export class EmailService {
           );
         })()
       : '';
+
+    const optOutHtml =
+      optOutHref && !content.includes(`/opt-out/${encodeURIComponent(contact.id)}`)
+        ? unsubscribeFooterHtml(
+            footerParagraph({
+              language: contactLanguage(contact.data, project.language),
+              projectName: project.name,
+              href: optOutHref,
+              footers: optOutFooters,
+              kind: 'optOut',
+            }),
+          )
+        : '';
 
     // Add Plunk badge if billing is enabled and project has no subscription (free tier)
     const badgeHtml =
@@ -519,7 +567,7 @@ export class EmailService {
         : '';
 
     // The footer and badge go at the end of the email, on its background if it has one
-    return renderBody(content, sourceEmailId, `${unsubscribeHtml}${badgeHtml}`);
+    return renderBody(content, sourceEmailId, `${unsubscribeHtml}${optOutHtml}${badgeHtml}`);
   }
 
   /**

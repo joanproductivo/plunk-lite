@@ -25,6 +25,8 @@ export enum ErrorCode {
   OPT_IN_NEEDS_TRANSACTIONAL = 'OPT_IN_NEEDS_TRANSACTIONAL',
   // Plunk Lite: the public subscribe page, for a contact that never signed up nor received an email
   CONFIRMATION_NEEDS_EMAIL = 'CONFIRMATION_NEEDS_EMAIL',
+  // Plunk Lite: /v1/send with a template whose opt-out topic the contact joined (422)
+  CONTACT_OPTED_OUT = 'CONTACT_OPTED_OUT',
   IDEMPOTENCY_KEY_REUSED = 'IDEMPOTENCY_KEY_REUSED',
 
   // Validation & Input Errors (400, 422)

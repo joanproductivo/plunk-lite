@@ -20,7 +20,11 @@ const SESSION = {type: 'jwt', userId: 'user-1', projectId: PROJECT};
  * Calls a handler as Express would. `CatchAsync` does not return its promise, so the outcome is
  * awaited from whichever of the response or `next` it reaches first.
  */
-async function call(handler: 'getFooters' | 'saveFooters', auth: Record<string, unknown>, body?: unknown) {
+async function call(
+  handler: 'getFooters' | 'saveFooters' | 'getOptOutFooters' | 'saveOptOutFooters',
+  auth: Record<string, unknown>,
+  body?: unknown,
+) {
   let status = 200;
   let json: unknown;
   let error: unknown;
@@ -96,6 +100,31 @@ describe('/projects/:id/footers', () => {
     for (const handler of ['getFooters', 'saveFooters'] as const) {
       expect(((await call(handler, {type: 'apiKey', projectId: PROJECT}, {})).error as HttpException).code).toBe(403);
     }
+    expect(ProjectFooterService.save).not.toHaveBeenCalled();
+  });
+
+  // Plunk Lite: /projects/:id/opt-out-footers, the notices footers, with the same rules
+  it('reads and saves the notices footers on their own endpoint, leaving the unsubscribe ones', async () => {
+    expect((await call('getOptOutFooters', SESSION)).status).toBe(200);
+    expect(ProjectFooterService.get).toHaveBeenCalledWith(PROJECT, 'optOut');
+
+    const {json} = await call('saveOptOutFooters', SESSION, {es: {text: 'Avisos', linkText: 'no quiero más'}});
+    expect(json).toEqual({es: {text: 'Avisos', linkText: 'no quiero más'}});
+    expect(ProjectFooterService.save).toHaveBeenCalledWith(PROJECT, json, 'optOut');
+
+    await call('saveFooters', SESSION, {es: {text: 'Hola', linkText: 'darte de baja'}});
+    expect(ProjectFooterService.save).toHaveBeenLastCalledWith(PROJECT, expect.anything(), 'unsubscribe');
+  });
+
+  it('keeps the notices footers to admins in the dashboard, and checks them', async () => {
+    vi.mocked(MembershipService.requireAdminAccess).mockRejectedValueOnce(new HttpException(403, 'Admin only'));
+    expect(((await call('saveOptOutFooters', SESSION, {})).error as HttpException).code).toBe(403);
+    expect(
+      ((await call('saveOptOutFooters', SESSION, {es: {text: 'x', linkText: '.'}})).error as HttpException).code,
+    ).toBe(400);
+    expect(((await call('getOptOutFooters', {type: 'apiKey', projectId: PROJECT})).error as HttpException).code).toBe(
+      403,
+    );
     expect(ProjectFooterService.save).not.toHaveBeenCalled();
   });
 });

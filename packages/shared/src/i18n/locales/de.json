@@ -31,6 +31,16 @@
       "invalidTitle": "Dieser Link funktioniert nicht mehr",
       "invalidDescription": "Er wurde durch eine neuere E-Mail ersetzt, oder die Adresse hat sich geändert. Melden Sie sich erneut an, um einen neuen Link zu erhalten."
     },
+    "optOut": {
+      "title": "Diese Hinweise von {projectName} abbestellen",
+      "description": "Sie erhalten unter {email} weiterhin die E-Mails, die Ihr Konto braucht, etwa Zugangslinks oder Belege.",
+      "button": "Diese Hinweise abbestellen",
+      "buttonLoading": "Wird gespeichert...",
+      "successTitle": "Erledigt",
+      "successDescription": "Sie erhalten keine weiteren Hinweise wie diesen von {projectName}.",
+      "unavailableTitle": "Dieser Link funktioniert nicht mehr",
+      "unavailableDescription": "Diese Hinweise können hier nicht mehr abbestellt werden. Antworten Sie auf einen davon, wenn Sie sie nicht mehr erhalten möchten."
+    },
     "manage": {
       "title": "Einstellungen verwalten",
       "description": "Verwalten Sie die E-Mails, die {projectName} an {email} sendet.",
@@ -68,7 +78,9 @@
   "email": {
     "footer": {
       "unsubscribeText": "Sie erhalten diese E-Mail, weil Sie dem Empfang von E-Mails von {projectName} zugestimmt haben. Wenn Sie solche E-Mails nicht mehr erhalten möchten, bitte",
-      "updatePreferences": "aktualisieren Sie Ihre Einstellungen"
+      "updatePreferences": "aktualisieren Sie Ihre Einstellungen",
+      "optOutText": "Sie erhalten diese Hinweise von {projectName}.",
+      "optOutLink": "Ich möchte keine Hinweise wie diesen mehr"
     },
     "optin": {
       "subject": "Bestätigen Sie Ihr Abonnement bei {projectName}",
