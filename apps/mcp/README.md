@@ -171,9 +171,11 @@ agent can build and edit a branching workflow without opening the builder.
   problems; `plunk_set_workflow_enabled` refuses to enable a workflow while any are errors.
 - A `DELAY` waits for a duration (`amount` + `unit`) or until a date (`until` + `timezone`, Plunk Lite),
   with `ifLate` for contacts who reach it after the date: `skip` (default) runs nothing up to the next
-  wait until a date, `continue` goes on at once. Its date can change while contacts wait there: they
-  move to the new date. `plunk_check_workflow` shows how many contacts wait at each step and when each
-  wait until a date ends.
+  wait until a date, `continue` goes on at once. With `spreadMinutes` (up to 1440), each contact
+  leaves at a time of its own within that many minutes after the date, instead of all at once; being
+  late is still against the date. Its date and spread can change while contacts wait there: they move
+  to their new times. `plunk_check_workflow` shows how many contacts wait at each step and when each
+  wait until a date ends, and gives `spread_overlaps_next` when a spread reaches the next date wait.
 
 ### Addressing contacts by email
 
