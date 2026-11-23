@@ -74,7 +74,7 @@ describe('tool registration', () => {
     expect(names).toContain('plunk_send_email');
     expect(names).toContain('plunk_send_campaign');
     expect(names).toContain('plunk_delete_contact');
-    expect(tools).toHaveLength(45);
+    expect(tools).toHaveLength(46);
 
     await close();
   });
@@ -721,6 +721,90 @@ describe('page-based lists', () => {
     expect(JSON.stringify(last.content)).toContain(`Found 12 ${noun}(s); showing 1.`);
     expect(JSON.stringify(last.content)).not.toContain('More results exist');
 
+    await close();
+  });
+});
+
+// Plunk Lite: opt-out topics, and editing a template
+describe('template tools', () => {
+  const TOPIC = '3f1c2a8e-7b4d-4c3a-9e2f-1a2b3c4d5e6f';
+
+  it('creates a template with or without an opt-out topic', async () => {
+    const bodies: unknown[] = [];
+    mockApi((_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      bodies.push(body);
+      return json({id: 'tpl-1', optOutSegmentId: body.optOutSegmentId ?? null, ...body});
+    });
+    const {client, close} = await connect(baseConfig);
+    const base = {name: 'Day 5', subject: 'Hi', body: '<p>Hi</p>', from: 'hi@example.com'};
+
+    const plain = await client.callTool({name: 'plunk_create_template', arguments: base});
+    const withTopic = await client.callTool({
+      name: 'plunk_create_template',
+      arguments: {...base, type: 'TRANSACTIONAL', optOutSegmentId: TOPIC},
+    });
+    const notAnId = await client.callTool({name: 'plunk_create_template', arguments: {...base, optOutSegmentId: 'x'}});
+
+    expect(plain.isError).toBeFalsy();
+    expect(withTopic.isError).toBeFalsy();
+    expect(notAnId.isError).toBe(true);
+    expect(bodies).toEqual([
+      expect.not.objectContaining({optOutSegmentId: expect.anything()}),
+      expect.objectContaining({type: 'TRANSACTIONAL', optOutSegmentId: TOPIC}),
+    ]);
+    await close();
+  });
+
+  it('updates only the fields given, and removes the topic with null after checking the installation has topics', async () => {
+    const calls: {method: string; path: string; body?: unknown}[] = [];
+    mockApi((url, init) => {
+      const method = init?.method ?? 'GET';
+      calls.push({method, path: new URL(url).pathname, body: init?.body ? JSON.parse(String(init.body)) : undefined});
+      return json({id: 'tpl-1', name: 'Day 5', optOutSegmentId: TOPIC});
+    });
+    const {client, close} = await connect(baseConfig);
+
+    const renamed = await client.callTool({name: 'plunk_update_template', arguments: {id: 'tpl-1', name: 'Day 6'}});
+    const removed = await client.callTool({
+      name: 'plunk_update_template',
+      arguments: {id: 'tpl-1', type: 'MARKETING', optOutSegmentId: null},
+    });
+
+    expect(renamed.isError).toBeFalsy();
+    expect(removed.isError).toBeFalsy();
+    expect(calls).toEqual([
+      {method: 'PATCH', path: '/templates/tpl-1', body: {name: 'Day 6'}},
+      {method: 'GET', path: '/templates/tpl-1', body: undefined},
+      {method: 'PATCH', path: '/templates/tpl-1', body: {type: 'MARKETING', optOutSegmentId: null}},
+    ]);
+    await close();
+  });
+
+  it('writes nothing on an installation without opt-out topics, nor with nothing or something invalid to change', async () => {
+    const methods: string[] = [];
+    mockApi((_url, init) => {
+      methods.push(init?.method ?? 'GET');
+      return json({id: 'tpl-1', name: 'Day 5'});
+    });
+    const {client, close} = await connect(baseConfig);
+
+    const old = await client.callTool({
+      name: 'plunk_update_template',
+      arguments: {id: 'tpl-1', optOutSegmentId: TOPIC},
+    });
+    const nothing = await client.callTool({name: 'plunk_update_template', arguments: {id: 'tpl-1'}});
+    const invalid = await Promise.all(
+      [{from: ''}, {subject: ''}, {name: null}, {type: 'OTHER'}, {replyTo: 'nope'}].map((fields) =>
+        client.callTool({name: 'plunk_update_template', arguments: {id: 'tpl-1', ...fields}}),
+      ),
+    );
+
+    expect(old.isError).toBe(true);
+    expect(JSON.stringify(old.content)).toContain('does not support opt-out topics');
+    expect(nothing.isError).toBe(true);
+    expect(invalid.every((result) => result.isError)).toBe(true);
+    expect(methods).toEqual(['GET']);
     await close();
   });
 });
