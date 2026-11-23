@@ -1239,6 +1239,46 @@ describe('waits until a date', () => {
     await close();
   });
 
+  it('adds and changes the spread of a wait until a date, and drops it with a duration', async () => {
+    const api = fakeApi();
+    const {client, close} = await connect();
+
+    await call(client, 'plunk_add_workflow_step', {
+      workflowId: 'wf-1',
+      type: 'DELAY',
+      name: 'Live',
+      until: '2026-11-25T14:00',
+      timezone: 'Europe/Madrid',
+      spreadMinutes: 240,
+    });
+    expect(api.stepNamed('Live').config).toEqual({
+      until: '2026-11-25T14:00',
+      timezone: 'Europe/Madrid',
+      spreadMinutes: 240,
+    });
+
+    await call(client, 'plunk_update_workflow_step', {workflowId: 'wf-1', stepId: 's1', spreadMinutes: 120});
+    expect(api.stepNamed('Live').config).toEqual({
+      until: '2026-11-25T14:00',
+      timezone: 'Europe/Madrid',
+      spreadMinutes: 120,
+    });
+
+    await call(client, 'plunk_update_workflow_step', {workflowId: 'wf-1', stepId: 's1', amount: 2, unit: 'hours'});
+    expect(api.stepNamed('Live').config).toEqual({amount: 2, unit: 'hours'});
+
+    const refused = await call(client, 'plunk_add_workflow_step', {
+      workflowId: 'wf-1',
+      type: 'DELAY',
+      until: '2026-11-25T14:00',
+      timezone: 'UTC',
+      spreadMinutes: 1441,
+    });
+    expect(refused.isError).toBe(true);
+
+    await close();
+  });
+
   it('turns a wait for a duration into one until a date, and back, dropping the other settings', async () => {
     const api = fakeApi();
     const {client, close} = await connect();
@@ -1271,6 +1311,7 @@ describe('waits until a date', () => {
     [{until: '22/11/2026 14:00', timezone: 'UTC'}, 'must look like'],
     [{until: '2026-11-22T14:00', timezone: '+02:00'}, 'not an offset'],
     [{until: '2026-11-22T14:00', timezone: 'Mars/Olympus'}, 'Unknown time zone'],
+    [{spreadMinutes: 60}, '`spreadMinutes` only apply to one'],
   ])('refuses %o', async (params, message) => {
     const api = fakeApi();
     const {client, close} = await connect();
@@ -1322,5 +1363,65 @@ describe('waits until a date', () => {
       'warning:date_passed:w1',
       'warning:skips_to_end:w2',
     ]);
+  });
+
+  it('shows the spread, and gives the spread reaching the next date wait as the API found it', () => {
+    const review = reviewWorkflow({
+      id: 'wf-1',
+      stepWaits: [
+        {
+          stepId: 'w1',
+          waiting: 0,
+          at: '2026-11-29T13:00:00.000Z',
+          late: false,
+          spreadUntil: '2026-11-29T18:00:00.000Z',
+          spreadOverlap: {stepId: 'w2', at: '2026-11-29T17:45:00.000Z', severity: 'error'},
+        },
+        {
+          stepId: 'w2',
+          waiting: 0,
+          at: '2026-11-29T17:45:00.000Z',
+          late: false,
+          spreadUntil: '2026-11-29T18:15:00.000Z',
+          spreadOverlap: {stepId: 'w3', at: '2026-11-29T18:00:00.000Z', severity: 'warning'},
+        },
+      ],
+      steps: [
+        {
+          id: 'trigger',
+          type: 'TRIGGER',
+          config: {eventName: 'x'},
+          outgoingTransitions: [{id: 't1', fromStepId: 'trigger', toStepId: 'w1'}],
+        },
+        {
+          id: 'w1',
+          type: 'DELAY',
+          config: {until: '2026-11-29T14:00', timezone: 'Europe/Madrid', spreadMinutes: 300},
+          outgoingTransitions: [{id: 't2', fromStepId: 'w1', toStepId: 'w2'}],
+        },
+        {
+          id: 'w2',
+          type: 'DELAY',
+          name: 'Evening live',
+          config: {until: '2026-11-29T18:45', timezone: 'Europe/Madrid', spreadMinutes: 30},
+          outgoingTransitions: [{id: 't3', fromStepId: 'w2', toStepId: 'w3'}],
+        },
+        {
+          id: 'w3',
+          type: 'DELAY',
+          config: {until: '2026-11-29T19:00', timezone: 'Europe/Madrid', ifLate: 'continue'},
+          outgoingTransitions: [],
+        },
+      ],
+    });
+
+    const lines = review.outline.split('\n');
+    expect(lines[1]).toContain(
+      'wait until 2026-11-29 14:00 Europe/Madrid (late: skip, spread over 300 min) ' +
+        '(ends 2026-11-29T13:00:00.000Z, spread until 2026-11-29T18:00:00.000Z)',
+    );
+    const overlaps = review.issues.filter((issue) => issue.code === 'spread_overlaps_next');
+    expect(overlaps.map((issue) => `${issue.severity}:${issue.stepId}`)).toEqual(['error:w1', 'warning:w2']);
+    expect(overlaps[0]!.message).toContain('"Evening live" (2026-11-29T17:45:00.000Z)');
   });
 });

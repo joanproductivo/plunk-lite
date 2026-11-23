@@ -39,6 +39,9 @@ export const DELAY_UNITS = ['minutes', 'hours', 'days'] as const;
 /** Plunk Lite: what a DELAY that waits until a date does with a contact who reaches it after the date */
 export const DATE_WAIT_IF_LATE = ['skip', 'continue'] as const;
 
+/** Plunk Lite: the longest spread of a DELAY until a date, in minutes */
+export const DATE_WAIT_MAX_SPREAD_MINUTES = 1440;
+
 export const WEBHOOK_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 
 export const SUBSCRIPTION_ACTIONS = ['none', 'subscribe', 'unsubscribe'] as const;
@@ -89,12 +92,14 @@ export interface ParkedGroup {
   canContinue: boolean;
 }
 
-/** Plunk Lite: the contacts waiting at one step, and, for a wait until a date, when it ends */
+/** Plunk Lite: who waits at a step; for a wait until a date, when it ends (and its spread), and what it reaches */
 export interface StepWait {
   stepId: string;
   waiting: number;
   at?: string;
   late?: boolean;
+  spreadUntil?: string;
+  spreadOverlap?: {stepId: string; at: string; severity: 'error' | 'warning'};
 }
 
 export interface Workflow {
@@ -193,7 +198,12 @@ const STEP_CONFIG_SCHEMAS: Record<BuildableStepType, z.ZodType> = {
       .object({amount: z.number().positive(), unit: z.enum(DELAY_UNITS)})
       .refine((data) => data.amount <= MAX_DELAY[data.unit], {message: 'Delay cannot exceed 365 days'}),
     z
-      .object({until: z.string(), timezone: z.string(), ifLate: z.enum(DATE_WAIT_IF_LATE).optional()})
+      .object({
+        until: z.string(),
+        timezone: z.string(),
+        ifLate: z.enum(DATE_WAIT_IF_LATE).optional(),
+        spreadMinutes: z.number().int().min(0).max(DATE_WAIT_MAX_SPREAD_MINUTES).optional(),
+      })
       .strict()
       .superRefine((data, ctx) => {
         const problem = dateWaitParamsProblem(data.until, data.timezone);
@@ -296,6 +306,7 @@ export interface StepParams {
   until?: string;
   timezone?: string;
   ifLate?: (typeof DATE_WAIT_IF_LATE)[number];
+  spreadMinutes?: number;
   eventName?: string;
   field?: string;
   operator?: (typeof CONDITION_OPERATORS)[number];
@@ -314,7 +325,7 @@ export interface StepParams {
 /** Arguments that belong to each step type, used to reject ones that would be silently ignored. */
 const PARAMS_BY_TYPE: Record<BuildableStepType, (keyof StepParams)[]> = {
   SEND_EMAIL: ['templateId', 'recipientEmail'],
-  DELAY: ['amount', 'unit', 'until', 'timezone', 'ifLate'],
+  DELAY: ['amount', 'unit', 'until', 'timezone', 'ifLate', 'spreadMinutes'],
   WAIT_FOR_EVENT: ['eventName', 'amount', 'unit'],
   CONDITION: ['field', 'operator', 'value', 'branches'],
   UPDATE_CONTACT: ['updates', 'subscriptionAction', 'segments'],
@@ -431,7 +442,11 @@ export function buildStepConfig(
 
     case 'DELAY': {
       // Plunk Lite: a wait until a date. Passing one form drops the other's settings
-      const date = params.until !== undefined || params.timezone !== undefined || params.ifLate !== undefined;
+      const date =
+        params.until !== undefined ||
+        params.timezone !== undefined ||
+        params.ifLate !== undefined ||
+        params.spreadMinutes !== undefined;
       const duration = params.amount !== undefined || params.unit !== undefined;
       if (date && duration) {
         return {
@@ -441,19 +456,23 @@ export function buildStepConfig(
       if (date || (!duration && 'until' in config)) {
         delete config.amount;
         delete config.unit;
-        for (const key of ['until', 'timezone', 'ifLate'] as const) {
+        for (const key of ['until', 'timezone', 'ifLate', 'spreadMinutes'] as const) {
           if (params[key] !== undefined) {
             config[key] = params[key];
           }
         }
         if (typeof config.until !== 'string' || typeof config.timezone !== 'string') {
-          return {error: 'A DELAY until a date needs both `until` and `timezone`.'};
+          return {
+            error:
+              'A DELAY until a date needs both `until` and `timezone` (`ifLate` and `spreadMinutes` only apply to one).',
+          };
         }
         return finish(type, config);
       }
       delete config.until;
       delete config.timezone;
       delete config.ifLate;
+      delete config.spreadMinutes;
 
       if (params.amount !== undefined) {
         config.amount = params.amount;
@@ -806,7 +825,11 @@ export function stepSummary(step: WorkflowStep): string {
     case 'DELAY':
       if (typeof config.until === 'string') {
         const late = config.ifLate === 'continue' ? 'continue' : 'skip';
-        return `wait until ${config.until.replace('T', ' ')} ${String(config.timezone ?? '?')} (late: ${late})`;
+        const spread =
+          typeof config.spreadMinutes === 'number' && config.spreadMinutes > 0
+            ? `, spread over ${config.spreadMinutes} min`
+            : '';
+        return `wait until ${config.until.replace('T', ' ')} ${String(config.timezone ?? '?')} (late: ${late}${spread})`;
       }
       return `wait ${String(config.amount ?? '?')} ${unitLabel(config.amount, config.unit)}`;
     case 'WAIT_FOR_EVENT': {
@@ -878,9 +901,11 @@ export interface WorkflowIssue {
     | 'invalid_config'
     | 'missing_template'
     | 'bad_connection'
-    // Plunk Lite: a wait until a date already past, and one that skips to the end when late
+    // Plunk Lite: a wait until a date already past, one that skips to the end when late, and one
+    // whose spread reaches the next date wait
     | 'date_passed'
-    | 'skips_to_end';
+    | 'skips_to_end'
+    | 'spread_overlaps_next';
   stepId?: string;
   message: string;
 }
@@ -965,7 +990,7 @@ export function reviewWorkflow(workflow: Workflow): WorkflowReview {
 
     const label = step.name && step.name !== stepSummary(step) ? ` "${step.name}"` : '';
     const wait = workflow.stepWaits?.find((entry) => entry.stepId === step.id);
-    const ends = wait?.at ? ` (ends ${wait.at})` : '';
+    const ends = wait?.at ? ` (ends ${wait.at}${wait.spreadUntil ? `, spread until ${wait.spreadUntil}` : ''})` : '';
     const waiting = wait?.waiting ? ` — ${wait.waiting} waiting` : '';
     lines.push(
       `#${n} ${step.type}${label}: ${stepSummary(step)}${ends}${waiting}${exits ? `  ${exits}` : ''}  [id ${step.id}]`,
@@ -1086,7 +1111,7 @@ function dateWaitAhead(step: WorkflowStep, byId: Map<string, WorkflowStep>): boo
   return false;
 }
 
-/** Plunk Lite: a wait until a date whose date has passed, or that skips everything after it when late */
+/** Plunk Lite: a date wait already past, that skips to the end when late, or whose spread reaches the next one */
 function checkDateWait(
   step: WorkflowStep,
   wait: StepWait | undefined,
@@ -1119,6 +1144,22 @@ function checkDateWait(
       message:
         `${name} skips when a contact arrives late, and no date wait follows it: a late contact skips every ` +
         'step after it (emails, webhooks, contact updates) and finishes the workflow.',
+    });
+  }
+  const overlap = wait?.spreadOverlap;
+  if (overlap) {
+    const next = byId.get(overlap.stepId);
+    const where = `"${next?.name ?? 'DELAY'}" (${overlap.at})`;
+    issues.push({
+      severity: overlap.severity,
+      code: 'spread_overlaps_next',
+      stepId: step.id,
+      message:
+        overlap.severity === 'error'
+          ? `${name}'s spread reaches the next date wait ${where}: the last contacts would arrive late and skip ` +
+            'it. Use a shorter spreadMinutes.'
+          : `${name}'s spread may reach the next date wait ${where}: it goes on right away when late, or a ` +
+            'WAIT_FOR_EVENT with no timeout lies between them.',
     });
   }
 }
