@@ -18,6 +18,7 @@ import {
   renderTemplate,
   renderTextTemplate,
   type DateWaitConfig,
+  dateWaitSpreadMs,
   hasDateWaitShape,
   wallTimeToInstant,
   WorkflowStepConfigSchemas,
@@ -859,28 +860,34 @@ export class WorkflowExecutionService {
   }
 
   /**
-   * Plunk Lite: a DELAY until a date and time. Before it, the run waits until then, like a delay.
-   * After it, with `ifLate: 'continue'`, it ends right away; with `skip`, the step completes and the
-   * run stays running at it, for skipLate to walk past what follows.
+   * Plunk Lite: a DELAY until a date and time. Before it, the run waits until then, like a delay,
+   * or until its own instant within the spread (DateWaits.slotOf). After the date, with `ifLate:
+   * 'continue'`, it ends right away; with `skip`, the step completes and the run stays running at
+   * it, for skipLate to walk past what follows.
    */
   private static async executeDateWait(
     step: WorkflowStep,
     execution: WorkflowExecutionWithRelations,
     stepExecution: WorkflowStepExecution,
-    {until, timezone, ifLate}: DateWaitConfig,
+    config: DateWaitConfig,
   ): Promise<StepResult> {
+    const {until, timezone, ifLate} = config;
     const at = wallTimeToInstant(until, timezone);
     if (!at) {
       throw new Error(`${until} in ${timezone} is not a real date and time`);
     }
     const now = Date.now();
+    // Late is against the date, the start of the spread
     const late = at.getTime() <= now ? ifLate : undefined;
+    const slot = late ? at : DateWaits.slotOf(execution.id, step.id, at, dateWaitSpreadMs(config));
     // The sweep reads resumeAt: never in the past, so a late wait is not taken for one stuck
     const output = {
       until,
       timezone,
       at: at.toISOString(),
-      resumeAt: new Date(Math.max(now, at.getTime())).toISOString(),
+      resumeAt: new Date(Math.max(now, slot.getTime())).toISOString(),
+      // Always written, so a round moving the runs to a new spread (DateWaits.rescheduleRound) knows where each is
+      spreadMinutes: config.spreadMinutes ?? 0,
       ...(late ? {late} : {}),
     };
     const completed = {status: StepExecutionStatus.COMPLETED, completedAt: new Date(), output};
@@ -901,7 +908,12 @@ export class WorkflowExecutionService {
         data: {status: WorkflowExecutionStatus.WAITING},
       }),
     ]);
-    await QueueService.queueWorkflowDelayEnd(execution.id, step.id, stepExecution.id, Math.max(0, at.getTime() - now));
+    await QueueService.queueWorkflowDelayEnd(
+      execution.id,
+      step.id,
+      stepExecution.id,
+      Math.max(0, slot.getTime() - now),
+    );
     return {...output, queued: true};
   }
 

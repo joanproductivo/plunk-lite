@@ -675,8 +675,9 @@ export class WorkflowService {
       const activeExecutions = await this.hasActiveExecutions(workflowId);
 
       if (activeExecutions > 0) {
-        // Only allow safe changes: name and position updates. Plunk Lite: and a new date, time zone
-        // or late option for a wait until a date (a new date moves the contacts waiting there, below)
+        // Only allow safe changes: name and position updates. Plunk Lite: and a new date, time zone,
+        // late option or spread for a wait until a date (a new date or spread moves the contacts
+        // waiting there, below)
         const newDate =
           step.type === 'DELAY' && isDateWait(step.config) && isDateWait(data.config) && data.templateId === undefined;
         const hasCriticalChanges = !newDate && (data.config !== undefined || data.templateId !== undefined);
@@ -686,9 +687,9 @@ export class WorkflowService {
             409,
             `Cannot modify step configuration while workflow has ${activeExecutions} active execution(s). ` +
               'Please disable the workflow first or wait for executions to complete. ' +
-              // Plunk Lite: and the date of a wait until a date
-              'You can still update the step name and position, and the date, time zone or late option ' +
-              'of a wait until a date.',
+              // Plunk Lite: and the date or spread of a wait until a date
+              'You can still update the step name and position, and the date, time zone, late option ' +
+              'or spread of a wait until a date.',
           );
         }
       }
@@ -714,14 +715,15 @@ export class WorkflowService {
       data: updateData,
     });
 
-    // Plunk Lite: a date wait whose date or time zone changed moves the contacts waiting there
+    // Plunk Lite: a date wait whose date, time zone or spread changed moves the contacts waiting there
     if (
       isDateWait(updated.config) &&
       (!isDateWait(step.config) ||
         step.config.until !== updated.config.until ||
-        step.config.timezone !== updated.config.timezone)
+        step.config.timezone !== updated.config.timezone ||
+        (step.config.spreadMinutes ?? 0) !== (updated.config.spreadMinutes ?? 0))
     ) {
-      await QueueService.queueWithoutWaiting(DateWaits.queueReschedule(stepId), `the new date of step ${stepId}`);
+      await QueueService.queueWithoutWaiting(DateWaits.queueReschedule(stepId), `the new date or spread of step ${stepId}`);
     }
 
     return updated;

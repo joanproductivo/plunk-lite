@@ -1,3 +1,5 @@
+import {randomUUID} from 'node:crypto';
+
 import {StepExecutionStatus, WorkflowExecutionStatus, WorkflowStepType} from '@plunk/db';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
@@ -154,6 +156,41 @@ describe('DateWaits.lateRoute', () => {
   });
 });
 
+describe('DateWaits.slotOf', () => {
+  const at = new Date('2026-11-25T13:00:00Z');
+  const HOUR = 60 * MINUTE;
+  const ids = Array.from({length: 2000}, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
+
+  it('is the date without a spread, and the same instant every time with one', () => {
+    expect(DateWaits.slotOf(ids[0]!, 's1', at, 0)).toEqual(at);
+    expect(DateWaits.slotOf(ids[0]!, 's1', at, 4 * HOUR)).toEqual(DateWaits.slotOf(ids[0]!, 's1', at, 4 * HOUR));
+  });
+
+  it('spreads 2000 runs evenly over 4 hours, inside the spread', () => {
+    const perHour = [0, 0, 0, 0];
+    for (const id of ids) {
+      const offset = DateWaits.slotOf(id, 's1', at, 4 * HOUR).getTime() - at.getTime();
+      expect(offset).toBeGreaterThanOrEqual(0);
+      expect(offset).toBeLessThan(4 * HOUR);
+      perHour[Math.floor(offset / HOUR)]!++;
+    }
+    for (const count of perHour) {
+      expect(count).toBeGreaterThanOrEqual(400);
+      expect(count).toBeLessThanOrEqual(600);
+    }
+  });
+
+  it('never moves anyone earlier when the spread grows, and orders each step differently', () => {
+    for (const id of ids.slice(0, 200)) {
+      const narrow = DateWaits.slotOf(id, 's1', at, 2 * HOUR).getTime();
+      expect(DateWaits.slotOf(id, 's1', at, 4 * HOUR).getTime()).toBeGreaterThanOrEqual(narrow);
+    }
+    const last = (stepId: string) =>
+      ids.reduce((a, b) => (DateWaits.slotOf(a, stepId, at, HOUR) > DateWaits.slotOf(b, stepId, at, HOUR) ? a : b));
+    expect(last('s1')).not.toBe(last('s2'));
+  });
+});
+
 /** Moving the contacts waiting at a date wait to its new date, through the real queue */
 describe('DateWaits.rescheduleRound', () => {
   const prisma = getPrismaClient();
@@ -227,6 +264,82 @@ describe('DateWaits.rescheduleRound', () => {
     await setDate(20 * MINUTE);
     await round();
     expect(await dueIn(run!.rowId)).toBeLessThan(20 * MINUTE);
+  });
+
+  it('moves the contacts waiting to their own instants when a spread is added, changed or removed', async () => {
+    const runs = await waiting(3);
+    const reschedule = vi.spyOn(QueueService, 'rescheduleWorkflowDelayEnd');
+    const config = {...dateWait(60 * MINUTE), spreadMinutes: 120};
+    await prisma.workflowStep.update({where: {id: stepId}, data: {config}});
+    const at = new Date(instant(config));
+
+    await round();
+    for (const run of runs) {
+      const slot = DateWaits.slotOf(run.executionId, stepId, at, 120 * MINUTE);
+      expect((await prisma.workflowStepExecution.findUniqueOrThrow({where: {id: run.rowId}})).output).toMatchObject({
+        at: at.toISOString(),
+        resumeAt: slot.toISOString(),
+        spreadMinutes: 120,
+      });
+      expect(Math.abs((await dueIn(run.rowId)) - (slot.getTime() - Date.now()))).toBeLessThan(2000);
+    }
+    expect(reschedule).toHaveBeenCalledTimes(3);
+
+    // The second round finds them in place
+    await round();
+    expect(reschedule).toHaveBeenCalledTimes(3);
+
+    await prisma.workflowStep.update({where: {id: stepId}, data: {config: {...config, spreadMinutes: 240}}});
+    await round();
+    expect(reschedule).toHaveBeenCalledTimes(6);
+
+    await prisma.workflowStep.update({where: {id: stepId}, data: {config: dateWait(60 * MINUTE)}});
+    await round();
+    expect(reschedule).toHaveBeenCalledTimes(9);
+    const output = (await prisma.workflowStepExecution.findUniqueOrThrow({where: {id: runs[0]!.rowId}})).output;
+    expect(output).toMatchObject({resumeAt: at.toISOString(), spreadMinutes: 0});
+  });
+
+  it('inside a spread that has started, lets go only those whose new time has passed, and none when it grows', async () => {
+    const runs = await waiting(20, {queued: false});
+    const at = new Date(Date.now() - 60 * MINUTE);
+    const start = {until: at.toISOString().slice(0, 16), timezone: 'UTC'};
+    const startAt = new Date(instant(start));
+    const due = async () => Promise.all(runs.map(run => dueIn(run.rowId)));
+
+    await prisma.workflowStep.update({where: {id: stepId}, data: {config: {...start, spreadMinutes: 240}}});
+    await round();
+    const wide = await due();
+    runs.forEach((run, i) => {
+      const passed = DateWaits.slotOf(run.executionId, stepId, startAt, 240 * MINUTE).getTime() <= Date.now();
+      expect(wide[i]! <= 0).toBe(passed);
+    });
+
+    // Growing it moves nobody earlier
+    await prisma.workflowStep.update({where: {id: stepId}, data: {config: {...start, spreadMinutes: 480}}});
+    await round();
+    const wider = await due();
+    runs.forEach((_, i) => {
+      if (wide[i]! > 0) expect(wider[i]!).toBeGreaterThanOrEqual(wide[i]! - 5000);
+    });
+
+    // Shortening it lets go exactly those whose new time has passed
+    await prisma.workflowStep.update({where: {id: stepId}, data: {config: {...start, spreadMinutes: 90}}});
+    await round();
+    const short = await due();
+    runs.forEach((run, i) => {
+      const passed = DateWaits.slotOf(run.executionId, stepId, startAt, 90 * MINUTE).getTime() <= Date.now();
+      expect(short[i]! <= 0).toBe(passed);
+    });
+  }, 30_000);
+
+  it('leaves the runs stored before spreads existed, at the date in force with none', async () => {
+    await waiting(2);
+    const reschedule = vi.spyOn(QueueService, 'rescheduleWorkflowDelayEnd');
+
+    await round();
+
+    expect(reschedule).not.toHaveBeenCalled();
   });
 
   it('ends right away the wait of a date now past', async () => {
@@ -370,5 +483,39 @@ describe('DateWaits.stepWaits', () => {
       {stepId: ahead.id, waiting: 2, at: instant(ahead.config as {until: string}), late: false},
       {stepId: event.id, waiting: 1},
     ]);
+  });
+  it('says when a spread ends, and the next date wait it reaches', async () => {
+    const spread = {...dateWait(60 * MINUTE), spreadMinutes: 120};
+    const steps = [
+      step('w1', 'DELAY', [['w2']], spread),
+      step('w2', 'DELAY', [['w3']], dateWait(150 * MINUTE)),
+      step('w3', 'DELAY', [], {...dateWait(24 * 60 * MINUTE), spreadMinutes: 60}),
+    ];
+
+    const waits = await DateWaits.stepWaits(randomUUID(), steps);
+
+    expect(waits[0]).toEqual({
+      stepId: 'w1',
+      waiting: 0,
+      at: instant(spread),
+      late: false,
+      spreadUntil: new Date(new Date(instant(spread)).getTime() + 120 * MINUTE).toISOString(),
+      spreadOverlap: {stepId: 'w2', at: instant(steps[1]!.config as {until: string}), severity: 'error'},
+    });
+    expect(waits[1]).not.toHaveProperty('spreadUntil');
+    expect(waits[2]).toMatchObject({stepId: 'w3', spreadUntil: expect.any(String)});
+    expect(waits[2]).not.toHaveProperty('spreadOverlap');
+  });
+
+  it('no longer gives the overlap of a spread that is over', async () => {
+    const steps = [
+      step('w1', 'DELAY', [['w2']], {...dateWait(-300 * MINUTE), spreadMinutes: 120}),
+      step('w2', 'DELAY', [], dateWait(-120 * MINUTE)),
+    ];
+
+    const [first] = await DateWaits.stepWaits(randomUUID(), steps);
+
+    expect(first).toMatchObject({stepId: 'w1', late: true, spreadUntil: expect.any(String)});
+    expect(first).not.toHaveProperty('spreadOverlap');
   });
 });

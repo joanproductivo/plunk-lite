@@ -380,8 +380,8 @@ export class FailureAlertService {
   }
 
   /**
-   * Plunk Lite: a round that moves the contacts waiting at a wait until a date to its new date
-   * failed for good: some may end at the old date. Recorded against the step's workflow.
+   * Plunk Lite: a round that moves the contacts waiting at a wait until a date to its new date or
+   * spread failed for good: some may end at the old time. Recorded against the step's workflow.
    */
   public static async recordDateWaitReschedule(stepId: string, error: string): Promise<void> {
     try {
@@ -393,11 +393,11 @@ export class FailureAlertService {
         await this.record(step.workflow.projectId, {
           sourceKey: `workflow:${step.workflowId}`,
           label: step.workflow.name,
-          error: `Moving the contacts waiting at "${step.name}" to its new date failed: ${error}`,
+          error: `Moving the contacts waiting at "${step.name}" to their new times failed: ${error}`,
         });
       }
     } catch (lookupError) {
-      signale.error(`[FAILURE-ALERTS] Could not record the failed new date of step ${stepId}:`, lookupError);
+      signale.error(`[FAILURE-ALERTS] Could not record the failed new date or spread of step ${stepId}:`, lookupError);
     }
   }
 

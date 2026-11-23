@@ -2,6 +2,7 @@ import {StepExecutionStatus, WorkflowExecutionStatus, WorkflowStepType} from '@p
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {factories, getPrismaClient} from '../../../../../test/helpers';
+import {DateWaits} from '../DateWaits';
 import {NtfyService} from '../NtfyService';
 import {ParkedRuns} from '../ParkedRuns';
 import {QueueService} from '../QueueService';
@@ -92,11 +93,57 @@ describe('WorkflowExecutionService - waiting until a date', () => {
 
     expect(await run(executionId)).toMatchObject({status: WorkflowExecutionStatus.WAITING, currentStepId: wait});
     const at = new Date(`${config.until}:00Z`).toISOString();
-    expect((await rowOf(executionId, wait)).output).toEqual({until: config.until, timezone: 'UTC', at, resumeAt: at});
+    expect((await rowOf(executionId, wait)).output).toEqual({
+      until: config.until,
+      timezone: 'UTC',
+      at,
+      resumeAt: at,
+      spreadMinutes: 0,
+    });
     const [, , , delay] = vi.mocked(QueueService.queueWorkflowDelayEnd).mock.calls[0]!;
     expect(delay).toBeGreaterThan(28 * MINUTE);
     expect(delay).toBeLessThanOrEqual(30 * MINUTE);
     expect(await emails(executionId)).toBe(0);
+  });
+
+  it('waits until its own instant within the spread, its end queued for then', async () => {
+    const workflow = await createWorkflow();
+    const config = {...until(30 * MINUTE), spreadMinutes: 60};
+    const wait = await workflow.add(workflow.triggerId, WorkflowStepType.DELAY, config);
+    await workflow.add(wait, WorkflowStepType.SEND_EMAIL);
+
+    const before = Date.now();
+    const executionId = await workflow.start();
+
+    const at = new Date(`${config.until}:00Z`);
+    const slot = DateWaits.slotOf(executionId, wait, at, 60 * MINUTE);
+    expect((await rowOf(executionId, wait)).output).toEqual({
+      until: config.until,
+      timezone: 'UTC',
+      at: at.toISOString(),
+      resumeAt: slot.toISOString(),
+      spreadMinutes: 60,
+    });
+    const [, , , delay] = vi.mocked(QueueService.queueWorkflowDelayEnd).mock.calls[0]!;
+    expect(delay).toBeLessThanOrEqual(slot.getTime() - before);
+    expect(delay).toBeGreaterThan(slot.getTime() - Date.now() - 1000);
+  });
+
+  it('is late once the date has passed, even inside the spread', async () => {
+    const workflow = await createWorkflow();
+    const wait = await workflow.add(workflow.triggerId, WorkflowStepType.DELAY, {
+      ...until(-10 * MINUTE, 'continue'),
+      spreadMinutes: 240,
+    });
+    await workflow.add(wait, WorkflowStepType.SEND_EMAIL);
+
+    const executionId = await workflow.start();
+
+    expect((await rowOf(executionId, wait)).output).toMatchObject({late: 'continue', spreadMinutes: 240});
+    expect(vi.mocked(QueueService.queueWorkflowDelayEnd).mock.calls[0]![3]).toBe(0);
+    // Its end is not held back to an instant of its own within the spread: it goes on now
+    expect(await WorkflowExecutionService.processDelayEnd(executionId, wait)).toBe(0);
+    expect(await emails(executionId)).toBe(1);
   });
 
   it('ends right away a date already past with ifLate continue, and the email goes', async () => {
@@ -288,6 +335,27 @@ describe('WorkflowExecutionService - waiting until a date', () => {
     await prisma.workflowStep.update({where: {id: wait}, data: {config: until(-1 * MINUTE)}});
     expect(await WorkflowExecutionService.processDelayEnd(executionId, wait)).toBe(0);
     expect(await emails(executionId)).toBe(1);
+  });
+
+  it('holds back an end until its own instant within the spread', async () => {
+    const workflow = await createWorkflow();
+    const wait = await workflow.add(workflow.triggerId, WorkflowStepType.DELAY, until(10 * MINUTE));
+    await workflow.add(wait, WorkflowStepType.SEND_EMAIL);
+    const executionId = await workflow.start();
+
+    // The date moves an hour later with a spread of two hours, and the old end wakes up
+    const later = {...until(70 * MINUTE), spreadMinutes: 120};
+    await prisma.workflowStep.update({where: {id: wait}, data: {config: later}});
+    const slot = DateWaits.slotOf(executionId, wait, new Date(`${later.until}:00Z`), 120 * MINUTE);
+    const left = await WorkflowExecutionService.processDelayEnd(executionId, wait);
+
+    expect(left).toBeGreaterThan(slot.getTime() - Date.now() - 1000);
+    expect(left).toBeLessThanOrEqual(slot.getTime() - Date.now() + 1000);
+    expect((await rowOf(executionId, wait)).output).toMatchObject({
+      at: new Date(`${later.until}:00Z`).toISOString(),
+      resumeAt: slot.toISOString(),
+      spreadMinutes: 120,
+    });
   });
 
   it('queues the held-back end again from an old process-step job', async () => {

@@ -18,6 +18,7 @@ import {
   buildStepConfig,
   CONDITION_OPERATORS,
   DATE_WAIT_IF_LATE,
+  DATE_WAIT_MAX_SPREAD_MINUTES,
   defaultAppendPoint,
   defaultStepName,
   DELAY_UNITS,
@@ -129,6 +130,18 @@ const stepConfigShape = {
         'nothing up to the next wait until a date (no emails, webhooks or contact updates; conditions still ' +
         'pick the path and an EXIT still ends the run) and goes on from there, or finishes the workflow if ' +
         'there is none. `continue` goes on to the next step right away.',
+    ),
+  spreadMinutes: z
+    .number()
+    .int()
+    .min(0)
+    .max(DATE_WAIT_MAX_SPREAD_MINUTES)
+    .optional()
+    .describe(
+      'DELAY until a date: spread the contacts over this many minutes after the date (at most 1440), each ' +
+        'leaving at a time of its own, instead of all at once. 0 or omitted: all at the date. Being late is ' +
+        'still against the date. The spread plus the waits up to the next date wait must end before it ' +
+        '(15 minutes of margin): `plunk_check_workflow` gives `spread_overlaps_next` otherwise.',
     ),
   eventName: z.string().min(1).optional().describe('WAIT_FOR_EVENT: the event to wait for.'),
   field: z
@@ -516,8 +529,9 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
         'with more than one exit, and steps not connected to the trigger.',
         '',
         '**Returns:** `outline` (one line per step with its exits and id, the contacts waiting at it, and',
-        'when each DELAY until a date ends), `stepWaits[]` (`stepId`, `waiting`, and `at` / `late` for',
-        'a wait until a date) and `issues[]` with `severity` error | warning.',
+        'when each DELAY until a date ends, and its spread), `stepWaits[]` (`stepId`, `waiting`, and `at` /',
+        '`late` / `spreadUntil` / `spreadOverlap` for a wait until a date) and `issues[]` with `severity`',
+        'error | warning.',
         '`plunk_set_workflow_enabled` refuses to enable while errors remain.',
         '',
         '**Key trigger phrases:** "is the workflow ok", "review the automation", "check before enabling"',
@@ -898,8 +912,8 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
         '',
         "**Step types** (pass only that type's arguments):",
         '- `SEND_EMAIL` — `templateId`; optional `recipientEmail` for a fixed address.',
-        '- `DELAY` — `amount` + `unit` (at most 365 days), or `until` + `timezone` (optional `ifLate`)',
-        '  to wait until a date and time.',
+        '- `DELAY` — `amount` + `unit` (at most 365 days), or `until` + `timezone` (optional `ifLate`',
+        '  and `spreadMinutes`) to wait until a date and time.',
         '- `WAIT_FOR_EVENT` — `eventName`; optional timeout via `amount` + `unit`. The flow continues',
         '  on the same path whether the event arrives or the timeout passes.',
         '- `CONDITION` — `field` + `operator` (+ `value`) for yes/no, or `field` + `branches` for',
@@ -1045,9 +1059,10 @@ export function registerWorkflowTools(ctx: ToolContext, client: PlunkClient): vo
         'step type (add a new step and delete this one).',
         '',
         '**Note:** settings cannot change while an enabled workflow has runs in progress (disable it',
-        'first), except the date, time zone and `ifLate` of a DELAY until a date: the contacts waiting',
-        'there move to a new date, or continue right away if it has passed. A condition cannot drop a',
-        'branch that still leads somewhere; disconnect it first.',
+        'first), except the date, time zone, `ifLate` and `spreadMinutes` of a DELAY until a date: the',
+        'contacts waiting there move to their new times, or continue right away once theirs has passed',
+        '(shortening a spread that has started lets go at once everyone whose new time has passed). A',
+        'condition cannot drop a branch that still leads somewhere; disconnect it first.',
         '',
         '**Returns:** The updated step.',
       ].join('\n'),

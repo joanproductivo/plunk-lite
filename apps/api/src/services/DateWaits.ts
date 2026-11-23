@@ -1,9 +1,9 @@
 import type {Prisma, WorkflowStep} from '@plunk/db';
 import {StepExecutionStatus, WorkflowExecutionStatus} from '@plunk/db';
-import {hasDateWaitShape, isDateWait, wallTimeToInstant} from '@plunk/shared';
+import {dateWaitSpreadMs, hasDateWaitShape, isDateWait, spreadOverlap, wallTimeToInstant} from '@plunk/shared';
 import type {RescheduleDateWaitJobData, StepWait} from '@plunk/types';
 import {toPrismaJson} from '@plunk/types';
-import {randomUUID} from 'node:crypto';
+import {createHash, randomUUID} from 'node:crypto';
 import signale from 'signale';
 
 import {prisma} from '../database/prisma.js';
@@ -19,14 +19,19 @@ import {QueueService} from './QueueService.js';
  *
  * - A contact that reaches one after its date with `ifLate: 'skip'` skips everything up to the next
  *   date wait (`lateRoute`): conditions are still evaluated to pick a branch, an Exit is kept.
- * - Changing the date of a step moves the contacts already waiting there (`rescheduleRound`), and
- *   a delay's end that wakes up before the date in force is held back (`heldBack`).
- * - `stepWaits` says how many contacts wait at each step, and when each date wait ends.
+ * - Changing the date or spread of a step moves the contacts already waiting there
+ *   (`rescheduleRound`), and a delay's end that wakes up before its instant in force is held back
+ *   (`heldBack`).
+ * - With a spread (`spreadMinutes`), each run leaves at an instant of its own within it (`slotOf`),
+ *   which every one of those reaches the same way without storing it. Being late is still measured
+ *   against the date, the start of the spread: a late run with `ifLate: 'continue'` goes on at once.
+ * - `stepWaits` says how many contacts wait at each step, when each date wait ends and, with a
+ *   spread, when that ends and the next date wait it reaches.
  */
 
-/** Runs moved to a new date in one round */
+/** Runs moved to a new date or spread in one round */
 export const RESCHEDULE_PER_ROUND = 200;
-/** The second round after a change of date, for contacts that reached the step as it was saved */
+/** The second round after a change, for contacts that reached the step as it was saved */
 const RESCHEDULE_AGAIN_MS = 2 * 60_000;
 /** A delay's end that wakes up less than this before its date is let through */
 const HOLD_BACK_MIN_MS = 1000;
@@ -44,12 +49,44 @@ export type LateRouteEnd<S> =
 /** What a late contact's skip walks through, in order */
 export type LateRouteVisit<S> = {step: S; skipped: true} | {step: S; condition: Record<string, unknown>};
 
-/** The instant a date wait's configuration stands for now, or null if it is not one */
-function dateWaitInstant(config: unknown): Date | null {
-  return isDateWait(config) ? wallTimeToInstant(config.until, config.timezone) : null;
+/** The instant a date wait's configuration stands for now and its spread, or null if it is not one */
+function dateWaitOf(config: unknown): {at: Date; spreadMs: number; spreadMinutes: number} | null {
+  if (!isDateWait(config)) {
+    return null;
+  }
+  const at = wallTimeToInstant(config.until, config.timezone);
+  return at ? {at, spreadMs: dateWaitSpreadMs(config), spreadMinutes: config.spreadMinutes ?? 0} : null;
+}
+
+/**
+ * When a run waiting at a date wait leaves: its own instant within the spread, or the date for one
+ * that reached it late (`ifLate: 'continue'`) while that date is still past
+ */
+function leavesAt(
+  executionId: string,
+  stepId: string,
+  wait: {at: Date; spreadMs: number},
+  output: Record<string, unknown>,
+): Date {
+  return typeof output.late === 'string' && wait.at.getTime() <= Date.now()
+    ? wait.at
+    : DateWaits.slotOf(executionId, stepId, wait.at, wait.spreadMs);
 }
 
 export const DateWaits = {
+  /**
+   * The instant the run `executionId` leaves the date wait `stepId`: the date plus a fraction of the
+   * spread taken from a hash of both ids, so it is the same every time it is worked out, a wider
+   * spread never moves anyone earlier, and the same contact is not always last. `at` without a spread
+   */
+  slotOf(executionId: string, stepId: string, at: Date, spreadMs: number): Date {
+    if (spreadMs <= 0) {
+      return at;
+    }
+    const share = createHash('sha256').update(`${executionId}:${stepId}`).digest().readUIntBE(0, 6) / 2 ** 48;
+    return new Date(at.getTime() + Math.floor(share * spreadMs));
+  },
+
   /**
    * The route of a contact that reached the date wait `fromStepId` late with `ifLate: 'skip'`, up to
    * the next date wait or Exit, or the end. Every other step is skipped, except a condition, which
@@ -164,17 +201,20 @@ export const DateWaits = {
 
   /**
    * One round: up to RESCHEDULE_PER_ROUND runs waiting at the date wait `stepId` whose end is not
-   * the date in force get their delay's end job moved first, and their stored date after, so a
-   * failure to move the job leaves the run to the next try. A date now past ends them right away.
-   * Runs whose wait started as a duration are left alone. Throws if any could not be moved, so the
-   * job is tried again.
+   * their instant in force (see leavesAt) get their delay's end job moved first, and their stored
+   * date after, so a failure to move the job leaves the run to the next try. An instant now past
+   * ends them right away.
+   * Runs whose wait started as a duration are left alone, and so are those already at the date and
+   * spread in force (a stored row without `spreadMinutes` had none). Throws if any could not be
+   * moved, so the job is tried again.
    */
   async rescheduleRound(data: RescheduleDateWaitJobData): Promise<void> {
     const step = await prisma.workflowStep.findUnique({where: {id: data.stepId}, select: {type: true, config: true}});
-    const at = step?.type === 'DELAY' ? dateWaitInstant(step.config) : null;
-    if (!at) {
+    const wait = step?.type === 'DELAY' ? dateWaitOf(step.config) : null;
+    if (!wait) {
       return;
     }
+    const {at, spreadMs, spreadMinutes} = wait;
 
     const runs = await prisma.workflowExecution.findMany({
       where: {
@@ -205,20 +245,26 @@ export const DateWaits = {
     for (const run of runs) {
       const row = latest.get(run.id);
       const output = row ? stepOutput(row.output) : {};
-      if (!row || typeof output.until !== 'string' || output.at === atIso) {
+      if (
+        !row ||
+        typeof output.until !== 'string' ||
+        (output.at === atIso && (output.spreadMinutes ?? 0) === spreadMinutes)
+      ) {
         continue;
       }
       const now = Date.now();
-      const left = Math.max(0, at.getTime() - now);
+      const left = Math.max(0, leavesAt(run.id, data.stepId, {at, spreadMs}, output).getTime() - now);
       try {
         await QueueService.rescheduleWorkflowDelayEnd(run.id, data.stepId, row.id, left);
         await prisma.workflowStepExecution.update({
           where: {id: row.id},
-          data: {output: toPrismaJson({...output, at: atIso, resumeAt: new Date(now + left).toISOString()})},
+          data: {
+            output: toPrismaJson({...output, at: atIso, resumeAt: new Date(now + left).toISOString(), spreadMinutes}),
+          },
         });
       } catch (error) {
         failed++;
-        signale.warn(`[WORKFLOW] Could not move execution ${run.id} to the new date: ${errorMessage(error)}`);
+        signale.warn(`[WORKFLOW] Could not move execution ${run.id} to its new time: ${errorMessage(error)}`);
       }
     }
 
@@ -226,14 +272,14 @@ export const DateWaits = {
       await QueueService.queueDateWaitReschedule({...data, after: runs[runs.length - 1]!.id});
     }
     if (failed > 0) {
-      throw new Error(`${failed} waiting contact(s) could not be moved to the new date`);
+      throw new Error(`${failed} waiting contact(s) could not be moved to their new time`);
     }
   },
 
   /**
    * How long the delay's end of `executionId` at `stepId` still has to wait, if its wait is until a
-   * date and that date (as the step has it now) is more than a second away; the stored end is set
-   * to it. 0 lets it end now.
+   * date and its instant (the date and spread the step has now, see leavesAt) is more than a
+   * second away; the stored end is set to it. 0 lets it end now.
    */
   async heldBack(executionId: string, stepId: string): Promise<number> {
     const row = await prisma.workflowStepExecution.findFirst({
@@ -245,26 +291,32 @@ export const DateWaits = {
     if (!row || typeof output.until !== 'string' || row.step.type !== 'DELAY') {
       return 0;
     }
-    const at = dateWaitInstant(row.step.config);
-    const left = at ? at.getTime() - Date.now() : 0;
-    if (!at || left <= HOLD_BACK_MIN_MS) {
+    const wait = dateWaitOf(row.step.config);
+    const slot = wait ? leavesAt(executionId, stepId, wait, output) : null;
+    const left = slot ? slot.getTime() - Date.now() : 0;
+    if (!wait || !slot || left <= HOLD_BACK_MIN_MS) {
       return 0;
     }
     await prisma.workflowStepExecution.update({
       where: {id: row.id},
-      data: {output: toPrismaJson({...output, at: at.toISOString(), resumeAt: at.toISOString()})},
+      data: {
+        output: toPrismaJson({
+          ...output,
+          at: wait.at.toISOString(),
+          resumeAt: slot.toISOString(),
+          spreadMinutes: wait.spreadMinutes,
+        }),
+      },
     });
     return left;
   },
 
   /**
    * The contacts waiting at each step of a workflow, and when each date wait ends (`late` once its
-   * date has passed): an entry per step with contacts waiting, and per date wait
+   * date has passed): an entry per step with contacts waiting, and per date wait. With a spread,
+   * when it ends, and, until then, the next date wait it reaches (see spreadOverlap in @plunk/shared)
    */
-  async stepWaits(
-    workflowId: string,
-    steps: readonly Pick<WorkflowStep, 'id' | 'type' | 'config'>[],
-  ): Promise<StepWait[]> {
+  async stepWaits(workflowId: string, steps: readonly RouteStep[]): Promise<StepWait[]> {
     const groups = await prisma.workflowExecution.groupBy({
       by: ['currentStepId'],
       where: {workflowId, status: WorkflowExecutionStatus.WAITING},
@@ -274,12 +326,24 @@ export const DateWaits = {
     const now = Date.now();
 
     return steps.flatMap(step => {
-      const at = step.type === 'DELAY' ? dateWaitInstant(step.config) : null;
+      const wait = step.type === 'DELAY' ? dateWaitOf(step.config) : null;
       const count = waiting.get(step.id) ?? 0;
-      if (!at && count === 0) {
-        return [];
+      if (!wait) {
+        return count === 0 ? [] : [{stepId: step.id, waiting: count}];
       }
-      return [{stepId: step.id, waiting: count, ...(at ? {at: at.toISOString(), late: at.getTime() <= now} : {})}];
+      const {at, spreadMs} = wait;
+      // Once the spread is over it can no longer make anyone late
+      const overlap = at.getTime() + spreadMs > now ? spreadOverlap(steps, step.id, step.config) : null;
+      return [
+        {
+          stepId: step.id,
+          waiting: count,
+          at: at.toISOString(),
+          late: at.getTime() <= now,
+          ...(spreadMs > 0 ? {spreadUntil: new Date(at.getTime() + spreadMs).toISOString()} : {}),
+          ...(overlap ? {spreadOverlap: {...overlap, at: overlap.at.toISOString()}} : {}),
+        },
+      ];
     });
   },
 };

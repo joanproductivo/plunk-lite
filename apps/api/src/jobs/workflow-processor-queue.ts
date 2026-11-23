@@ -22,7 +22,7 @@ export function createWorkflowWorker() {
         await ParkedRuns.continueRound(job.data);
         return;
       }
-      // Plunk Lite: a round of moving the contacts waiting at a date wait to its new date
+      // Plunk Lite: a round of moving the contacts waiting at a date wait to its new date or spread
       if (job.data.type === 'reschedule-date-wait') {
         await DateWaits.rescheduleRound(job.data);
         return;

@@ -426,8 +426,11 @@ export default function WorkflowEditorPage() {
               </p>
               <ul className="list-disc list-inside space-y-1 mt-2">
                 <li>Delete steps or transitions</li>
-                {/* Plunk Lite: a wait until a date can take a new date */}
-                <li>Change step settings, such as templates or conditions (except the date of a wait until a date)</li>
+                {/* Plunk Lite: a wait until a date can take a new date or spread */}
+                <li>
+                  Change step settings, such as templates or conditions (except the date, time zone, late option or
+                  spread of a wait until a date)
+                </li>
                 <li>Change the trigger</li>
               </ul>
               <p className="mt-2">
@@ -449,6 +452,32 @@ export default function WorkflowEditorPage() {
             onContinued={() => void mutate()}
           />
         )}
+
+        {/* Plunk Lite: a spread that reaches the next date wait, however it came about */}
+        {(() => {
+          const overlaps = (workflow.stepWaits ?? []).filter(wait => wait.spreadOverlap?.severity === 'error');
+          if (overlaps.length === 0) {
+            return null;
+          }
+          const stepName = (stepId: string) => workflow.steps.find(s => s.id === stepId)?.name ?? 'Wait';
+          return (
+            <Alert variant="warning">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>A spread reaches the next date wait</AlertTitle>
+              <AlertDescription>
+                <ul className="list-disc list-inside space-y-1">
+                  {overlaps.map(wait => (
+                    <li key={wait.stepId}>
+                      The last contacts of &quot;{stepName(wait.stepId)}&quot; would reach &quot;
+                      {stepName(wait.spreadOverlap?.stepId ?? '')}&quot; after its date and skip it. Shorten the spread
+                      or move that date later.
+                    </li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          );
+        })()}
 
         {/* Validation Warning Banner / Ready-to-enable Banner */}
         {!workflow.enabled &&
@@ -567,6 +596,7 @@ export default function WorkflowEditorPage() {
               onOpenChange={open => !open && setDialog({type: 'none'})}
               onSuccess={() => mutate()}
               waiting={workflow.stepWaits?.find(wait => wait.stepId === dialog.step.id)?.waiting ?? 0}
+              steps={workflow.steps}
             />
           )}
 
