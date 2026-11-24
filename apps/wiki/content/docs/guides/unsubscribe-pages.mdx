@@ -49,7 +49,7 @@ Transactional templates skip the subscription check, so a recipient cannot stop 
 - **The notices footer.** Plunk adds it at the end of every email of the template, in the contact's language, unless the body already has its own `{{optOutUrl}}` link. Its text is set by language in **Settings → Brand**, like the unsubscribe footer.
 - **The sending.** A contact in the segment no longer gets the templates of that topic, from workflows or `/v1/send` (`422` `CONTACT_OPTED_OUT`); other transactional emails still reach them. Joining the segment fires its `entry` event when it tracks membership.
 
-The segment cannot be deleted while it is a template's topic. Removing the topic from a template sends it again to everyone, those who opted out included.
+The segment cannot be deleted while it is a template's topic. If it goes anyway (by SQL, from an earlier version, or while it was being chosen), the template is sent to no one, with an alert, until it gets another segment or none: its settings show the topic as a deleted segment, and `/v1/send` answers `422` `OPT_OUT_SEGMENT_MISSING`. Removing the topic from a template sends it again to everyone, those who opted out included.
 
 ## What happens when the recipient acts
 

@@ -6,13 +6,15 @@ import {
   WorkflowExecutionStatus,
   WorkflowStepType,
 } from '@plunk/db';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {factories, getPrismaClient} from '../../../../../test/helpers';
 import {DASHBOARD_URI} from '../../app/constants';
+import {prisma as appPrisma} from '../../database/prisma';
 import {ErrorCode, HttpException} from '../../exceptions/index.js';
 import {BillingLimitService} from '../BillingLimitService';
 import {EmailService} from '../EmailService';
+import {FailureAlertService} from '../FailureAlertService';
 import {WorkflowExecutionService} from '../WorkflowExecutionService';
 
 vi.mock('../QueueService', () => ({
@@ -28,7 +30,9 @@ vi.mock('../QueueService', () => ({
 
 /**
  * Plunk Lite: a transactional template with an opt-out topic is not queued for a contact who opted
- * out. /v1/send is told (422); a workflow step completes with a FAILED email saying why.
+ * out. /v1/send is told (422); a workflow step completes with a FAILED email saying why. While the
+ * topic's segment is gone it is queued for no one, with an alert: /v1/send gets a 422
+ * OPT_OUT_SEGMENT_MISSING.
  */
 describe('EmailService with an opt-out topic', () => {
   const prisma = getPrismaClient();
@@ -43,6 +47,10 @@ describe('EmailService with an opt-out topic', () => {
     templateId = (
       await factories.createTemplate({projectId, type: TemplateType.TRANSACTIONAL, optOutSegmentId: segmentId})
     ).id;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   async function optedOutContact() {
@@ -102,6 +110,56 @@ describe('EmailService with an opt-out topic', () => {
     expect(unsubscribed.error).toBe('Contact is unsubscribed from marketing emails');
   });
 
+  describe('while the segment of the topic is gone', () => {
+    let record: ReturnType<typeof vi.spyOn<typeof FailureAlertService, 'record'>>;
+
+    beforeEach(async () => {
+      await prisma.template.update({where: {id: templateId}, data: {name: 'Workshop day'}});
+      await prisma.segment.delete({where: {id: segmentId}});
+      record = vi.spyOn(FailureAlertService, 'record').mockResolvedValue(true);
+    });
+
+    it('refuses the send with 422 OPT_OUT_SEGMENT_MISSING and an alert, creating nothing', async () => {
+      const contact = await factories.createContact({projectId, subscribed: false});
+
+      const error = await EmailService.sendTransactionalEmail(params(contact.id)).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(HttpException);
+      expect((error as HttpException).code).toBe(422);
+      expect((error as HttpException).errorCode).toBe(ErrorCode.OPT_OUT_SEGMENT_MISSING);
+      expect((error as HttpException).message).toContain('template "Workshop day"');
+      expect(await prisma.email.count({where: {contactId: contact.id}})).toBe(0);
+      expect(record).toHaveBeenCalledWith(
+        projectId,
+        expect.objectContaining({sourceKey: `template:${templateId}`, label: 'Workshop day'}),
+      );
+    });
+
+    it('creates a FAILED workflow email with the reason, alerted against the template', async () => {
+      const contact = await factories.createContact({projectId, subscribed: false});
+
+      const email = await EmailService.sendWorkflowEmail(params(contact.id));
+
+      expect(email.status).toBe(EmailStatus.FAILED);
+      expect(email.error).toContain('The opt-out segment of template "Workshop day" no longer exists');
+      expect(record).toHaveBeenCalledWith(projectId, {
+        sourceKey: `template:${templateId}`,
+        label: 'Workshop day',
+        error: email.error,
+      });
+    });
+  });
+
+  it('sends nothing when the membership cannot be read, from the API or a workflow', async () => {
+    const contact = await factories.createContact({projectId, subscribed: false});
+    vi.spyOn(appPrisma.segmentMembership, 'findUnique').mockRejectedValue(new Error('database down'));
+
+    await expect(EmailService.sendTransactionalEmail(params(contact.id))).rejects.toThrow('database down');
+    await expect(EmailService.sendWorkflowEmail(params(contact.id))).rejects.toThrow('database down');
+
+    expect(await prisma.email.count({where: {contactId: contact.id}})).toBe(0);
+  });
+
   it('still sends a workflow email to a custom recipient', async () => {
     const contact = await optedOutContact();
 
@@ -111,7 +169,8 @@ describe('EmailService with an opt-out topic', () => {
   });
 
   describe('in a SEND_EMAIL step', () => {
-    async function runSendStep(contactId: string, body: string) {
+    /** Runs a workflow whose trigger leads to a SEND_EMAIL of the template, then one of `nextTemplateId` */
+    async function runSendStep(contactId: string, body: string, nextTemplateId?: string) {
       await prisma.template.update({where: {id: templateId}, data: {body}});
       const workflow = await factories.createWorkflow({projectId});
       const trigger = await prisma.workflowStep.findFirstOrThrow({
@@ -124,6 +183,15 @@ describe('EmailService with an opt-out topic', () => {
         config: {templateId},
       });
       await prisma.workflowTransition.create({data: {fromStepId: trigger.id, toStepId: send.id}});
+      if (nextTemplateId) {
+        const next = await factories.createWorkflowStep({
+          workflowId: workflow.id,
+          type: WorkflowStepType.SEND_EMAIL,
+          templateId: nextTemplateId,
+          config: {templateId: nextTemplateId},
+        });
+        await prisma.workflowTransition.create({data: {fromStepId: send.id, toStepId: next.id}});
+      }
       const execution = await prisma.workflowExecution.create({
         data: {workflowId: workflow.id, contactId, status: WorkflowExecutionStatus.RUNNING, currentStepId: trigger.id},
       });
@@ -133,7 +201,7 @@ describe('EmailService with an opt-out topic', () => {
       const step = await prisma.workflowStepExecution.findFirstOrThrow({
         where: {executionId: execution.id, stepId: send.id},
       });
-      const email = await prisma.email.findFirstOrThrow({where: {workflowExecutionId: execution.id}});
+      const email = await prisma.email.findFirstOrThrow({where: {workflowExecutionId: execution.id, templateId}});
       return {step, email};
     }
 
@@ -154,6 +222,26 @@ describe('EmailService with an opt-out topic', () => {
       expect(step.status).toBe(StepExecutionStatus.COMPLETED);
       expect(email.status).toBe(EmailStatus.FAILED);
       expect(email.error).toBe('Contact opted out of this kind of email');
+    });
+
+    it('completes the step with a FAILED email and one alert while the topic is gone, and goes on', async () => {
+      const contact = await factories.createContact({projectId, subscribed: false});
+      await prisma.segment.delete({where: {id: segmentId}});
+      const record = vi.spyOn(FailureAlertService, 'record').mockResolvedValue(true);
+      const plain = await factories.createTemplate({projectId, type: TemplateType.TRANSACTIONAL});
+
+      const {step, email} = await runSendStep(contact.id, '<p>Hi</p>', plain.id);
+
+      expect(step.status).toBe(StepExecutionStatus.COMPLETED);
+      expect(email.status).toBe(EmailStatus.FAILED);
+      expect(email.error).toContain('no longer exists');
+      expect(record).toHaveBeenCalledTimes(1);
+      const execution = await prisma.workflowExecution.findUniqueOrThrow({where: {id: email.workflowExecutionId!}});
+      expect(execution.status).toBe(WorkflowExecutionStatus.COMPLETED);
+      const next = await prisma.email.findFirstOrThrow({
+        where: {workflowExecutionId: execution.id, templateId: plain.id},
+      });
+      expect(next.status).toBe(EmailStatus.PENDING);
     });
   });
 });

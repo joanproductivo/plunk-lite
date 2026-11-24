@@ -4,7 +4,7 @@ import {Label} from '@plunk/ui';
 import {TriangleAlert} from 'lucide-react';
 import type {ReactNode} from 'react';
 
-import {SegmentChip, SegmentSelect, useSegmentName} from '../segments/SegmentPicker';
+import {SegmentChip, SegmentSelect, useSegmentName, useSegments} from '../segments/SegmentPicker';
 
 /** The description of the "Template type" card: transactional templates with a topic get its footer */
 export function templateTypeDescription(hasTopic: boolean): string {
@@ -40,6 +40,9 @@ interface OptOutTopicFieldProps {
  */
 export function OptOutTopicField({type, value, saved, body, onChange}: OptOutTopicFieldProps) {
   const nameOf = useSegmentName();
+  const {data: segments} = useSegments();
+  // A topic whose segment is gone (by SQL, or from an earlier image): the template reaches no one
+  const gone = Boolean(value && segments && !segments.some(segment => segment.id === value));
   const removing = Boolean(saved) && value !== saved;
   const emptyLink = usesVariable(body, 'optOutUrl') && (type !== 'TRANSACTIONAL' || !value);
 
@@ -81,7 +84,11 @@ export function OptOutTopicField({type, value, saved, body, onChange}: OptOutTop
           staticOnly
         />
       )}
-      {value ? (
+      {gone ? (
+        <Warning>
+          This segment no longer exists, so this template is sent to no one: pick another segment, or remove it.
+        </Warning>
+      ) : value ? (
         <>
           <Warning>
             Contacts who opt out join {nameOf(value)} and stop getting this template — from workflows and from the API.

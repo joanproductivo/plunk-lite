@@ -83,6 +83,17 @@ const TEMPLATES: Record<string, object> = {
     type: 'MARKETING',
     optOutSegmentId: 's1',
   },
+  // A topic whose segment is gone (by SQL, or from an earlier image)
+  f: {
+    id: 'f',
+    name: 'F',
+    subject: 'Subject F',
+    body: '<p>F</p>',
+    from: 'f@example.com',
+    replyTo: 'f@other.example.org',
+    type: 'TRANSACTIONAL',
+    optOutSegmentId: 'gone',
+  },
   segments: [{id: 's1', name: 'EXCLUIR', type: 'STATIC'}] as unknown as object,
 };
 
@@ -178,6 +189,16 @@ describe('TemplateEditorPage', () => {
 
       expect(text()).toContain('All changes saved');
       expect(text()).not.toContain('will get this template again');
+    });
+
+    it('warns that a template whose topic is gone is sent to no one', async () => {
+      await open('f', 'f@other.example.org');
+      await vi.waitFor(() =>
+        expect(text()).toContain('This segment no longer exists, so this template is sent to no one'),
+      );
+
+      expect(container.querySelector('[aria-label="Remove the opt-out topic Deleted segment"]')).not.toBeNull();
+      expect(text()).not.toContain('stop getting this template');
     });
 
     it('warns when removing the topic, and when {{optOutUrl}} has no topic to fill it', async () => {

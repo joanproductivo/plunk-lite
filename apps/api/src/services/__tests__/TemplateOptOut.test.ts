@@ -6,7 +6,7 @@ import {API_URI, DASHBOARD_URI} from '../../app/constants';
 import {HttpException} from '../../exceptions/index.js';
 import {QueueService} from '../QueueService';
 import {SegmentMembershipService} from '../SegmentMembershipService';
-import {isOptedOut, optOutLink, optOutTopic, optOutUrl, readTemplateParam} from '../TemplateOptOut';
+import {optOutBlock, optOutLink, optOutTopic, optOutUrl, readTemplateParam} from '../TemplateOptOut';
 import {assertValidTopic, optOut} from '../TemplateOptOutAdmin';
 import {TemplateService} from '../TemplateService';
 
@@ -58,6 +58,35 @@ describe('opt-out topics', () => {
     expect(readTemplateParam({})).toBeUndefined();
   });
 
+  describe('optOutBlock', () => {
+    it('stops a current member of the topic, and no one else', async () => {
+      const member = await factories.createContact({projectId});
+      const left = await factories.createContact({projectId});
+      const outside = await factories.createContact({projectId});
+      await prisma.segmentMembership.createMany({
+        data: [
+          {segmentId, contactId: member.id},
+          {segmentId, contactId: left.id, exitedAt: new Date()},
+        ],
+      });
+
+      expect(await optOutBlock(projectId, segmentId, member.id)).toBe('opted-out');
+      expect(await optOutBlock(projectId, segmentId, left.id)).toBeNull();
+      expect(await optOutBlock(projectId, segmentId, outside.id)).toBeNull();
+    });
+
+    it("stops everyone while the topic is gone, is another project's or is not static", async () => {
+      const contact = await factories.createContact({projectId});
+      const {project: other} = await factories.createUserWithProject();
+      const foreign = await factories.createSegment(other.id, {type: SegmentType.STATIC});
+      const dynamic = await factories.createSegment(projectId, {type: SegmentType.DYNAMIC});
+
+      expect(await optOutBlock(projectId, '00000000-0000-4000-8000-000000000000', contact.id)).toBe('missing-topic');
+      expect(await optOutBlock(projectId, foreign.id, contact.id)).toBe('missing-topic');
+      expect(await optOutBlock(projectId, dynamic.id, contact.id)).toBe('missing-topic');
+    });
+  });
+
   describe('optOut', () => {
     it('puts the contact in the topic once: a second call fires no second entry', async () => {
       const contact = await factories.createContact({projectId});
@@ -71,7 +100,7 @@ describe('opt-out topics', () => {
       expect(await optOut(contact.id, template.id)).toBe('opted-out');
       expect(await optOut(contact.id, template.id)).toBe('opted-out');
 
-      expect(await isOptedOut(projectId, segmentId, contact.id)).toBe(true);
+      expect(await optOutBlock(projectId, segmentId, contact.id)).toBe('opted-out');
       const entries = events.mock.calls.flatMap(([job]) => job.contactIds);
       expect(entries).toEqual([contact.id]);
       events.mockRestore();

@@ -377,7 +377,7 @@ export class SegmentService {
       // same segments waits too and then finds them gone. Plunk Lite: a campaign's excluded segments
       // have no foreign key, so one excluded meanwhile is left dangling, and that campaign does not
       // send until it is removed. Likewise a template's opt-out topic set meanwhile is left dangling,
-      // and that template is then sent to everyone, as without a topic.
+      // and that template is then sent to no one, with an alert, until it gets another topic or none.
       await tx.$queryRaw`SELECT 1 FROM segments WHERE id IN (${Prisma.join(ids)}) AND "projectId" = ${projectId} FOR UPDATE`;
       const segments = await tx.segment.findMany({
         where: {id: {in: ids}, projectId},

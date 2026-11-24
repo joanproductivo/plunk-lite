@@ -9,6 +9,7 @@ import {Actions} from '../../controllers/Actions.js';
 import {HttpException} from '../../exceptions/index.js';
 import {idempotency} from '../../middleware/idempotency.js';
 import {EmailService} from '../../services/EmailService.js';
+import {FailureAlertService} from '../../services/FailureAlertService.js';
 
 type Outcome = {status: number; body?: {success: boolean; data: Record<string, unknown>}; error?: unknown};
 
@@ -267,6 +268,25 @@ describe('POST /v1/send with an opt-out topic', () => {
     expect(outcome.status).toBe(422);
     expect((outcome.error as HttpException).errorCode).toBe('CONTACT_OPTED_OUT');
     expect(await prisma.email.count({where: {projectId}})).toBe(0);
+  });
+
+  it('refuses the whole call with 422 while the topic is gone, writing nothing and alerting once', async () => {
+    await prisma.segment.delete({where: {id: segmentId}});
+    const record = vi.spyOn(FailureAlertService, 'record').mockResolvedValue(true);
+
+    const outcome = await send(projectId, {
+      to: ['new-1@example.com', 'new-2@example.com'],
+      template: templateId,
+      subscribed: true,
+    });
+
+    expect(outcome.status).toBe(422);
+    expect((outcome.error as HttpException).errorCode).toBe('OPT_OUT_SEGMENT_MISSING');
+    expect(await prisma.contact.count({where: {projectId}})).toBe(0);
+    expect(await prisma.email.count({where: {projectId}})).toBe(0);
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(record).toHaveBeenCalledWith(projectId, expect.objectContaining({sourceKey: `template:${templateId}`}));
+    record.mockRestore();
   });
 
   it('renders {{optOutUrl}} empty with a template without a topic', async () => {

@@ -10,6 +10,7 @@ import {HttpException} from '../exceptions/index.js';
 
 import {DomainService} from './DomainService.js';
 import {sendRawEmail} from './SESService.js';
+import {missingTopicError} from './TemplateOptOut.js';
 import {sourceKeyOf} from './failureSources.js';
 
 /** One failure, as the place it happened knows it */
@@ -22,7 +23,8 @@ export interface FailureReport {
    * pipeline), `ses:<what>` (the SES account: its quota, a pause), `aws:alarm:<name>`,
    * `aws:alarm-subscription`, `aws:dlq`, `aws:dlq-unattributed` and `aws:dlq-access:<what>` (the drain of
    * the dead-letter queue of SES events), `delivery:campaign:<id>` (a campaign that delivered too
-   * little) and `redis:memory`. Each kind is in SOURCE_KINDS.
+   * little), `redis:memory` and `template:<id>` (a template whose opt-out segment is gone). Each
+   * kind is in SOURCE_KINDS.
    */
   sourceKey: string;
   /** What the dashboard and the alert call the source, e.g. the workflow's name */
@@ -164,6 +166,11 @@ const SOURCE_KINDS: Record<string, SourceKind> = {
   },
   // The installation's Redis close to its maxmemory (RedisMemoryCheck)
   'redis': {name: {en: label => label, es: () => 'Redis se está quedando sin memoria'}, path: () => '/activity'},
+  // A transactional template whose opt-out segment is gone, so it reaches no one (TemplateOptOut)
+  'template': {
+    name: {en: label => `Template "${label}"`, es: label => `Plantilla «${label}»`},
+    path: id => `/templates/${encodeURIComponent(id)}`,
+  },
 };
 
 const TRANSACTIONAL: SourceKind = {
@@ -502,6 +509,19 @@ export class FailureAlertService {
         signale.warn(`[ALERTS] Could not keep the last soft bounce alert of project ${projectId}:`, redisError);
       });
     }
+  }
+
+  /**
+   * Plunk Lite: an email of a template whose opt-out segment is gone was not sent, from /v1/send, a
+   * workflow or the queue. Recorded against the template, which is what needs fixing, and with no
+   * contact: it reaches no one, whoever was the last.
+   */
+  public static async recordMissingOptOutTopic(projectId: string, template: {id: string; name: string}): Promise<void> {
+    await this.record(projectId, {
+      sourceKey: `template:${template.id}`,
+      label: template.name,
+      error: missingTopicError(template.name),
+    });
   }
 
   /** A domain SES stopped verifying, so the project's emails from it fail */

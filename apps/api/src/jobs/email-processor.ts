@@ -47,7 +47,13 @@ import {ProjectFooterService} from '../services/ProjectFooterService.js';
 import {emailQueue} from '../services/QueueService.js';
 import {SecurityService} from '../services/SecurityService.js';
 import {suppressionCause, SuppressionService} from '../services/SuppressionService.js';
-import {isOptedOut, OPTED_OUT_EMAIL_ERROR, optOutLink, optOutTopic} from '../services/TemplateOptOut.js';
+import {
+  missingTopicError,
+  OPTED_OUT_EMAIL_ERROR,
+  optOutBlock,
+  optOutLink,
+  optOutTopic,
+} from '../services/TemplateOptOut.js';
 import {
   classifySesRefusal,
   configurationSetFor,
@@ -115,7 +121,7 @@ function deriveWorkerConcurrency(rateLimit: number): number {
 const EMAIL_INCLUDE = {
   contact: true,
   project: true,
-  template: {select: {type: true, optOutSegmentId: true}},
+  template: {select: {type: true, name: true, optOutSegmentId: true}},
   campaign: {select: {type: true, status: true, name: true, sentAt: true}},
   workflowExecution: {select: {status: true, exitReason: true}},
 } satisfies Prisma.EmailInclude;
@@ -455,18 +461,27 @@ export async function processEmailJob(job: EmailJob): Promise<void> {
   }
 
   // Plunk Lite: a contact who opted out of the template's topic since the email was queued, or an
-  // email queued before the template had its topic. Skipped like an unsubscribed one, with no alert.
+  // email queued before the template had its topic. Skipped like an unsubscribed one, with no alert;
+  // while the topic's segment is gone, every one fails with an alert.
   // Only a transactional email has one: an email queued as marketing keeps its own footer and header
   const topic =
     email.sourceType === EmailSourceType.TRANSACTIONAL
       ? optOutTopic(email.template, hasRecipientOverride(email.headers))
       : null;
-  if (topic && (await isOptedOut(email.projectId, topic, email.contactId))) {
-    signale.info(`[EMAIL-PROCESSOR] Contact ${email.contactId} opted out of the topic, skipping email ${emailId}`);
-    await prisma.email.updateMany({
+  const block = topic ? await optOutBlock(email.projectId, topic, email.contactId) : null;
+  if (block) {
+    const template = {id: email.templateId ?? '', name: email.template?.name ?? ''};
+    const error = block === 'opted-out' ? OPTED_OUT_EMAIL_ERROR : missingTopicError(template.name);
+    signale[block === 'opted-out' ? 'info' : 'warn'](
+      `[EMAIL-PROCESSOR] Skipping email ${emailId} of contact ${email.contactId}: ${error}`,
+    );
+    const {count} = await prisma.email.updateMany({
       where: {id: emailId, status: EmailStatus.PENDING},
-      data: {status: EmailStatus.FAILED, error: OPTED_OUT_EMAIL_ERROR},
+      data: {status: EmailStatus.FAILED, error},
     });
+    if (count > 0 && block === 'missing-topic') {
+      await FailureAlertService.recordMissingOptOutTopic(email.projectId, template);
+    }
 
     await finalizeCampaignSafely(email.campaignId);
     return;

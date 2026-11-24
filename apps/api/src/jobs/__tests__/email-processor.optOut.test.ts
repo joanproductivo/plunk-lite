@@ -1,11 +1,12 @@
 import {EmailSourceType, EmailStatus, SegmentType, TemplateType} from '@plunk/db';
 import type {SendEmailJobData} from '@plunk/types';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {factories, getPrismaClient} from '../../../../../test/helpers';
 import {API_URI, DASHBOARD_URI} from '../../app/constants';
+import {prisma as appPrisma} from '../../database/prisma';
 import {RECIPIENT_OVERRIDE_HEADER} from '../../services/EmailHeaderService';
-import {SegmentService} from '../../services/SegmentService';
+import {FailureAlertService} from '../../services/FailureAlertService';
 import {ProjectFooterService} from '../../services/ProjectFooterService';
 import {sendRawEmail} from '../../services/SESService';
 import {type EmailJob, processEmailJob} from '../email-processor';
@@ -40,8 +41,8 @@ function makeJob(emailId: string) {
 
 /**
  * Plunk Lite: the send of a transactional template with an opt-out topic. It skips a contact who
- * opted out after it was queued, and otherwise carries the one-click header to its opt-out link, the
- * bulk headers and the notices footer.
+ * opted out after it was queued, fails with an alert while the topic's segment is gone, and otherwise
+ * carries the one-click header to its opt-out link, the bulk headers and the notices footer.
  */
 describe('processEmailJob with an opt-out topic', () => {
   const prisma = getPrismaClient();
@@ -59,6 +60,10 @@ describe('processEmailJob with an opt-out topic', () => {
     ProjectFooterService.clearCache();
     vi.mocked(sendRawEmail).mockReset();
     vi.mocked(sendRawEmail).mockResolvedValue({messageId: 'ses-1'});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   async function pendingEmail(
@@ -91,6 +96,25 @@ describe('processEmailJob with an opt-out topic', () => {
     expect(row?.status).toBe(EmailStatus.FAILED);
     expect(row?.error).toBe('Contact opted out of this kind of email');
     expect(sendRawEmail).not.toHaveBeenCalled();
+  });
+
+  it('fails with an alert, sending nothing, while the segment of the topic is gone', async () => {
+    const {email} = await pendingEmail();
+    await prisma.template.update({where: {id: templateId}, data: {name: 'Workshop day'}});
+    await prisma.segment.delete({where: {id: segmentId}});
+    const record = vi.spyOn(FailureAlertService, 'record').mockResolvedValue(true);
+
+    await processEmailJob(makeJob(email.id));
+
+    const row = await prisma.email.findUnique({where: {id: email.id}});
+    expect(row?.status).toBe(EmailStatus.FAILED);
+    expect(row?.error).toContain('The opt-out segment of template "Workshop day" no longer exists');
+    expect(sendRawEmail).not.toHaveBeenCalled();
+    expect(record).toHaveBeenCalledWith(projectId, {
+      sourceKey: `template:${templateId}`,
+      label: 'Workshop day',
+      error: row?.error,
+    });
   });
 
   it('sends the one-click header to the opt-out link, the bulk headers and the notices footer', async () => {
@@ -166,13 +190,12 @@ describe('processEmailJob with an opt-out topic', () => {
 
   it('fails the attempt, sending nothing, when the membership cannot be read', async () => {
     const {email} = await pendingEmail();
-    vi.spyOn(SegmentService, 'isMember').mockRejectedValueOnce(new Error('database down'));
+    vi.spyOn(appPrisma.segmentMembership, 'findUnique').mockRejectedValueOnce(new Error('database down'));
 
     await expect(processEmailJob(makeJob(email.id))).rejects.toThrow('database down');
 
     expect(sendRawEmail).not.toHaveBeenCalled();
     expect((await prisma.email.findUnique({where: {id: email.id}}))?.status).toBe(EmailStatus.PENDING);
-    vi.restoreAllMocks();
   });
 
   it('leaves an email queued as marketing as it was, though its template has a topic now', async () => {

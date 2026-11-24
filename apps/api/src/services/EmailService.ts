@@ -21,9 +21,17 @@ import {renderBody} from '../utils/emailBody.js';
 
 import {BillingLimitService} from './BillingLimitService.js';
 import {RECIPIENT_OVERRIDE_HEADER, withSourceEmail} from './EmailHeaderService.js';
+import {FailureAlertService} from './FailureAlertService.js';
 import {ProjectService} from './ProjectService.js';
 import {QueueService} from './QueueService.js';
-import {isOptedOut, OPTED_OUT_EMAIL_ERROR, optedOutError, optOutTopic} from './TemplateOptOut.js';
+import {
+  missingTopicError,
+  missingTopicHttpError,
+  OPTED_OUT_EMAIL_ERROR,
+  optedOutError,
+  optOutBlock,
+  optOutTopic,
+} from './TemplateOptOut.js';
 
 interface Attachment {
   filename: string;
@@ -116,7 +124,7 @@ export class EmailService {
     if (params.templateId) {
       const template = await prisma.template.findUnique({
         where: {id: params.templateId},
-        select: {type: true, optOutSegmentId: true},
+        select: {type: true, name: true, optOutSegmentId: true},
       });
 
       // If using a marketing template, check subscription status
@@ -140,11 +148,19 @@ export class EmailService {
         }
       }
 
-      // Plunk Lite: a contact who opted out of the template's topic is told so, and nothing is created
+      // Plunk Lite: a contact who opted out of the template's topic is told so, and nothing is created.
+      // A topic whose segment is gone sends to no one, with an alert, until the template is fixed
+      // (/v1/send refuses it before writing anything; this is for the segment going meanwhile).
       const topic = optOutTopic(template, false);
-      if (topic && (await isOptedOut(params.projectId, topic, params.contactId))) {
+      const block = topic ? await optOutBlock(params.projectId, topic, params.contactId) : null;
+      if (block === 'opted-out') {
         const contact = await prisma.contact.findUnique({where: {id: params.contactId}, select: {email: true}});
         throw optedOutError(contact?.email ?? params.contactId);
+      }
+      if (block === 'missing-topic') {
+        const name = template?.name ?? '';
+        await FailureAlertService.recordMissingOptOutTopic(params.projectId, {id: params.templateId, name});
+        throw missingTopicHttpError(name);
       }
     }
 
@@ -290,11 +306,12 @@ export class EmailService {
     // Check if template is transactional to determine source type
     let sourceType: EmailSourceType = EmailSourceType.WORKFLOW;
     let topic: string | null = null;
+    let topicTemplate = {id: '', name: ''};
 
     if (params.templateId) {
       const template = await prisma.template.findUnique({
         where: {id: params.templateId},
-        select: {type: true, optOutSegmentId: true},
+        select: {type: true, name: true, optOutSegmentId: true},
       });
 
       // If template is marked as TRANSACTIONAL, use TRANSACTIONAL sourceType
@@ -303,6 +320,7 @@ export class EmailService {
         sourceType = EmailSourceType.TRANSACTIONAL;
       }
       topic = optOutTopic(template, Boolean(params.recipientEmail));
+      topicTemplate = {id: params.templateId, name: template?.name ?? ''};
     }
 
     // Check subscription status for marketing emails
@@ -323,12 +341,19 @@ export class EmailService {
       }
     }
 
-    // Plunk Lite: likewise for a contact who opted out of the template's topic
-    if (topic && (await isOptedOut(params.projectId, topic, params.contactId))) {
+    // Plunk Lite: likewise for a contact who opted out of the template's topic, and for everyone,
+    // with an alert, while the topic's segment is gone
+    const block = topic ? await optOutBlock(params.projectId, topic, params.contactId) : null;
+    if (block === 'opted-out') {
       signale.info(
         `[WORKFLOW] Skipping email to contact ${params.contactId}, who opted out of its topic, in workflow execution ${params.workflowExecutionId}`,
       );
       return this.skippedWorkflowEmail(params, sourceType, OPTED_OUT_EMAIL_ERROR);
+    }
+    if (block === 'missing-topic') {
+      const skipped = await this.skippedWorkflowEmail(params, sourceType, missingTopicError(topicTemplate.name));
+      await FailureAlertService.recordMissingOptOutTopic(params.projectId, topicTemplate);
+      return skipped;
     }
 
     // Check billing limit before sending
