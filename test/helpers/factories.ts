@@ -58,6 +58,8 @@ export interface TemplateFactoryOptions {
   from?: string;
   fromName?: string;
   type?: TemplateType;
+  /** Plunk Lite: the opt-out topic, a static segment */
+  optOutSegmentId?: string | null;
 }
 
 export interface CampaignFactoryOptions {
@@ -213,6 +215,7 @@ export class TestFactories {
         from: options.from || 'test@example.com',
         fromName: options.fromName || 'Test Sender',
         type: options.type || TemplateType.MARKETING,
+        optOutSegmentId: options.optOutSegmentId ?? null,
       },
     });
   }

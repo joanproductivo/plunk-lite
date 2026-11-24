@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 
-import {detectUnsubscribeSignal} from '../unsubscribe.js';
+import {detectUnsubscribeSignal, usesVariable} from '../unsubscribe.js';
 
 describe('detectUnsubscribeSignal', () => {
   it.each([
@@ -35,4 +35,24 @@ describe('detectUnsubscribeSignal', () => {
       expect(detectUnsubscribeSignal(body)).toBe(false);
     },
   );
+});
+
+// Plunk Lite: the check behind detectUnsubscribeSignal, also used for {{optOutUrl}}
+describe('usesVariable', () => {
+  it.each(['{{optOutUrl}}', '{{ optOutUrl }}', '{{- optOutUrl -}}', '{{optOutUrl | strip}}'])('finds %s', body => {
+    expect(usesVariable(`<a href="${body}">x</a>`, 'optOutUrl')).toBe(true);
+  });
+
+  it('does not find another variable, a longer name, or nothing', () => {
+    expect(usesVariable('{{optOutUrlX}}', 'optOutUrl')).toBe(false);
+    expect(usesVariable('{{unsubscribeUrl}}', 'optOutUrl')).toBe(false);
+    expect(usesVariable('', 'optOutUrl')).toBe(false);
+    expect(usesVariable('{{optOutUrl}}')).toBe(false);
+  });
+
+  it('does not let {{optOutUrl}} pass for an unsubscribe link, as it is empty in a headless template', () => {
+    expect(detectUnsubscribeSignal('<p>{{optOutUrl}}</p>')).toBe(false);
+    expect(detectUnsubscribeSignal('<a href="{{optOutUrl}}">Stop</a>')).toBe(false);
+    expect(detectUnsubscribeSignal('<a href="{{ optOutUrl }}">Stop</a> <a href="{{unsubscribeUrl}}">x</a>')).toBe(true);
+  });
 });

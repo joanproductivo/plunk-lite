@@ -31,6 +31,16 @@
       "invalidTitle": "Deze link werkt niet meer",
       "invalidDescription": "Hij is vervangen door een nieuwere e-mail, of het adres is gewijzigd. Meld je opnieuw aan voor een nieuwe link."
     },
+    "optOut": {
+      "title": "Deze meldingen van {projectName} stopzetten",
+      "description": "Je blijft op {email} de e-mails ontvangen die je account nodig heeft, zoals toegangslinks of bonnen.",
+      "button": "Deze meldingen stopzetten",
+      "buttonLoading": "Opslaan...",
+      "successTitle": "Klaar",
+      "successDescription": "Je ontvangt geen meldingen zoals deze meer van {projectName}.",
+      "unavailableTitle": "Deze link werkt niet meer",
+      "unavailableDescription": "Deze meldingen kunnen hier niet meer worden stopgezet. Beantwoord er een als je ze niet meer wilt ontvangen."
+    },
     "manage": {
       "title": "Voorkeuren beheren",
       "description": "Beheer de e-mails die {projectName} naar {email} stuurt.",
@@ -68,7 +78,9 @@
   "email": {
     "footer": {
       "unsubscribeText": "Je ontvangt deze e-mail omdat je hebt ingestemd met het ontvangen van e-mails van {projectName}. Als je deze e-mails niet meer wilt ontvangen,",
-      "updatePreferences": "werk je voorkeuren bij"
+      "updatePreferences": "werk je voorkeuren bij",
+      "optOutText": "Je ontvangt deze meldingen van {projectName}.",
+      "optOutLink": "Ik wil geen meldingen zoals deze meer"
     },
     "optin": {
       "subject": "Bevestig je inschrijving bij {projectName}",

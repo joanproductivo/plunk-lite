@@ -82,4 +82,34 @@ describe('ProjectFooterService', () => {
     vi.spyOn(servicePrisma.plunkLiteProjectFooters, 'findUnique').mockRejectedValueOnce(new Error('database down'));
     await expect(ProjectFooterService.forEmail('marketing', projectId)).rejects.toThrow('database down');
   });
+
+  // Plunk Lite: the notices footer of transactional templates with an opt-out topic
+  describe('notices footers', () => {
+    const notices = {es: {text: 'Avisos', linkText: 'no quiero más'}};
+
+    it('keeps each kind apart: saving one leaves the other, also in what is remembered', async () => {
+      await ProjectFooterService.save(projectId, footers);
+      await ProjectFooterService.save(projectId, notices, 'optOut');
+
+      expect(await ProjectFooterService.get(projectId)).toEqual(footers);
+      expect(await ProjectFooterService.get(projectId, 'optOut')).toEqual(notices);
+      ProjectFooterService.clearCache();
+      expect(await ProjectFooterService.get(projectId)).toEqual(footers);
+      expect(await ProjectFooterService.get(projectId, 'optOut')).toEqual(notices);
+    });
+
+    it('starts a row saved first for notices with no unsubscribe footers of its own', async () => {
+      await ProjectFooterService.save(projectId, notices, 'optOut');
+
+      const row = await prisma.plunkLiteProjectFooters.findUnique({where: {projectId}});
+      expect(row?.footers).toEqual({});
+      expect(await ProjectFooterService.get(projectId)).toEqual({});
+    });
+
+    it('lets a first failed read of the notices footers fail the email, as the unsubscribe ones', async () => {
+      vi.spyOn(servicePrisma.plunkLiteProjectFooters, 'findUnique').mockRejectedValueOnce(new Error('database down'));
+
+      await expect(ProjectFooterService.get(projectId, 'optOut')).rejects.toThrow('database down');
+    });
+  });
 });

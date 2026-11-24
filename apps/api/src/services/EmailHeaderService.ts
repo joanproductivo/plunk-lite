@@ -137,6 +137,13 @@ export interface BuildEmailHeadersParams {
    */
   sourceEmailId?: string;
   /**
+   * Plunk Lite: the API's opt-out link of a transactional email with an opt-out topic
+   * (TemplateOptOut.optOutLink). When given, the List-Unsubscribe pair points at it -- even if the
+   * body also links the marketing unsubscribe, as the recipient wants to stop *this* kind of email --
+   * and the email gets the bulk headers too.
+   */
+  oneClickOptOutUrl?: string;
+  /**
    * Caller-supplied headers (internal `X-Plunk-*` routing keys already stripped).
    * These override any default header with the same name — see {@link mergeHeaders}.
    */
@@ -157,6 +164,8 @@ export interface BuildEmailHeadersParams {
  *   instead of looping them back to the sender. This keys on "is this a bulk send?",
  *   so it covers marketing mail *and* every campaign broadcast, transactional ones
  *   included.
+ * - Plunk Lite: a transactional email with an opt-out topic (`oneClickOptOutUrl`) gets both: the pair,
+ *   pointing at its opt-out link, and the bulk headers, as it is a notice sent to many.
  *
  * The returned record is the complete set of extra headers for the message;
  * {@link sendRawEmail} serializes it verbatim.
@@ -167,13 +176,15 @@ export function buildEmailHeaders({
   hasListManagementLink = false,
   unsubscribeId,
   sourceEmailId,
+  oneClickOptOutUrl,
   customHeaders,
 }: BuildEmailHeadersParams): Record<string, string> {
   const defaults: Record<string, string> = {};
   const isMarketing = emailClass === 'marketing';
 
   // One-click unsubscribe — for subscribed marketing mail, or any message whose
-  // body advertises an opt-out link. Both headers must be present for mailbox
+  // body advertises an opt-out link, and (Plunk Lite) a transactional template's
+  // opt-out topic, whose own one-click link it points at instead. Both headers must be present for mailbox
   // providers to render the one-click control, and List-Unsubscribe-Post is
   // meaningless without a target, so the pair is only emitted together when we
   // have an unsubscribe URL to point at.
@@ -184,17 +195,21 @@ export function buildEmailHeaders({
   // unsubscribes on a button click, so a provider POSTing to it would get a
   // response but change nothing. `GET /unsubscribe/:id` on the API redirects to
   // that dashboard page, so this one URL still serves humans who click through.
-  if ((isMarketing || hasListManagementLink) && unsubscribeId) {
+  if (oneClickOptOutUrl) {
+    defaults['List-Unsubscribe'] = `<${oneClickOptOutUrl}>`;
+    defaults['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
+  } else if ((isMarketing || hasListManagementLink) && unsubscribeId) {
     defaults['List-Unsubscribe'] =
       `<${withSourceEmail(`${API_URI}/unsubscribe/${unsubscribeId}`, sourceEmailId)}>`;
     defaults['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
   }
 
   // Bulk / auto-reply suppression — any bulk or automated send: marketing mail and
-  // every campaign broadcast. `Precedence: bulk` is the widely-honored de-facto
-  // signal, `Auto-Submitted: auto-generated` is the RFC 3834 equivalent, and
-  // `X-Auto-Response-Suppress: All` covers Exchange/Outlook out-of-office replies.
-  if (isMarketing || isCampaign) {
+  // every campaign broadcast, and (Plunk Lite) notices with an opt-out topic.
+  // `Precedence: bulk` is the widely-honored de-facto signal, `Auto-Submitted:
+  // auto-generated` is the RFC 3834 equivalent, and `X-Auto-Response-Suppress: All`
+  // covers Exchange/Outlook out-of-office replies.
+  if (isMarketing || isCampaign || oneClickOptOutUrl) {
     defaults.Precedence = 'bulk';
     defaults['Auto-Submitted'] = 'auto-generated';
     defaults['X-Auto-Response-Suppress'] = 'All';

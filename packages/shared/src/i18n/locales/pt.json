@@ -31,6 +31,16 @@
       "invalidTitle": "Este link não funciona mais",
       "invalidDescription": "Ele foi substituído por um e-mail mais recente, ou o endereço mudou. Inscreva-se novamente para receber um novo link."
     },
+    "optOut": {
+      "title": "Deixar de receber estes avisos de {projectName}",
+      "description": "Você continuará recebendo em {email} os e-mails necessários da sua conta, como acessos ou recibos.",
+      "button": "Deixar de receber estes avisos",
+      "buttonLoading": "Salvando...",
+      "successTitle": "Pronto",
+      "successDescription": "Você não receberá mais avisos como este de {projectName}.",
+      "unavailableTitle": "Este link não funciona mais",
+      "unavailableDescription": "Estes avisos não podem mais ser cancelados aqui. Responda a um deles se quiser deixar de recebê-los."
+    },
     "manage": {
       "title": "Gerenciar Preferências",
       "description": "Gerencie os e-mails que {projectName} envia para {email}.",
@@ -68,7 +78,9 @@
   "email": {
     "footer": {
       "unsubscribeText": "Você recebeu este e-mail porque concordou em receber e-mails de {projectName}. Se não deseja mais receber e-mails como este, por favor",
-      "updatePreferences": "atualize suas preferências"
+      "updatePreferences": "atualize suas preferências",
+      "optOutText": "Você recebe estes avisos de {projectName}.",
+      "optOutLink": "Não quero mais avisos como este"
     },
     "optin": {
       "subject": "Confirme sua inscrição em {projectName}",

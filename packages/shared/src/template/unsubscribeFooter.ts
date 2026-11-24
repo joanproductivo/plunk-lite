@@ -36,25 +36,44 @@ export interface ProjectFooter {
 /** A project's own footers, by language code; languages without one get Plunk's. */
 export type ProjectFooters = Partial<Record<string, ProjectFooter>>;
 
+/**
+ * Plunk Lite: which footer. 'unsubscribe' is the marketing one (to update preferences); 'optOut' is
+ * the notices footer of transactional templates with an opt-out topic (to stop getting them).
+ */
+export type FooterKind = 'unsubscribe' | 'optOut';
+
+const FOOTER_KEYS: Record<FooterKind, {text: string; link: string}> = {
+  unsubscribe: {text: 'email.footer.unsubscribeText', link: 'email.footer.updatePreferences'},
+  optOut: {text: 'email.footer.optOutText', link: 'email.footer.optOutLink'},
+};
+
 /** Plunk's own footer text and link text in `language` (English when it has none), unfilled. */
-export function plunkFooterText(language: string): ProjectFooter {
+export function plunkFooterText(language: string, kind: FooterKind = 'unsubscribe'): ProjectFooter {
   const translator = createTranslatorSync(language);
-  return {text: translator.t('email.footer.unsubscribeText'), linkText: translator.t('email.footer.updatePreferences')};
+  return {text: translator.t(FOOTER_KEYS[kind].text), linkText: translator.t(FOOTER_KEYS[kind].link)};
 }
 
 /**
- * Plunk's own footer text in `language`, followed by the link to update preferences. The project's
- * name goes in as it always has, unescaped.
+ * Plunk's own footer text in `language`, followed by its link: to update preferences or (Plunk Lite,
+ * `optOut`) to stop the notices. The project's name goes in as it always has, unescaped.
  */
-export function plunkFooterParagraph(language: string, projectName: string, href: string): string {
+export function plunkFooterParagraph(
+  language: string,
+  projectName: string,
+  href: string,
+  kind: FooterKind = 'unsubscribe',
+): string {
   const translator = createTranslatorSync(language);
-  const text = translator.t('email.footer.unsubscribeText', {projectName});
-  return `${text}\n${PARAGRAPH_INDENT}<a href="${href}">${translator.t('email.footer.updatePreferences')}</a>.`;
+  // The marketing footer keeps the name as it was always sent; the notices footer (Plunk Lite) escapes it
+  const text = translator.t(FOOTER_KEYS[kind].text, {
+    projectName: kind === 'optOut' ? escapeHtml(projectName) : projectName,
+  });
+  return `${text}\n${PARAGRAPH_INDENT}<a href="${href}">${translator.t(FOOTER_KEYS[kind].link)}</a>.`;
 }
 
 /** Plunk's footer as a project's own starts from: its text with the link in place, as Plunk sends it. */
-export function plunkFooterTemplate(language: string): ProjectFooter {
-  const {text, linkText} = plunkFooterText(language);
+export function plunkFooterTemplate(language: string, kind: FooterKind = 'unsubscribe'): ProjectFooter {
+  const {text, linkText} = plunkFooterText(language, kind);
   return {text: `${text} {link}.`, linkText};
 }
 
@@ -157,8 +176,8 @@ export function toProjectFooters(value: unknown): {footers: ProjectFooters; erro
 }
 
 /** Whether `footer` says just what Plunk's would in `language`, so it needs no footer of its own. */
-export function isPlunkFooter(footer: ProjectFooter, language: string): boolean {
-  const plunk = plunkFooterTemplate(language);
+export function isPlunkFooter(footer: ProjectFooter, language: string, kind: FooterKind = 'unsubscribe'): boolean {
+  const plunk = plunkFooterTemplate(language, kind);
   return footer.text.trim() === plunk.text && footer.linkText.trim() === plunk.linkText;
 }
 
@@ -205,10 +224,11 @@ export function footerParagraph(params: {
   projectName: string;
   href: string;
   footers?: ProjectFooters;
+  kind?: FooterKind;
 }): string {
   const own =
     params.footers && Object.hasOwn(params.footers, params.language) ? params.footers[params.language] : undefined;
   return own
     ? customFooterParagraph(own, params.projectName, params.href)
-    : plunkFooterParagraph(params.language, params.projectName, params.href);
+    : plunkFooterParagraph(params.language, params.projectName, params.href, params.kind);
 }

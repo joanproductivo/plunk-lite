@@ -73,6 +73,13 @@ export function registerEmailTools(ctx: ToolContext, client: PlunkClient): void 
         'yet: they also get a confirmation email, and join the `segments` when they confirm. A marketing template',
         'with `subscribed: true` is refused with 422 OPT_IN_NEEDS_TRANSACTIONAL.',
         '',
+        '**Opt-out topics (Plunk Lite):** a `template` with an opt-out topic, to a recipient who opted out of it',
+        '(joined its segment), is refused with 422 CONTACT_OPTED_OUT: nothing is sent, and it must not be resent.',
+        'The topic counts even with your own `body`. The contact is still created or updated, and `subscribed`',
+        "still applies. If the topic's segment no longer exists, the call is refused with 422",
+        'OPT_OUT_SEGMENT_MISSING and nothing is sent or written until the template gets another segment or none',
+        '(plunk_update_template).',
+        '',
         '**Key trigger phrases:** "send an email", "email this to", "notify", "send them a message"',
       ].join('\n'),
       inputSchema: z.object({

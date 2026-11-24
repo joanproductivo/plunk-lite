@@ -293,7 +293,16 @@ export class ContactService {
       existing && typeof existing === 'object' && !Array.isArray(existing) ? (existing as Record<string, unknown>) : {};
     const merged: Record<string, unknown> = {...base};
 
-    const reservedFields = ['plunk_id', 'plunk_email', 'id', 'email', 'unsubscribeUrl', 'subscribeUrl', 'manageUrl'];
+    const reservedFields = [
+      'plunk_id',
+      'plunk_email',
+      'id',
+      'email',
+      'unsubscribeUrl',
+      'subscribeUrl',
+      'manageUrl',
+      'optOutUrl',
+    ];
 
     for (const [key, value] of Object.entries(incoming)) {
       if (reservedFields.includes(key)) continue;
@@ -692,7 +701,15 @@ export class ContactService {
     if (temporaryData) {
       for (const [key, value] of Object.entries(temporaryData)) {
         // Skip reserved system-generated fields
-        const reservedFields = ['plunk_id', 'plunk_email', 'email', 'unsubscribeUrl', 'subscribeUrl', 'manageUrl'];
+        const reservedFields = [
+          'plunk_id',
+          'plunk_email',
+          'email',
+          'unsubscribeUrl',
+          'subscribeUrl',
+          'manageUrl',
+          'optOutUrl',
+        ];
         if (reservedFields.includes(key)) {
           continue;
         }

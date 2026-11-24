@@ -71,6 +71,25 @@ describe('SegmentMembershipService', () => {
       expect(await memberCountOf(segment.id)).toBe(4);
     });
 
+    // Plunk Lite: an opt-out link clicked twice, or retried by a provider, enters once
+    it('with reenter off, lets new and returning contacts in with their event, and leaves members alone', async () => {
+      const segment = await createStaticSegment();
+      const [fresh, active, returning] = await factories.createContacts(projectId, 3);
+      const activeEnteredAt = await addMembership(segment.id, active!.id);
+      await addMembership(segment.id, returning!.id, new Date('2026-02-01T00:00:00Z'));
+
+      const result = await SegmentMembershipService.addMembers(
+        projectId,
+        segment.id,
+        [fresh!.id, active!.id, returning!.id],
+        {mode: 'await', reenter: false},
+      );
+
+      expect(result).toEqual({added: 2});
+      expect((await eventContactIds('segment.workshop.entry')).sort()).toEqual([fresh!.id, returning!.id].sort());
+      expect(await enteredAtOf(segment.id, active!.id)).toBe(activeEnteredAt.getTime());
+    });
+
     it('leaves members alone and fires nothing in silent mode', async () => {
       const segment = await createStaticSegment();
       const [fresh1, fresh2, active, returning] = await factories.createContacts(projectId, 4);

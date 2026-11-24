@@ -144,16 +144,20 @@ export function useTemplateValidation(source: string): TemplateSyntaxIssue | nul
  * with. Debounced on the same cadence so the two strips never disagree about whether
  * the author has stopped typing.
  */
-export function useTemplateFieldWarnings(source: string, fields: ContactField[]): TemplateFieldWarning[] {
+export function useTemplateFieldWarnings(
+  source: string,
+  fields: ContactField[],
+  optOutVariable = false,
+): TemplateFieldWarning[] {
   const [warnings, setWarnings] = useState<TemplateFieldWarning[]>([]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      setWarnings(lintTemplateFields(source || '', fields));
+      setWarnings(lintTemplateFields(source || '', fields, optOutVariable));
     }, DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [source, fields]);
+  }, [source, fields, optOutVariable]);
 
   return warnings;
 }

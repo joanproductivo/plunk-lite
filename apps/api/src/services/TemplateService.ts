@@ -86,6 +86,7 @@ export class TemplateService {
       fromName?: string | null;
       replyTo?: string | null;
       type?: Template['type'];
+      optOutSegmentId?: string | null;
     },
   ): Promise<Template> {
     return prisma.template.create({
@@ -99,6 +100,7 @@ export class TemplateService {
         fromName: data.fromName,
         replyTo: data.replyTo,
         type: data.type ?? 'MARKETING',
+        optOutSegmentId: data.optOutSegmentId ?? null,
       },
     });
   }
@@ -118,6 +120,7 @@ export class TemplateService {
       fromName?: string | null;
       replyTo?: string | null;
       type?: Template['type'];
+      optOutSegmentId?: string | null;
     },
   ): Promise<Template> {
     // Verify template exists and belongs to project
@@ -126,6 +129,7 @@ export class TemplateService {
     const updateData = {
       ...buildEmailFieldsUpdate(data),
       ...(data.type !== undefined ? {type: data.type} : {}),
+      ...(data.optOutSegmentId !== undefined ? {optOutSegmentId: data.optOutSegmentId} : {}),
     } as Prisma.TemplateUpdateInput;
 
     return prisma.template.update({
@@ -259,6 +263,7 @@ export class TemplateService {
         fromName: template.fromName,
         replyTo: template.replyTo,
         type: template.type,
+        optOutSegmentId: template.optOutSegmentId,
       },
     });
   }

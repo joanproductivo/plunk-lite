@@ -4,6 +4,7 @@ import {TemplateSchemas} from '@plunk/shared';
 import type {NextFunction, Request, Response} from 'express';
 import {requireAuth, requireEmailVerified} from '../middleware/auth.js';
 import {DomainService} from '../services/DomainService.js';
+import {assertValidTopic} from '../services/TemplateOptOutAdmin.js';
 import {TemplateService} from '../services/TemplateService.js';
 import {CatchAsync} from '../utils/asyncHandler.js';
 import {parseListSort} from '../utils/listSort.js';
@@ -67,7 +68,7 @@ export class Templates {
   @CatchAsync
   public async create(req: Request, res: Response, _next: NextFunction) {
     const auth = res.locals.auth;
-    const {name, description, subject, body, from, fromName, replyTo, type} = req.body;
+    const {name, description, subject, body, from, fromName, replyTo, type, optOutSegmentId} = req.body;
 
     if (!name) {
       return res.status(400).json({error: 'Name is required'});
@@ -87,6 +88,8 @@ export class Templates {
 
     assertValidTemplateSyntax({subject, body});
     assertValidReplyTo(replyTo);
+    // Plunk Lite: the opt-out topic, a static segment of the project on a TRANSACTIONAL template
+    await assertValidTopic(auth.projectId!, optOutSegmentId, type);
 
     // Verify domain ownership and verification
     await DomainService.verifyEmailDomain(from, auth.projectId!);
@@ -100,6 +103,7 @@ export class Templates {
       fromName,
       replyTo,
       type,
+      optOutSegmentId,
     });
 
     return res.status(201).json(template);
@@ -115,7 +119,7 @@ export class Templates {
   public async update(req: Request, res: Response, _next: NextFunction) {
     const auth = res.locals.auth;
     const templateId = req.params.id;
-    const {name, description, subject, body, from, fromName, replyTo, type} = req.body;
+    const {name, description, subject, body, from, fromName, replyTo, type, optOutSegmentId} = req.body;
 
     if (!templateId) {
       return res.status(400).json({error: 'Template ID is required'});
@@ -123,6 +127,8 @@ export class Templates {
 
     assertValidTemplateSyntax({subject, body});
     assertValidReplyTo(replyTo);
+    // Plunk Lite: the opt-out topic, checked against the saved type when no type is sent
+    await assertValidTopic(auth.projectId!, optOutSegmentId, type, templateId);
 
     // Verify domain ownership and verification if 'from' is being updated
     if (from) {
@@ -138,6 +144,7 @@ export class Templates {
       fromName,
       replyTo,
       type,
+      optOutSegmentId,
     });
 
     return res.status(200).json(template);

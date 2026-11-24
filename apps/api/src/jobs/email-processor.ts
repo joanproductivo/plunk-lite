@@ -14,13 +14,14 @@
  * itself fails it at once.
  */
 
-import {CampaignStatus, EmailStatus, Prisma, WorkflowExecutionStatus} from '@plunk/db';
+import {CampaignStatus, EmailSourceType, EmailStatus, Prisma, WorkflowExecutionStatus} from '@plunk/db';
 import {isMailboxSimulatorAddress} from '@plunk/shared';
 import type {AcceptedEmail, SendEmailJobData} from '@plunk/types';
 import {type Job, UnrecoverableError, Worker} from 'bullmq';
 import signale from 'signale';
 
 import {
+  API_URI,
   DASHBOARD_URI,
   EMAIL_RATE_LIMIT_PER_SECOND,
   EMAIL_WORKER_CONCURRENCY,
@@ -34,6 +35,7 @@ import {
   bodyHasListManagementLink,
   buildEmailHeaders,
   classifyEmail,
+  hasRecipientOverride,
   RECIPIENT_OVERRIDE_HEADER,
   recipientAddress,
   withSourceEmail,
@@ -45,6 +47,13 @@ import {ProjectFooterService} from '../services/ProjectFooterService.js';
 import {emailQueue} from '../services/QueueService.js';
 import {SecurityService} from '../services/SecurityService.js';
 import {suppressionCause, SuppressionService} from '../services/SuppressionService.js';
+import {
+  missingTopicError,
+  OPTED_OUT_EMAIL_ERROR,
+  optOutBlock,
+  optOutLink,
+  optOutTopic,
+} from '../services/TemplateOptOut.js';
 import {
   classifySesRefusal,
   configurationSetFor,
@@ -112,7 +121,7 @@ function deriveWorkerConcurrency(rateLimit: number): number {
 const EMAIL_INCLUDE = {
   contact: true,
   project: true,
-  template: {select: {type: true}},
+  template: {select: {type: true, name: true, optOutSegmentId: true}},
   campaign: {select: {type: true, status: true, name: true, sentAt: true}},
   workflowExecution: {select: {status: true, exitReason: true}},
 } satisfies Prisma.EmailInclude;
@@ -451,6 +460,33 @@ export async function processEmailJob(job: EmailJob): Promise<void> {
     return;
   }
 
+  // Plunk Lite: a contact who opted out of the template's topic since the email was queued, or an
+  // email queued before the template had its topic. Skipped like an unsubscribed one, with no alert;
+  // while the topic's segment is gone, every one fails with an alert.
+  // Only a transactional email has one: an email queued as marketing keeps its own footer and header
+  const topic =
+    email.sourceType === EmailSourceType.TRANSACTIONAL
+      ? optOutTopic(email.template, hasRecipientOverride(email.headers))
+      : null;
+  const block = topic ? await optOutBlock(email.projectId, topic, email.contactId) : null;
+  if (block) {
+    const template = {id: email.templateId ?? '', name: email.template?.name ?? ''};
+    const error = block === 'opted-out' ? OPTED_OUT_EMAIL_ERROR : missingTopicError(template.name);
+    signale[block === 'opted-out' ? 'info' : 'warn'](
+      `[EMAIL-PROCESSOR] Skipping email ${emailId} of contact ${email.contactId}: ${error}`,
+    );
+    const {count} = await prisma.email.updateMany({
+      where: {id: emailId, status: EmailStatus.PENDING},
+      data: {status: EmailStatus.FAILED, error},
+    });
+    if (count > 0 && block === 'missing-topic') {
+      await FailureAlertService.recordMissingOptOutTopic(email.projectId, template);
+    }
+
+    await finalizeCampaignSafely(email.campaignId);
+    return;
+  }
+
   // An address on the project's suppression list is never sent to, transactional email
   // included: it bounced, for good or again and again, or reported mail as spam.
   // This is the last gate whatever subscribed the contact meanwhile.
@@ -481,6 +517,8 @@ export async function processEmailJob(job: EmailJob): Promise<void> {
   // read fails this attempt before the email is marked, so BullMQ's retry sends it, rather
   // than it going out without the project's footer.
   const footers = await ProjectFooterService.forEmail(emailClass, email.projectId);
+  // Plunk Lite: an email with an opt-out topic reads the notices footers the same way
+  const optOutFooters = topic ? await ProjectFooterService.get(email.projectId, 'optOut') : undefined;
 
   // Set once SES has the email: a failure after that (counters, billing, events) does not
   // mean the email was not sent, so it is never marked failed and never sent again.
@@ -520,6 +558,8 @@ export async function processEmailJob(job: EmailJob): Promise<void> {
             unsubscribeUrl: withSourceEmail(`${DASHBOARD_URI}/unsubscribe/${email.contact.id}`, emailId),
             subscribeUrl: withSourceEmail(`${DASHBOARD_URI}/subscribe/${email.contact.id}`, emailId),
             manageUrl: withSourceEmail(`${DASHBOARD_URI}/manage/${email.contact.id}`, emailId),
+            // Plunk Lite: given when the email was queued; never the contact's own data
+            optOutUrl: '',
           },
         });
 
@@ -532,6 +572,8 @@ export async function processEmailJob(job: EmailJob): Promise<void> {
       includeUnsubscribe: emailClass === 'marketing',
       sourceEmailId: emailId,
       footers,
+      optOutHref: topic && email.templateId ? optOutLink(DASHBOARD_URI, email.contact.id, email.templateId) : undefined,
+      optOutFooters,
     });
 
     // Use fromName from database if available, otherwise fall back to project name
@@ -553,6 +595,8 @@ export async function processEmailJob(job: EmailJob): Promise<void> {
       hasListManagementLink: bodyHasListManagementLink(compiledHtml, email.contact.id),
       unsubscribeId: email.contact.id,
       sourceEmailId: emailId,
+      oneClickOptOutUrl:
+        topic && email.templateId ? optOutLink(API_URI, email.contact.id, email.templateId) : undefined,
       customHeaders: publicHeaders,
     });
 

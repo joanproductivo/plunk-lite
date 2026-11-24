@@ -1,7 +1,7 @@
 import {createTranslator, type OptInSchemas, type Translator} from '@plunk/shared';
 import type {OptInLink} from '@plunk/types';
 import {Button, IconSpinner} from '@plunk/ui';
-import {AlertCircle, Check} from 'lucide-react';
+import {Check} from 'lucide-react';
 import React, {useEffect, useState} from 'react';
 
 import {
@@ -10,6 +10,7 @@ import {
   ErrorCard,
   InlineError,
   LoadingCard,
+  NoticeState,
   RecipientShell,
   ResultState,
   RichText,
@@ -83,14 +84,9 @@ export default function Confirm() {
   if (link.status === 'invalid') {
     return (
       <RecipientShell>
-        <div className="flex flex-col gap-4 p-6 sm:p-8">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-600/20 ring-inset">
-            <AlertCircle className="h-5 w-5" aria-hidden="true" />
-          </div>
-          <CardIntro title={translator.t('pages.confirm.invalidTitle')}>
-            {translator.t('pages.confirm.invalidDescription')}
-          </CardIntro>
-        </div>
+        <NoticeState title={translator.t('pages.confirm.invalidTitle')}>
+          {translator.t('pages.confirm.invalidDescription')}
+        </NoticeState>
       </RecipientShell>
     );
   }

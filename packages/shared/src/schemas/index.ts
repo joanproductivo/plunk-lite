@@ -293,6 +293,8 @@ export const TemplateSchemas = {
     fromName: z.string().max(100).nullish(),
     replyTo: email.nullish(),
     type: z.nativeEnum(TemplateType).default('MARKETING'),
+    // Plunk Lite: the opt-out topic, a static segment (TRANSACTIONAL templates only)
+    optOutSegmentId: uuid.nullish(),
   }),
   update: z.object({
     name: z.string().min(1).max(100).optional(),
@@ -303,6 +305,8 @@ export const TemplateSchemas = {
     fromName: z.string().max(100).nullish(),
     replyTo: email.nullish(),
     type: z.nativeEnum(TemplateType).optional(),
+    // Plunk Lite: the opt-out topic; null removes it
+    optOutSegmentId: uuid.nullish(),
   }),
   // Bulk operation payload for POST /templates/bulk-update.
   //

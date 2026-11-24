@@ -130,6 +130,7 @@ Writing tools:
 | `plunk_send_email`                 | Send a transactional email to specific recipients         |
 | `plunk_track_event`                | Record an event, which can trigger automation workflows   |
 | `plunk_create_template`            | Create a reusable template                                |
+| `plunk_update_template`            | Edit a template, or set its opt-out topic (Plunk Lite)    |
 | `plunk_create_campaign`            | Create a campaign as a draft                              |
 | `plunk_test_campaign`              | Send one copy of a campaign to a project member           |
 | `plunk_send_campaign`              | Send or schedule a campaign *(destructive, irreversible)* |

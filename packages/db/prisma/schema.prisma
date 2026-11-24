@@ -197,6 +197,11 @@ model Template {
   // Type
   type TemplateType @default(MARKETING)
 
+  // Plunk Lite: the static segment a contact joins to stop getting this TRANSACTIONAL template
+  // (its "opt-out topic"). An id without a foreign key: deleting the segment is refused while a
+  // template uses it, and an older image ignores it and sends to everyone
+  optOutSegmentId String?
+
   // Relations
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   projectId String
@@ -900,12 +905,15 @@ model PlunkLiteProjectBrand {
   @@map("plunk_lite_project_brands")
 }
 
-/// Plunk Lite: a project's own unsubscribe footers, by language (see ProjectFooterService). A table
+/// Plunk Lite: a project's own unsubscribe footers, and notices footers (opt-out topics), by
+/// language (see ProjectFooterService). A table
 /// of its own with no relation to Project, so that Plunk's own tables stay as upstream has them.
 model PlunkLiteProjectFooters {
-  projectId String   @id
-  footers   Json
-  updatedAt DateTime @updatedAt
+  projectId     String   @id
+  footers       Json
+  /// The notices footer of transactional templates with an opt-out topic, same shape as footers
+  optOutFooters Json?
+  updatedAt     DateTime @updatedAt
 
   @@map("plunk_lite_project_footers")
 }

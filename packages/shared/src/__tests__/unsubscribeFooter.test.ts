@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 
-import {createTranslatorSync} from '../i18n/index.js';
+import {createTranslatorSync, SUPPORTED_LANGUAGES} from '../i18n/index.js';
 import {
   footerParagraph,
   isPlunkFooter,
@@ -176,15 +176,34 @@ describe('footerParagraph', () => {
 });
 
 describe("Plunk's footer as a starting point", () => {
-  it("sends just like Plunk's own when left as it is, and needs no footer of its own", () => {
-    for (const language of ['es', 'de', 'ja']) {
-      const template = plunkFooterTemplate(language);
-      const own = footerParagraph({language, projectName: 'Acme', href: '#', footers: {[language]: template}});
-      const flat = (html: string) => html.replace(/\s+/g, ' ');
+  // Plunk Lite: the notices footer of opt-out topics too
+  it.each(['unsubscribe', 'optOut'] as const)(
+    "sends just like Plunk's own %s footer when left as it is, and needs no footer of its own",
+    kind => {
+      for (const language of ['es', 'de', 'ja']) {
+        const template = plunkFooterTemplate(language, kind);
+        const own = footerParagraph({language, projectName: 'Acme', href: '#', footers: {[language]: template}, kind});
+        const flat = (html: string) => html.replace(/\s+/g, ' ');
 
-      expect(flat(own)).toBe(flat(plunkFooterParagraph(language, 'Acme', '#')));
-      expect(isPlunkFooter(template, language)).toBe(true);
-      expect(isPlunkFooter({...template, linkText: 'otro'}, language)).toBe(false);
-    }
+        expect(flat(own)).toBe(flat(plunkFooterParagraph(language, 'Acme', '#', kind)));
+        expect(isPlunkFooter(template, language, kind)).toBe(true);
+        expect(isPlunkFooter({...template, linkText: 'otro'}, language, kind)).toBe(false);
+        expect(toProjectFooters({[language]: template}).errors).toEqual([]);
+      }
+    },
+  );
+
+  it('starts every language from a notices footer a project could keep', () => {
+    const footers = Object.fromEntries(
+      SUPPORTED_LANGUAGES.map(({code}) => [code, plunkFooterTemplate(code, 'optOut')]),
+    );
+    expect(toProjectFooters(footers).errors).toEqual([]);
+  });
+
+  it('says the notices footer in Spanish as one sentence and its link', () => {
+    expect(plunkFooterParagraph('es', 'Acme', '#', 'optOut').replace(/\s+/g, ' ')).toBe(
+      'Recibes estos avisos de Acme. <a href="#">No quiero más avisos como este</a>.',
+    );
+    expect(isPlunkFooter(plunkFooterTemplate('es', 'optOut'), 'es')).toBe(false);
   });
 });

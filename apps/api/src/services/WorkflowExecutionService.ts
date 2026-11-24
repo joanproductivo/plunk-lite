@@ -45,6 +45,7 @@ import {NtfyService} from './NtfyService.js';
 import {ParkedRuns} from './ParkedRuns.js';
 import {QueueService} from './QueueService.js';
 import {SuppressionService} from './SuppressionService.js';
+import {optOutUrl} from './TemplateOptOut.js';
 import {
   isTransientStatus,
   toDeliveryError,
@@ -757,6 +758,8 @@ export class WorkflowExecutionService {
       unsubscribeUrl: `${DASHBOARD_URI}/unsubscribe/${contact.id}`,
       subscribeUrl: `${DASHBOARD_URI}/subscribe/${contact.id}`,
       manageUrl: `${DASHBOARD_URI}/manage/${contact.id}`,
+      // Plunk Lite: the opt-out page of the template's topic; empty without one or to a custom recipient
+      optOutUrl: optOutUrl(contact.id, step.template, recipientConfig.type === 'CUSTOM'),
     };
 
     const renderedSubject = renderSubjectTemplate(step.template.subject, variables);
@@ -1406,6 +1409,8 @@ export class WorkflowExecutionService {
       unsubscribeUrl: `${DASHBOARD_URI}/unsubscribe/${contact.id}`,
       subscribeUrl: `${DASHBOARD_URI}/subscribe/${contact.id}`,
       manageUrl: `${DASHBOARD_URI}/manage/${contact.id}`,
+      // Plunk Lite: no template, so no opt-out topic; set so the contact's own data cannot fill it
+      optOutUrl: '',
     };
 
     const renderedUrl = renderTextTemplate(url, variables);
