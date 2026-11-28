@@ -74,7 +74,7 @@ describe('tool registration', () => {
     expect(names).toContain('plunk_send_email');
     expect(names).toContain('plunk_send_campaign');
     expect(names).toContain('plunk_delete_contact');
-    expect(tools).toHaveLength(46);
+    expect(tools).toHaveLength(47);
 
     await close();
   });
@@ -807,6 +807,130 @@ describe('template tools', () => {
     expect(invalid.every((result) => result.isError)).toBe(true);
     expect(noId.isError).toBe(true);
     expect(methods).toEqual(['GET']);
+    await close();
+  });
+});
+
+// Plunk Lite: the opt-out topic of a campaign, and editing a draft campaign
+describe('campaign opt-out topic and plunk_update_campaign', () => {
+  const TOPIC = '3f1c2a8e-7b4d-4c3a-9e2f-1a2b3c4d5e6f';
+  const base = {name: 'Reminder', subject: 'Hi', body: '<p>Hi</p>', from: 'hi@example.com', audienceType: 'ALL'};
+
+  it('creates a campaign with or without a topic, and says so when the installation dropped it', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    let withKey = true;
+    mockApi((_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      bodies.push(body);
+      const data = {id: 'cmp-1', ...body};
+      // An installation without the column ignores the field and answers without it
+      if (withKey) data.optOutSegmentId = body.optOutSegmentId ?? null;
+      else delete data.optOutSegmentId;
+      return json({success: true, data});
+    });
+    const {client, close} = await connect(baseConfig);
+
+    const plain = await client.callTool({name: 'plunk_create_campaign', arguments: base});
+    const withTopic = await client.callTool({
+      name: 'plunk_create_campaign',
+      arguments: {...base, type: 'TRANSACTIONAL', optOutSegmentId: TOPIC},
+    });
+    withKey = false;
+    const dropped = await client.callTool({
+      name: 'plunk_create_campaign',
+      arguments: {...base, type: 'TRANSACTIONAL', optOutSegmentId: TOPIC},
+    });
+
+    expect(plain.isError).toBeFalsy();
+    expect(withTopic.isError).toBeFalsy();
+    expect(dropped.isError).toBe(true);
+    expect(JSON.stringify(dropped.content)).toContain('WITHOUT its opt-out topic');
+    expect(bodies[0]).not.toHaveProperty('optOutSegmentId');
+    expect(bodies[1]).toMatchObject({type: 'TRANSACTIONAL', optOutSegmentId: TOPIC});
+    await close();
+  });
+
+  function campaignApi(campaign: Record<string, unknown>) {
+    const calls: {method: string; path: string; body?: unknown}[] = [];
+    mockApi((url, init) => {
+      const method = init?.method ?? 'GET';
+      calls.push({method, path: new URL(url).pathname, body: init?.body ? JSON.parse(String(init.body)) : undefined});
+      return json({success: true, data: campaign});
+    });
+    return calls;
+  }
+
+  it('edits a draft with only the fields given, removes the topic with null, and lets go of the segment', async () => {
+    const calls = campaignApi({id: 'cmp-1', status: 'DRAFT', optOutSegmentId: TOPIC});
+    const {client, close} = await connect(baseConfig);
+
+    const renamed = await client.callTool({name: 'plunk_update_campaign', arguments: {id: 'cmp-1', name: 'New'}});
+    const removed = await client.callTool({
+      name: 'plunk_update_campaign',
+      arguments: {id: 'cmp-1', type: 'MARKETING', optOutSegmentId: null},
+    });
+    const all = await client.callTool({name: 'plunk_update_campaign', arguments: {id: 'cmp-1', audienceType: 'ALL'}});
+
+    expect([renamed, removed, all].every(result => !result.isError)).toBe(true);
+    expect(calls.filter(call => call.method === 'PUT')).toEqual([
+      {method: 'PUT', path: '/campaigns/cmp-1', body: {name: 'New'}},
+      {method: 'PUT', path: '/campaigns/cmp-1', body: {type: 'MARKETING', optOutSegmentId: null}},
+      {method: 'PUT', path: '/campaigns/cmp-1', body: {audienceType: 'ALL', segmentId: null}},
+    ]);
+    expect(calls.filter(call => call.method === 'GET')).toHaveLength(3);
+    await close();
+  });
+
+  it('writes nothing to a campaign that is not a draft', async () => {
+    for (const status of ['SCHEDULED', 'SENT']) {
+      const calls = campaignApi({id: 'cmp-1', status, optOutSegmentId: null});
+      const {client, close} = await connect(baseConfig);
+
+      const result = await client.callTool({
+        name: 'plunk_update_campaign',
+        arguments: {id: 'cmp-1', optOutSegmentId: TOPIC},
+      });
+
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain('Only drafts can be edited');
+      expect(calls.map(call => call.method)).toEqual(['GET']);
+      await close();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('writes nothing without topics, with nothing or something invalid to change, or a SEGMENT without its id', async () => {
+    const calls = campaignApi({id: 'cmp-1', status: 'DRAFT'});
+    const {client, close} = await connect(baseConfig);
+
+    const old = await client.callTool({
+      name: 'plunk_update_campaign',
+      arguments: {id: 'cmp-1', optOutSegmentId: TOPIC},
+    });
+    const nothing = await client.callTool({name: 'plunk_update_campaign', arguments: {id: 'cmp-1'}});
+    const noId = await client.callTool({name: 'plunk_update_campaign', arguments: {id: '', name: 'x'}});
+    const segment = await client.callTool({
+      name: 'plunk_update_campaign',
+      arguments: {id: 'cmp-1', audienceType: 'SEGMENT'},
+    });
+    const invalid = await Promise.all(
+      [
+        {from: 'nope'},
+        {subject: ''},
+        {type: 'OTHER'},
+        {optOutSegmentId: 'x'},
+        {excludedSegmentIds: Array(21).fill('s')},
+      ].map(fields => client.callTool({name: 'plunk_update_campaign', arguments: {id: 'cmp-1', ...fields}})),
+    );
+
+    expect(old.isError).toBe(true);
+    expect(JSON.stringify(old.content)).toContain('does not support opt-out topics');
+    expect(nothing.isError).toBe(true);
+    expect(noId.isError).toBe(true);
+    expect(segment.isError).toBe(true);
+    expect(JSON.stringify(segment.content)).toContain('plunk_list_segments');
+    expect(invalid.every(result => result.isError)).toBe(true);
+    expect(calls.map(call => call.method)).toEqual(['GET']);
     await close();
   });
 });

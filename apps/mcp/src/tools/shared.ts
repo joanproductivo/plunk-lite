@@ -182,3 +182,16 @@ export function paginationHint(hasMore: boolean, cursor: string | null | undefin
 export function pageHint(page: number, totalPages: number): string {
   return page < totalPages ? `\n\nMore results exist. For the next page, pass page=${page + 1}.` : '';
 }
+
+/**
+ * Plunk Lite: what an opt-out topic does, for the tools that set one on a template or a campaign.
+ * Each tool adds what setting or removing it means there.
+ */
+export const OPT_OUT_TOPIC = [
+  '**Opt-out topic (Plunk Lite, `optOutSegmentId`):** a STATIC segment (from `plunk_list_segments`), on a',
+  'TRANSACTIONAL template or campaign only. Its emails carry a one-click unsubscribe (List-Unsubscribe) that',
+  'puts the contact in that segment, and a notices footer linking to the page where they can do the same. Its',
+  'members no longer get it (a template, from workflows or `plunk_send_email`; a campaign, when it is sent);',
+  'other transactional emails still reach them. Use it for notices, never for receipts or access emails.',
+  '`{{optOutUrl}}` in the body is that page, and then the footer is left out.',
+];

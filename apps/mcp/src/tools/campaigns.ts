@@ -3,7 +3,16 @@ import * as z from 'zod';
 import type {PlunkClient} from '../client.js';
 import {EMAIL_TYPES, FILTER_HELP, filterCondition} from '../schemas.js';
 
-import {errorResult, jsonResult, pageHint, register, requireConfirmation, runTool, type ToolContext} from './shared.js';
+import {
+  errorResult,
+  jsonResult,
+  OPT_OUT_TOPIC,
+  pageHint,
+  register,
+  requireConfirmation,
+  runTool,
+  type ToolContext,
+} from './shared.js';
 
 /** `GET /campaigns` is page-based, like `GET /workflows`. */
 interface CampaignList {
@@ -24,6 +33,8 @@ interface Campaign {
   totalRecipients?: number;
   recipientCount?: number;
   type?: string;
+  /** Plunk Lite: the opt-out topic; absent on an installation without it */
+  optOutSegmentId?: string | null;
 }
 
 /**
@@ -60,6 +71,25 @@ async function getCampaign(client: PlunkClient, id: string): Promise<Campaign> {
   });
 
   return response && 'data' in response ? response.data : (response as Campaign);
+}
+
+/**
+ * Plunk Lite: up to 20 segments a campaign leaves out (CAMPAIGN_EXCLUDED_SEGMENTS_MAX in
+ * @plunk/shared, which this package cannot import: schemas.ts)
+ */
+const excludedSegmentIds = z.array(z.string()).max(20).optional();
+
+/** What a campaign write is missing for its audience type, before anything is sent to the API */
+function audienceInputError(input: {audienceType?: string; segmentId?: string; audienceCondition?: unknown}) {
+  if (input.audienceType === 'SEGMENT' && !input.segmentId) {
+    return errorResult(
+      'audienceType is SEGMENT but no segmentId was given. Call plunk_list_segments to find the segment ID.',
+    );
+  }
+  if (input.audienceType === 'FILTERED' && !input.audienceCondition) {
+    return errorResult('audienceType is FILTERED but no audienceCondition was given.');
+  }
+  return undefined;
 }
 
 /** Unwraps the same `{success, data}` envelope for any single-campaign payload. */
@@ -130,6 +160,10 @@ export function registerCampaignTools(ctx: ToolContext, client: PlunkClient): vo
         'Any of them can leave out the contacts of some segments with `excludedSegmentIds`: they never',
         'get the campaign, even when they are also in the audience.',
         '',
+        ...OPT_OUT_TOPIC,
+        "The type defaults to MARKETING, so a campaign with a topic needs `type: 'TRANSACTIONAL'`; its audience",
+        'cannot be the topic segment itself. Change it later with `plunk_update_campaign`, while it is a draft.',
+        '',
         FILTER_HELP,
         '',
         '**Key trigger phrases:** "create a campaign", "draft a newsletter", "email my whole list"',
@@ -148,27 +182,22 @@ export function registerCampaignTools(ctx: ToolContext, client: PlunkClient): vo
         audienceCondition: z
           .optional(filterCondition)
           .describe('Inline filter tree. Required when audienceType is FILTERED.'),
-        excludedSegmentIds: z
-          .array(z.string())
-          // CAMPAIGN_EXCLUDED_SEGMENTS_MAX in @plunk/shared, which this package cannot import (schemas.ts)
-          .max(20)
+        excludedSegmentIds: excludedSegmentIds.describe(
+          'Segment IDs whose contacts never get this campaign, whatever the audience. Find them with plunk_list_segments.',
+        ),
+        optOutSegmentId: z
+          .string()
+          .uuid()
           .optional()
-          .describe(
-            'Segment IDs whose contacts never get this campaign, whatever the audience. Find them with plunk_list_segments.',
-          ),
+          .describe('Opt-out topic: a static segment id. TRANSACTIONAL campaigns only (Plunk Lite).'),
       }),
       annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true},
     },
     async (input) =>
       runTool(async () => {
-        if (input.audienceType === 'SEGMENT' && !input.segmentId) {
-          return errorResult(
-            'audienceType is SEGMENT but no segmentId was given. Call plunk_list_segments to find the segment ID.',
-          );
-        }
-
-        if (input.audienceType === 'FILTERED' && !input.audienceCondition) {
-          return errorResult('audienceType is FILTERED but no audienceCondition was given.');
+        const audienceError = audienceInputError(input);
+        if (audienceError) {
+          return audienceError;
         }
 
         const campaign = unwrap(
@@ -178,6 +207,12 @@ export function registerCampaignTools(ctx: ToolContext, client: PlunkClient): vo
             body: input,
           }),
         );
+        if (input.optOutSegmentId && !Object.hasOwn(campaign, 'optOutSegmentId')) {
+          return errorResult(
+            `The campaign was created as a draft (${campaign.id}), but WITHOUT its opt-out topic: this installation ` +
+              'does not support opt-out topics in campaigns yet. It has not been sent.',
+          );
+        }
 
         return jsonResult(
           `Campaign created as a draft (id: ${campaign.id}). It has NOT been sent — send yourself a ` +
@@ -206,6 +241,8 @@ export function registerCampaignTools(ctx: ToolContext, client: PlunkClient): vo
         '',
         "Addresses on the project's suppression list (permanent bounces and spam complaints) are",
         'unsubscribed and never emailed, so they are left out even if the audience matches them.',
+        'A campaign with an opt-out topic (`optOutSegmentId`) is not sent to the members of that segment, and',
+        'its emails carry the one-click opt-out.',
         '',
         '**This is irreversible.** Once sending starts the email cannot be recalled. This tool always',
         'asks the user to confirm before it proceeds, and will report the recipient count in that prompt.',
@@ -292,7 +329,8 @@ export function registerCampaignTools(ctx: ToolContext, client: PlunkClient): vo
         '`plunk_get_campaign_stats` for opens, clicks and bounces.',
         '',
         '**Returns:** The campaign record, including `status` (DRAFT, SCHEDULED, SENDING, SENT,',
-        'CANCELLED) and `totalRecipients`.',
+        'CANCELLED) and `totalRecipients`. With an opt-out topic (`optOutSegmentId`, Plunk Lite), the',
+        "campaign is not sent to that segment's members and its emails carry the one-click opt-out.",
         '',
         '**When to use:**',
         '- Before sending, to check what the campaign actually says and who it targets',
@@ -309,6 +347,109 @@ export function registerCampaignTools(ctx: ToolContext, client: PlunkClient): vo
       runTool(async () => {
         const campaign = await getCampaign(client, id);
         return jsonResult('Campaign:', campaign);
+      }),
+  );
+
+  register(
+    ctx,
+    'plunk_update_campaign',
+    {
+      title: 'Update campaign',
+      description: [
+        '**Purpose:** Change a draft campaign: its name, description, subject, body, sender, reply-to,',
+        'type, audience, excluded segments or (Plunk Lite) opt-out topic. Only the fields given change.',
+        '',
+        '**NOT for:** Sending anything (that is `plunk_send_campaign`), or editing a template (use',
+        '`plunk_update_template`).',
+        '',
+        '**Only drafts.** A scheduled campaign has to be cancelled back to a draft first with',
+        '`plunk_cancel_campaign`; one that is sending or sent cannot be changed.',
+        '',
+        '**Audience:** `audienceType: SEGMENT` needs `segmentId`, and `FILTERED` needs `audienceCondition`, in',
+        'the same call. Moving to another audience type lets go of the old segment.',
+        '',
+        ...OPT_OUT_TOPIC,
+        'Moving a campaign with an opt-out topic to a type other than TRANSACTIONAL needs',
+        '`optOutSegmentId: null` in the same call; `null` removes it, and then the contacts who opted out',
+        'get the campaign again.',
+        '',
+        '**Requirements:** `from` must be on a domain verified for this project.',
+        '',
+        '**Returns:** The updated campaign. Its `totalRecipients` is recalculated when the audience, the',
+        'type, the excluded segments or the topic change.',
+        '',
+        '**Key trigger phrases:** "edit the campaign", "change the subject of the campaign", "add an opt-out to"',
+      ].join('\n'),
+      inputSchema: z.object({
+        id: z.string().min(1).describe('The campaign ID, as returned by plunk_list_campaigns.'),
+        name: z.string().min(1).optional().describe('New internal name.'),
+        description: z.string().optional().describe('New internal note.'),
+        subject: z.string().min(1).optional().describe('New subject line.'),
+        body: z.string().min(1).optional().describe('New HTML body.'),
+        from: z.string().email().optional().describe('New sender address, on a verified domain.'),
+        fromName: z.string().max(100).nullable().optional().describe('New sender display name; null removes it.'),
+        replyTo: z.string().email().nullable().optional().describe('New reply-to address; null removes it.'),
+        type: z.enum(EMAIL_TYPES).optional().describe('New content type.'),
+        audienceType: z.enum(['ALL', 'SEGMENT', 'FILTERED']).optional().describe('Who receives this campaign.'),
+        segmentId: z.string().optional().describe('Segment ID. Required when audienceType is SEGMENT.'),
+        audienceCondition: z
+          .optional(filterCondition)
+          .describe('Inline filter tree. Required when audienceType is FILTERED.'),
+        excludedSegmentIds: excludedSegmentIds.describe(
+          'The full new list of segment IDs whose contacts never get this campaign.',
+        ),
+        optOutSegmentId: z
+          .string()
+          .uuid()
+          .nullable()
+          .optional()
+          .describe('Opt-out topic: a static segment id, or null to remove it. TRANSACTIONAL only (Plunk Lite).'),
+      }),
+      annotations: {readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true},
+    },
+    async ({id, ...fields}) =>
+      runTool(async () => {
+        const body: Record<string, unknown> = Object.fromEntries(
+          Object.entries(fields).filter(([, value]) => value !== undefined),
+        );
+        if (Object.keys(body).length === 0) {
+          return errorResult(
+            'Nothing to update: pass name, description, subject, body, from, fromName, replyTo, type, audienceType, ' +
+              'segmentId, audienceCondition, excludedSegmentIds or optOutSegmentId.',
+          );
+        }
+
+        const audienceError = audienceInputError(fields);
+        if (audienceError) {
+          return audienceError;
+        }
+        // Otherwise the old segment stays attached, and cannot be deleted while the draft lives
+        if (fields.audienceType !== undefined && fields.audienceType !== 'SEGMENT') {
+          body.segmentId = null;
+        }
+
+        // Read first: the API also edits scheduled campaigns, and this tool only drafts, like the
+        // dashboard. An installation without opt-out topics ignores the field and answers 200, having
+        // written the rest: checked here too, before writing anything
+        const current = await getCampaign(client, id);
+        if (current.status !== 'DRAFT') {
+          return errorResult(
+            `Only drafts can be edited, and this campaign is ${current.status ?? 'not a draft'}: cancel it back to ` +
+              'a draft with plunk_cancel_campaign first (one already sending or sent cannot be changed).',
+          );
+        }
+        if (fields.optOutSegmentId !== undefined && !Object.hasOwn(current, 'optOutSegmentId')) {
+          return errorResult('Nothing was changed: this installation does not support opt-out topics yet.');
+        }
+
+        const campaign = unwrap(
+          await client.request<Campaign | {success: boolean; data: Campaign}>({
+            method: 'PUT',
+            path: `/campaigns/${encodeURIComponent(id)}`,
+            body,
+          }),
+        );
+        return jsonResult('Campaign updated. It is still a draft: nothing was sent.', campaign);
       }),
   );
 

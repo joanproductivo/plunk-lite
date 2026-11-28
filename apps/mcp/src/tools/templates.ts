@@ -3,17 +3,7 @@ import * as z from 'zod';
 import type {PlunkClient} from '../client.js';
 import {EMAIL_TYPES} from '../schemas.js';
 
-import {errorResult, jsonResult, pageHint, register, runTool, type ToolContext} from './shared.js';
-
-/** Plunk Lite: what an opt-out topic does, for both tools that set one */
-const OPT_OUT_TOPIC = [
-  '**Opt-out topic (Plunk Lite, `optOutSegmentId`):** a STATIC segment (from `plunk_list_segments`), on a',
-  'TRANSACTIONAL template only. Its emails carry a one-click unsubscribe (List-Unsubscribe) that puts the',
-  'contact in that segment, and a notices footer linking to the page where they can do the same. Its members',
-  'no longer get it, from workflows or `plunk_send_email`; other transactional emails still reach them. Use',
-  'it for notices, never for receipts or access emails. `{{optOutUrl}}` in the body is that page, and then',
-  'the footer is left out.',
-];
+import {errorResult, jsonResult, OPT_OUT_TOPIC, pageHint, register, runTool, type ToolContext} from './shared.js';
 
 /** `GET /templates` is page-based, like `GET /workflows`. */
 interface TemplateList {
@@ -132,7 +122,7 @@ export function registerTemplateTools(ctx: ToolContext, client: PlunkClient): vo
         '**Purpose:** Change a template: its name, description, subject, body, sender, reply-to, type or',
         '(Plunk Lite) opt-out topic. Only the fields given change.',
         '',
-        '**NOT for:** Sending anything, or editing a campaign (campaigns have no template).',
+        '**NOT for:** Sending anything, or editing a campaign (use `plunk_update_campaign`).',
         '',
         '**Note:** a changed `body` or `subject` reaches the active workflows that use the template at once.',
         'Moving a template with an opt-out topic to a type other than TRANSACTIONAL needs',
