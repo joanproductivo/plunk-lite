@@ -32,7 +32,7 @@ const PUBLIC_ROUTES = [
   '/manage',
   // Plunk Lite: the double opt-in's confirmation page
   '/confirm',
-  // Plunk Lite: the opt-out page of a transactional template's opt-out topic
+  // Plunk Lite: the opt-out page of a transactional template's or campaign's opt-out topic (?t= or ?c=)
   '/opt-out',
 ];
 

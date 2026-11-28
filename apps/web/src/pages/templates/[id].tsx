@@ -295,7 +295,6 @@ function TemplateEditor() {
                   from={editedTemplate.from || ''}
                   replyTo={editedTemplate.replyTo || ''}
                   fillHeight
-                  optOutVariable
                 />
               </CardContent>
             </Card>

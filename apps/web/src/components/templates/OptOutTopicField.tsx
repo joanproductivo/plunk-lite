@@ -6,12 +6,23 @@ import type {ReactNode} from 'react';
 
 import {SegmentChip, SegmentSelect, useSegmentName, useSegments} from '../segments/SegmentPicker';
 
-/** The description of the "Template type" card: transactional templates with a topic get its footer */
-export function templateTypeDescription(hasTopic: boolean): string {
+/** What has the opt-out topic: a template, or (Plunk Lite) a campaign */
+type OptOutOwner = 'template' | 'campaign';
+
+/** The description of the "Template type" (or "Campaign type") card: transactional ones with a topic get its footer */
+export function templateTypeDescription(hasTopic: boolean, owner: OptOutOwner = 'template'): string {
+  const subject = owner === 'campaign' ? 'Transactional campaigns' : 'Transactional templates';
   return hasTopic
-    ? 'Transactional templates skip the subscription check and the footer, except the notices footer of their opt-out topic.'
-    : 'Transactional templates skip the subscription check and the footer.';
+    ? `${subject} skip the subscription check and the footer, except the notices footer of their opt-out topic.`
+    : `${subject} skip the subscription check and the footer.`;
 }
+
+/** What a campaign editor says when the segment chosen as its audience was its opt-out topic */
+export const TOPIC_DROPPED = 'Opt-out topic removed: a campaign cannot be sent to its own opt-out segment.';
+
+/** How to use a topic, the same for templates and campaigns */
+const TOPIC_USE =
+  'Use it only for notices, never for receipts or access emails, and pick a segment kept for this: joining it also fires its entry event and adds them to whatever uses it.';
 
 function Warning({children}: {children: ReactNode}) {
   return (
@@ -30,18 +41,32 @@ interface OptOutTopicFieldProps {
   saved?: string | null;
   body: string;
   onChange: (id: string | null) => void;
+  /** What has the topic, for the texts; a template by default */
+  owner?: OptOutOwner;
+  /** Segments that cannot be the topic (a campaign's audience) */
+  exclude?: string[];
 }
 
 /**
- * Plunk Lite: the opt-out topic of a TRANSACTIONAL template, a static segment. Its emails carry a
- * one-click unsubscribe that puts the contact in that segment, and are not sent to its members.
+ * Plunk Lite: the opt-out topic of a TRANSACTIONAL template or campaign, a static segment. Its emails
+ * carry a one-click unsubscribe that puts the contact in that segment, and are not sent to its members.
  * Outside TRANSACTIONAL only the warnings show: removing a saved topic, and an `{{optOutUrl}}` that
  * would be empty.
  */
-export function OptOutTopicField({type, value, saved, body, onChange}: OptOutTopicFieldProps) {
+export function OptOutTopicField({
+  type,
+  value,
+  saved,
+  body,
+  onChange,
+  owner = 'template',
+  exclude = [],
+}: OptOutTopicFieldProps) {
   const nameOf = useSegmentName();
   const {data: segments} = useSegments();
-  // A topic whose segment is gone (by SQL, or from an earlier image): the template reaches no one
+  const campaign = owner === 'campaign';
+  // A topic whose segment is gone (by SQL, or from an earlier image): the template reaches no one, and
+  // the campaign cannot be sent
   const gone = Boolean(value && segments && !segments.some(segment => segment.id === value));
   const removing = Boolean(saved) && value !== saved;
   const emptyLink = usesVariable(body, 'optOutUrl') && (type !== 'TRANSACTIONAL' || !value);
@@ -49,12 +74,15 @@ export function OptOutTopicField({type, value, saved, body, onChange}: OptOutTop
   const warnings = (
     <>
       {removing && (
-        <Warning>Contacts who opted out of {nameOf(saved!)} will get this template again once you save.</Warning>
+        <Warning>
+          Contacts who opted out of {nameOf(saved!)} will get this {campaign ? 'campaign' : 'template again'} once you
+          save.
+        </Warning>
       )}
       {emptyLink && (
         <Warning>
           This link is empty without an opt-out topic: <code className="font-mono">{'{{optOutUrl}}'}</code> only works
-          in a transactional template with one.
+          in a transactional {owner} with one.
         </Warning>
       )}
     </>
@@ -78,7 +106,7 @@ export function OptOutTopicField({type, value, saved, body, onChange}: OptOutTop
         </div>
       ) : (
         <SegmentSelect
-          exclude={[]}
+          exclude={exclude}
           onSelect={segment => onChange(segment.id)}
           placeholder="Choose a static segment…"
           staticOnly
@@ -86,14 +114,17 @@ export function OptOutTopicField({type, value, saved, body, onChange}: OptOutTop
       )}
       {gone ? (
         <Warning>
-          This segment no longer exists, so this template is sent to no one: pick another segment, or remove it.
+          {campaign
+            ? 'This segment no longer exists, so this campaign cannot be sent: pick another segment, or remove it.'
+            : 'This segment no longer exists, so this template is sent to no one: pick another segment, or remove it.'}
         </Warning>
       ) : value ? (
         <>
           <Warning>
-            Contacts who opt out join {nameOf(value)} and stop getting this template — from workflows and from the API.
-            Other transactional emails still reach them. Use it only for notices, never for receipts or access emails,
-            and pick a segment kept for this: joining it also fires its entry event and adds them to whatever uses it.
+            {campaign
+              ? `Contacts who opt out join ${nameOf(value)}. This campaign is not sent to its members, and neither is any other email with this topic.`
+              : `Contacts who opt out join ${nameOf(value)} and stop getting this template — from workflows and from the API. Other transactional emails still reach them.`}{' '}
+            {TOPIC_USE}
           </Warning>
           <p className="text-xs text-neutral-500">
             Plunk adds the notices footer (Settings → Brand) at the end. Put{' '}
@@ -103,7 +134,9 @@ export function OptOutTopicField({type, value, saved, body, onChange}: OptOutTop
         </>
       ) : (
         <p className="text-xs text-neutral-500">
-          Optional. For notices only: a one-click unsubscribe that stops this template for whoever uses it.
+          {campaign
+            ? 'Optional. For notices only: a one-click unsubscribe that stops this kind of email for whoever opts out.'
+            : 'Optional. For notices only: a one-click unsubscribe that stops this template for whoever uses it.'}
         </p>
       )}
       {warnings}

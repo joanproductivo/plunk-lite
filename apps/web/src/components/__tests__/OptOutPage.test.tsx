@@ -91,4 +91,26 @@ describe('the opt-out page', () => {
     expect(container.textContent).toContain('Este enlace ya no funciona');
     expect(button()).toBeUndefined();
   });
+
+  it('opts out with the campaign of a `c` link', async () => {
+    route.query = {id: 'c1', c: 'k1'};
+    vi.mocked(network.fetch).mockImplementation(async (_method, path) =>
+      path === '/contacts/public/c1' ? CONTACT : {status: 'opted-out'},
+    );
+
+    await render();
+    await act(async () => button()!.click());
+
+    expect(network.fetch).toHaveBeenLastCalledWith('POST', '/opt-out/c1?c=k1');
+  });
+
+  it('says the link no longer works when it carries both a template and a campaign', async () => {
+    route.query = {id: 'c1', t: 't1', c: 'k1'};
+    vi.mocked(network.fetch).mockResolvedValue(CONTACT);
+
+    await render();
+
+    expect(container.textContent).toContain('Este enlace ya no funciona');
+    expect(button()).toBeUndefined();
+  });
 });

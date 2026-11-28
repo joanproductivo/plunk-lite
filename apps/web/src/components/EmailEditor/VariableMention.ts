@@ -21,6 +21,8 @@ const RUNTIME_FIELDS: ContactField[] = [
   {field: 'subscribeUrl', type: 'string', coverage: 100},
   {field: 'manageUrl', type: 'string', coverage: 100},
   {field: 'locale', type: 'string', coverage: 100},
+  // Plunk Lite: the opt-out link of a transactional template or campaign with a topic; empty without one
+  {field: 'optOutUrl', type: 'string', coverage: 100},
 ];
 
 const TYPE_LABELS: Record<ContactField['type'], string> = {
@@ -30,27 +32,17 @@ const TYPE_LABELS: Record<ContactField['type'], string> = {
   date: 'date',
 };
 
-/** Plunk Lite: the opt-out link, offered only where it has a value (templates, not campaigns) */
-const OPT_OUT_FIELD: ContactField = {field: 'optOutUrl', type: 'string', coverage: 100};
-
 // Set from the component once the project's fields have loaded.
 let contactFields: ContactField[] = [];
-// Set from the component: whether this editor is a template's
-let optOutVariable = false;
 
 export function setAvailableVariables(fields: ContactField[]) {
   contactFields = fields || [];
 }
 
-export function setOptOutVariable(enabled: boolean) {
-  optOutVariable = enabled;
-}
-
 /** The project's fields, runtime variables first. Shared with the `{%` logic menu. */
 export function getSuggestionFields(): ContactField[] {
-  const runtime = optOutVariable ? [...RUNTIME_FIELDS, OPT_OUT_FIELD] : RUNTIME_FIELDS;
-  const seen = new Set(runtime.map(field => field.field));
-  return [...runtime, ...contactFields.filter(field => !seen.has(field.field))];
+  const seen = new Set(RUNTIME_FIELDS.map(field => field.field));
+  return [...RUNTIME_FIELDS, ...contactFields.filter(field => !seen.has(field.field))];
 }
 
 /**
