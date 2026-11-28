@@ -285,6 +285,47 @@ describe('CampaignService - opt-out topic', () => {
     await expect(SegmentService.delete(projectId, topic.id)).rejects.toMatchObject({code: 409});
   });
 
+  describe('archiving while it starts sending', () => {
+    it('does not archive one campaign whose send started after the read', async () => {
+      const campaign = await create({});
+      await prisma.campaign.update({where: {id: campaign.id}, data: {status: CampaignStatus.SENDING}});
+      // The read still sees the draft, as an archive crossing the start of the send would
+      vi.spyOn(appPrisma.campaign, 'findFirst').mockResolvedValueOnce({
+        id: campaign.id,
+        status: CampaignStatus.DRAFT,
+        archived: false,
+      } as never);
+
+      await expect(CampaignService.setArchived(projectId, campaign.id, true)).rejects.toMatchObject({
+        code: 400,
+        message: expect.stringContaining('This one is sending'),
+      });
+      expect((await prisma.campaign.findUniqueOrThrow({where: {id: campaign.id}})).archived).toBe(false);
+    });
+
+    it('archives none of a batch when one started sending after the check', async () => {
+      const draft = await create({name: 'Draft'});
+      const sending = await create({name: 'Sending'});
+      await prisma.campaign.update({where: {id: sending.id}, data: {status: CampaignStatus.SENDING}});
+      // The batch's check still sees both as drafts
+      const transaction = appPrisma.$transaction.bind(appPrisma) as (fn: (tx: unknown) => unknown) => unknown;
+      vi.spyOn(appPrisma, '$transaction').mockImplementationOnce(((fn: (tx: unknown) => unknown) =>
+        transaction(async tx => {
+          const client = tx as {campaign: {findMany: (args: unknown) => Promise<Array<{status: CampaignStatus}>>}};
+          const findMany = client.campaign.findMany.bind(client.campaign);
+          vi.spyOn(client.campaign, 'findMany').mockImplementationOnce(async (args: unknown) =>
+            (await findMany(args)).map(row => ({...row, status: CampaignStatus.DRAFT})),
+          );
+          return fn(tx);
+        })) as never);
+
+      await expect(
+        CampaignService.bulkUpdate(projectId, {ids: [draft.id, sending.id], archived: true}),
+      ).rejects.toMatchObject({code: 400, message: expect.stringContaining('started sending')});
+      expect(await prisma.campaign.count({where: {id: {in: [draft.id, sending.id]}, archived: true}})).toBe(0);
+    });
+  });
+
   describe('a topic whose segment is gone', () => {
     async function campaignWithDeletedTopic() {
       await contact('a@x.test');

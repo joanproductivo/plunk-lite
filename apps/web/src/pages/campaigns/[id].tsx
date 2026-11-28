@@ -41,7 +41,7 @@ import {DashboardLayout} from '../../components/DashboardLayout';
 import {EmailSettings} from '../../components/EmailSettings';
 import {EmailEditor} from '../../components/EmailEditor';
 import {useSegmentName} from '../../components/segments/SegmentPicker';
-import {OptOutTopicField, TOPIC_DROPPED} from '../../components/templates/OptOutTopicField';
+import {OptOutTopicField, templateTypeDescription, TOPIC_DROPPED} from '../../components/templates/OptOutTopicField';
 import {network} from '../../lib/network';
 import {formatFullDateTime, formatUTCDateTime, getUserTimezone, schedulePresets} from '../../lib/dateUtils';
 import {useChangeTracking} from '../../lib/hooks/useChangeTracking';
@@ -902,7 +902,12 @@ function CampaignDetails() {
                 <Card>
                   <CardHeader>
                     <CardTitle>Campaign type</CardTitle>
-                    <CardDescription>Choose how this campaign should be treated</CardDescription>
+                    {/* Plunk Lite: with a topic, Transactional no longer means "all contacts, no footer" */}
+                    <CardDescription>
+                      {optOutSegmentId
+                        ? templateTypeDescription(true, 'campaign')
+                        : 'Choose how this campaign should be treated'}
+                    </CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="flex flex-col gap-2">

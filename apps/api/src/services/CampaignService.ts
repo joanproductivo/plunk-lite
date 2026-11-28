@@ -397,11 +397,14 @@ export class CampaignService {
       throw new HttpException(404, 'Campaign not found');
     }
 
-    if (archived && !ARCHIVABLE_STATUSES.includes(campaign.status)) {
-      throw new HttpException(
+    const notArchivable = (status: CampaignStatus) =>
+      new HttpException(
         400,
-        `Can only archive draft, sent or cancelled campaigns. This one is ${campaign.status.toLowerCase()}.`,
+        `Can only archive draft, sent or cancelled campaigns. This one is ${status.toLowerCase()}.`,
       );
+
+    if (archived && !ARCHIVABLE_STATUSES.includes(campaign.status)) {
+      throw notArchivable(campaign.status);
     }
 
     // Already in the requested state: return it rather than burning a write. Makes the
@@ -410,10 +413,26 @@ export class CampaignService {
       return this.get(projectId, campaignId);
     }
 
-    return prisma.campaign.update({
-      where: {id: campaignId},
-      data: {archived},
+    if (!archived) {
+      return prisma.campaign.update({
+        where: {id: campaignId},
+        data: {archived},
+      });
+    }
+
+    // Plunk Lite: archived only while it is still archivable, in the same statement. A send or a
+    // schedule started since the read takes it out of the archive (startSending, send), and
+    // writing `archived` over it would hide it -- and free its opt-out topic's segment once sent
+    const {count} = await prisma.campaign.updateMany({
+      where: {id: campaignId, projectId, status: {in: [...ARCHIVABLE_STATUSES]}},
+      data: {archived: true},
     });
+    if (count === 0) {
+      const current = await prisma.campaign.findFirst({where: {id: campaignId, projectId}, select: {status: true}});
+      if (!current) throw new HttpException(404, 'Campaign not found');
+      throw notArchivable(current.status);
+    }
+    return this.get(projectId, campaignId);
   }
 
   /**
@@ -552,10 +571,19 @@ export class CampaignService {
           }
         }
 
+        // Plunk Lite: archiving filters by status in the write too, so a campaign whose send or
+        // schedule started since the check above is not archived over it; then nothing is
         const result = await tx.campaign.updateMany({
-          where: {id: {in: uniqueIds}, projectId},
+          where: {id: {in: uniqueIds}, projectId, ...(archived && {status: {in: [...ARCHIVABLE_STATUSES]}})},
           data: {archived},
         });
+
+        if (archived && result.count !== uniqueIds.length) {
+          throw new HttpException(
+            400,
+            'Can only archive draft, sent or cancelled campaigns: one of the selected campaigns started sending or was scheduled meanwhile.',
+          );
+        }
 
         return {updated: result.count};
       });

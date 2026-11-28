@@ -881,6 +881,19 @@ describe('campaign opt-out topic and plunk_update_campaign', () => {
     await close();
   });
 
+  it('changes the segment alone of a campaign already sent to a segment', async () => {
+    const calls = campaignApi({id: 'cmp-1', status: 'DRAFT', audienceType: 'SEGMENT', optOutSegmentId: null});
+    const {client, close} = await connect(baseConfig);
+
+    const result = await client.callTool({name: 'plunk_update_campaign', arguments: {id: 'cmp-1', segmentId: 'seg-2'}});
+
+    expect(result.isError).toBeFalsy();
+    expect(calls.filter(call => call.method === 'PUT')).toEqual([
+      {method: 'PUT', path: '/campaigns/cmp-1', body: {segmentId: 'seg-2'}},
+    ]);
+    await close();
+  });
+
   it('writes nothing to a campaign that is not a draft', async () => {
     for (const status of ['SCHEDULED', 'SENT']) {
       const calls = campaignApi({id: 'cmp-1', status, optOutSegmentId: null});
@@ -913,6 +926,15 @@ describe('campaign opt-out topic and plunk_update_campaign', () => {
       name: 'plunk_update_campaign',
       arguments: {id: 'cmp-1', audienceType: 'SEGMENT'},
     });
+    // The campaign read is a draft with no audienceType: a segment alone has no SEGMENT audience to go with
+    const looseSegment = await client.callTool({
+      name: 'plunk_update_campaign',
+      arguments: {id: 'cmp-1', segmentId: 'seg-1'},
+    });
+    const segmentOnAll = await client.callTool({
+      name: 'plunk_update_campaign',
+      arguments: {id: 'cmp-1', audienceType: 'ALL', segmentId: 'seg-1'},
+    });
     const invalid = await Promise.all(
       [
         {from: 'nope'},
@@ -929,8 +951,10 @@ describe('campaign opt-out topic and plunk_update_campaign', () => {
     expect(noId.isError).toBe(true);
     expect(segment.isError).toBe(true);
     expect(JSON.stringify(segment.content)).toContain('plunk_list_segments');
+    expect([looseSegment, segmentOnAll].every(result => result.isError)).toBe(true);
+    expect(JSON.stringify(looseSegment.content)).toContain('only applies to a SEGMENT audience');
     expect(invalid.every(result => result.isError)).toBe(true);
-    expect(calls.map(call => call.method)).toEqual(['GET']);
+    expect(calls.map(call => call.method)).toEqual(['GET', 'GET', 'GET']);
     await close();
   });
 });

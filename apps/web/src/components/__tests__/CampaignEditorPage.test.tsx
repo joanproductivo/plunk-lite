@@ -143,10 +143,12 @@ describe('CampaignDetailsPage opt-out topic', () => {
     await open('k1');
     await vi.waitFor(() => expect(text()).toContain('This campaign is not sent to its members'));
     expect(text()).toContain('EXCLUIR');
+    expect(text()).toContain('except the notices footer of their opt-out topic');
 
     await act(async () => typeButton('Marketing').click());
     expect(text()).not.toContain('Opt-out topic');
     expect(text()).toContain('will get this campaign once you save');
+    expect(text()).toContain('Choose how this campaign should be treated');
 
     await save();
     expect(network.fetch).toHaveBeenCalledWith(
@@ -165,7 +167,8 @@ describe('CampaignDetailsPage opt-out topic', () => {
     await save();
     const [, , body] = vi.mocked(network.fetch).mock.calls.find(([method]) => method === 'PUT')!;
     expect(body).toMatchObject({segmentId: 's2'});
-    expect(body).not.toHaveProperty('optOutSegmentId', expect.anything());
+    // Undefined, not null: null would remove the topic
+    expect((body as {optOutSegmentId?: unknown}).optOutSegmentId).toBeUndefined();
   });
 
   it('drops the topic when its segment becomes the audience', async () => {

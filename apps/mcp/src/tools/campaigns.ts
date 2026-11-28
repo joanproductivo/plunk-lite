@@ -366,7 +366,8 @@ export function registerCampaignTools(ctx: ToolContext, client: PlunkClient): vo
         '`plunk_cancel_campaign`; one that is sending or sent cannot be changed.',
         '',
         '**Audience:** `audienceType: SEGMENT` needs `segmentId`, and `FILTERED` needs `audienceCondition`, in',
-        'the same call. Moving to another audience type lets go of the old segment.',
+        'the same call; `segmentId` alone only works on a campaign already sent to a segment. Moving to another',
+        'audience type lets go of the old segment.',
         '',
         ...OPT_OUT_TOPIC,
         'Moving a campaign with an opt-out topic to a type other than TRANSACTIONAL needs',
@@ -440,6 +441,14 @@ export function registerCampaignTools(ctx: ToolContext, client: PlunkClient): vo
         }
         if (fields.optOutSegmentId !== undefined && !Object.hasOwn(current, 'optOutSegmentId')) {
           return errorResult('Nothing was changed: this installation does not support opt-out topics yet.');
+        }
+        // A segment on another audience would stay attached unused, and could not be deleted
+        const audienceType = fields.audienceType ?? current.audienceType;
+        if (fields.segmentId !== undefined && audienceType !== 'SEGMENT') {
+          return errorResult(
+            `Nothing was changed: segmentId only applies to a SEGMENT audience, and this one would be ` +
+              `${audienceType ?? 'another type'}. Pass audienceType: 'SEGMENT' with it to send the campaign to that segment.`,
+          );
         }
 
         const campaign = unwrap(
