@@ -74,6 +74,8 @@ export interface CampaignFactoryOptions {
   type?: TemplateType;
   audienceType?: CampaignAudienceType;
   excludedSegmentIds?: string[];
+  /** Plunk Lite: the opt-out topic */
+  optOutSegmentId?: string | null;
 }
 
 export interface WorkflowFactoryOptions {
@@ -237,6 +239,7 @@ export class TestFactories {
         type: options.type || TemplateType.MARKETING,
         audienceType: options.audienceType ?? CampaignAudienceType.ALL,
         excludedSegmentIds: options.excludedSegmentIds ?? [],
+        optOutSegmentId: options.optOutSegmentId ?? null,
       },
     });
   }

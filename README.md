@@ -28,7 +28,7 @@ Thanks to the Plunk team for the platform this is built on. If you find Plunk us
 - **Filters and conditions:** "is not member of" counts contacts without the field, "not equals" warns that it leaves them out, a filter value the query can't compare is refused with a 400 that names the filter instead of a server error, and workflow conditions compare dates as dates, the contact's creation date included
 - **Contacts:** CSV export, import with segments and signup dates, and no contact is subscribed unless the call asks for it: `/v1/track` and `POST /contacts` without `subscribed: true`, and inbound email always, create new contacts unsubscribed (a CSV import still subscribes them unless its columns say otherwise), and `contact.subscribed` fires for a contact created subscribed too
 - **Double opt-in:** per project, off by default
-- **Opt-out topics:** a transactional template can carry one-click unsubscribe into a static segment, with a notices footer by language, and is not sent to its members
+- **Opt-out topics:** a transactional template or campaign can carry one-click unsubscribe into a static segment, with a notices footer by language, and is not sent to its members
 - **Suppression you can see:** a "Suppressed" status with its reason, and removal that also clears the address from SES
 - **Sending safeguards:** a cut-off for repeated soft bounces, automatic clicks left out of the statistics, and a DMARC check for each domain
 - **Template data as text:** in email bodies, `{{ variables }}` are HTML-escaped (add `| raw` to print HTML you trust), data never runs as Liquid when an email is rendered again, and links in emails that are not custom HTML can only go to web, mail, phone or text-message addresses and anchors

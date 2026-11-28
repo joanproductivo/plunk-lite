@@ -233,7 +233,6 @@ export default function CreateTemplatePage() {
                     from={from}
                     replyTo={replyTo}
                     fillHeight
-                    optOutVariable
                   />
                 </CardContent>
               </Card>

@@ -1,14 +1,16 @@
-import {EmailSourceType, EmailStatus, SegmentType, TemplateType} from '@plunk/db';
+import {CampaignStatus, EmailSourceType, EmailStatus, SegmentType, TemplateType} from '@plunk/db';
 import type {SendEmailJobData} from '@plunk/types';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 
 import {factories, getPrismaClient} from '../../../../../test/helpers';
 import {API_URI, DASHBOARD_URI} from '../../app/constants';
 import {prisma as appPrisma} from '../../database/prisma';
+import {CampaignService} from '../../services/CampaignService';
 import {RECIPIENT_OVERRIDE_HEADER} from '../../services/EmailHeaderService';
 import {FailureAlertService} from '../../services/FailureAlertService';
 import {ProjectFooterService} from '../../services/ProjectFooterService';
 import {sendRawEmail} from '../../services/SESService';
+import {MISSING_CAMPAIGN_TOPIC, OPTED_OUT_EMAIL_ERROR} from '../../services/TemplateOptOut';
 import {type EmailJob, processEmailJob} from '../email-processor';
 
 vi.mock('../../services/SESService', async importOriginal => ({
@@ -208,5 +210,112 @@ describe('processEmailJob with an opt-out topic', () => {
     const [params] = vi.mocked(sendRawEmail).mock.calls[0]!;
     expect(params.headers!['List-Unsubscribe']).toContain('/unsubscribe/');
     expect(params.content.html).not.toContain("I don't want any more notices like this");
+  });
+});
+
+/** Plunk Lite: the same for an email of a TRANSACTIONAL campaign with an opt-out topic (`?c=`) */
+describe('processEmailJob with a campaign opt-out topic', () => {
+  const prisma = getPrismaClient();
+  let projectId: string;
+  let segmentId: string;
+  let campaignId: string;
+  let generation: number;
+
+  beforeEach(async () => {
+    const {project} = await factories.createUserWithProject({}, {name: 'Acme'});
+    projectId = project.id;
+    segmentId = (await factories.createSegment(projectId, {type: SegmentType.STATIC})).id;
+    const campaign = await factories.createCampaign({
+      projectId,
+      name: 'Workshop reminder',
+      type: TemplateType.TRANSACTIONAL,
+      status: CampaignStatus.SENDING,
+      optOutSegmentId: segmentId,
+    });
+    const sentAt = new Date();
+    await prisma.campaign.update({where: {id: campaign.id}, data: {sentAt, totalRecipients: 1}});
+    campaignId = campaign.id;
+    generation = sentAt.getTime();
+    ProjectFooterService.clearCache();
+    vi.mocked(sendRawEmail).mockReset();
+    vi.mocked(sendRawEmail).mockResolvedValue({messageId: 'ses-1'});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function campaignEmail(body = '<p>Your workshop starts soon</p>') {
+    const contact = await factories.createContact({projectId, subscribed: false});
+    const email = await prisma.email.create({
+      data: {
+        id: CampaignService.emailIdFor(campaignId, generation, contact.id),
+        projectId,
+        contactId: contact.id,
+        campaignId,
+        subject: 'Reminder',
+        body,
+        from: 'hello@plunk.test',
+        sourceType: EmailSourceType.TRANSACTIONAL,
+        status: EmailStatus.PENDING,
+      },
+    });
+    return {contact, email};
+  }
+
+  it("sends the one-click header to the campaign's opt-out link, the bulk headers and the notices footer", async () => {
+    const {contact, email} = await campaignEmail();
+
+    await processEmailJob(makeJob(email.id));
+
+    const [params] = vi.mocked(sendRawEmail).mock.calls[0]!;
+    expect(params.headers).toMatchObject({
+      'List-Unsubscribe': `<${API_URI}/opt-out/${contact.id}?c=${campaignId}>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+      'Precedence': 'bulk',
+      'Auto-Submitted': 'auto-generated',
+      'X-Auto-Response-Suppress': 'All',
+    });
+    expect(params.content.html).toContain(`href="${DASHBOARD_URI}/opt-out/${contact.id}?c=${campaignId}"`);
+    expect(params.content.html).toContain("I don't want any more notices like this");
+  });
+
+  it('leaves the footer out when the body already links the opt-out page', async () => {
+    const {email} = await campaignEmail();
+    await prisma.email.update({
+      where: {id: email.id},
+      data: {body: `<p><a href="${DASHBOARD_URI}/opt-out/${email.contactId}?c=${campaignId}">Stop</a></p>`},
+    });
+
+    await processEmailJob(makeJob(email.id));
+
+    const [params] = vi.mocked(sendRawEmail).mock.calls[0]!;
+    expect(params.content.html).not.toContain("I don't want any more notices like this");
+  });
+
+  it('skips a contact who opted out after the batch, without sending, and closes the campaign', async () => {
+    const {contact, email} = await campaignEmail();
+    await prisma.segmentMembership.create({data: {segmentId, contactId: contact.id}});
+    const finalize = vi.spyOn(CampaignService, 'finalizeIfDone').mockResolvedValue();
+
+    await processEmailJob(makeJob(email.id));
+
+    const row = await prisma.email.findUnique({where: {id: email.id}});
+    expect(row).toMatchObject({status: EmailStatus.FAILED, error: OPTED_OUT_EMAIL_ERROR});
+    expect(sendRawEmail).not.toHaveBeenCalled();
+    expect(finalize).toHaveBeenCalledWith(campaignId);
+  });
+
+  it('fails with an alert on the campaign, sending nothing, while the segment of the topic is gone', async () => {
+    const {email} = await campaignEmail();
+    await prisma.segment.delete({where: {id: segmentId}});
+    const alert = vi.spyOn(FailureAlertService, 'recordCampaignJob').mockResolvedValue();
+
+    await processEmailJob(makeJob(email.id));
+
+    const row = await prisma.email.findUnique({where: {id: email.id}});
+    expect(row).toMatchObject({status: EmailStatus.FAILED, error: MISSING_CAMPAIGN_TOPIC});
+    expect(sendRawEmail).not.toHaveBeenCalled();
+    expect(alert).toHaveBeenCalledWith(campaignId, MISSING_CAMPAIGN_TOPIC);
   });
 });

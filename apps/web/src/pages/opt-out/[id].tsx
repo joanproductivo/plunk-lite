@@ -17,8 +17,9 @@ import {
 import {network} from '../../lib/network';
 
 /**
- * Plunk Lite: the page an opt-out link opens, `/opt-out/<contactId>?t=<templateId>`: stop getting
- * the notices of that template's opt-out topic. Other transactional emails still arrive.
+ * Plunk Lite: the page an opt-out link opens, `/opt-out/<contactId>?t=<templateId>` (a template) or
+ * `/opt-out/<contactId>?c=<campaignId>` (a campaign): stop getting the notices of that template's or
+ * campaign's opt-out topic. Other transactional emails still arrive. A link with both is unavailable.
  *
  * Loading the page does nothing; the contact opts out by pressing the button. Mail scanners open
  * every link in an email, and would otherwise opt out people who never asked.
@@ -32,7 +33,7 @@ export default function OptOutPage() {
   const [result, setResult] = useState<'opted-out' | 'unavailable' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // The query is empty on the first render of a static page: wait for it before reading `t`
+  // The query is empty on the first render of a static page: wait for it before reading `t` or `c`
   if (!router.isReady || state.status === 'loading') {
     return (
       <RecipientShell loading>
@@ -50,7 +51,16 @@ export default function OptOutPage() {
   }
 
   const {contact, translator} = state;
-  const templateId = typeof router.query.t === 'string' ? router.query.t : '';
+  // Where the link came from: only `t` or only `c`, never one picked out of two
+  const {t, c} = router.query;
+  const source =
+    t !== undefined && c !== undefined
+      ? ''
+      : typeof t === 'string' && t
+        ? `t=${encodeURIComponent(t)}`
+        : typeof c === 'string' && c
+          ? `c=${encodeURIComponent(c)}`
+          : '';
   const values = {projectName: contact.projectName, email: contact.email};
 
   if (result === 'opted-out') {
@@ -63,7 +73,7 @@ export default function OptOutPage() {
     );
   }
 
-  if (result === 'unavailable' || !templateId) {
+  if (result === 'unavailable' || !source) {
     return (
       <RecipientShell>
         <NoticeState title={translator.t('pages.optOut.unavailableTitle')}>
@@ -79,7 +89,7 @@ export default function OptOutPage() {
       setActionError(null);
       const {status} = await network.fetch<{status: 'opted-out' | 'unavailable'}>(
         'POST',
-        `/opt-out/${encodeURIComponent(contact.id)}?t=${encodeURIComponent(templateId)}`,
+        `/opt-out/${encodeURIComponent(contact.id)}?${source}`,
       );
       setResult(status);
     } catch {

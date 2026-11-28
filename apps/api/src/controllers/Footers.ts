@@ -11,7 +11,7 @@ import {CatchAsync} from '../utils/asyncHandler.js';
 /**
  * A project's own footers (Plunk Lite), which only the dashboard reads and its admins change: the
  * unsubscribe footers of marketing emails (`/footers`) and the notices footers of transactional
- * templates with an opt-out topic (`/opt-out-footers`). Each kind has its own endpoint, with the
+ * templates and campaigns with an opt-out topic (`/opt-out-footers`). Each kind has its own endpoint, with the
  * same map of languages, so a dashboard or image that only knows `/footers` is unaffected.
  */
 @Controller('projects')

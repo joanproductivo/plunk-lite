@@ -335,6 +335,12 @@ model Campaign {
   // without a foreign key: a deleted one stops the send until it is removed
   excludedSegmentIds String[] @default([])
 
+  // Plunk Lite: the static segment a contact joins to stop getting this TRANSACTIONAL campaign's
+  // kind of email (its "opt-out topic", as on templates). An id without a foreign key: deleting the
+  // segment is refused while a campaign uses it (a draft, scheduled or sending, or sent or cancelled
+  // and not archived), and a missing one stops the send
+  optOutSegmentId String?
+
   // Scheduling
   scheduledFor DateTime?
 

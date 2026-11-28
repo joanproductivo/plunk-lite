@@ -26,7 +26,7 @@ export function detectUnsubscribeSignal(body: string): boolean {
   if (usesVariable(body, 'unsubscribeUrl', 'manageUrl')) return true;
 
   // Plunk Lite: {{optOutUrl}} is no unsubscribe link here: it is empty outside a transactional
-  // template with an opt-out topic, and its name would pass for one below
+  // template or campaign with an opt-out topic, and its name would pass for one below
   const markup = body.replace(/\{\{-?\s*optOutUrl\b[^}]*\}\}/g, '');
 
   // href containing unsubscribe keywords

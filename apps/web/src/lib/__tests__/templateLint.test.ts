@@ -147,3 +147,10 @@ describe('lintTemplateFields', () => {
     expect(new Set(warnings.map(w => w.field)).size).toBe(warnings.length);
   });
 });
+
+// Plunk Lite: the opt-out link of a template's or campaign's topic is always in scope
+describe('lintTemplateFields and optOutUrl', () => {
+  it('does not flag {{optOutUrl}}, in a template or a campaign alike', () => {
+    expect(lintTemplateFields('<a href="{{optOutUrl}}">Stop</a>', FIELDS)).toEqual([]);
+  });
+});

@@ -272,7 +272,7 @@ The `/v1/*` endpoints are designed for use from your applications and accept sim
 | POST   | `/segments`                   | Create a segment. `type: "DYNAMIC"` requires `condition`; `type: "STATIC"` rejects it.       |
 | GET    | `/segments/:id`               | Get a segment, including cached `memberCount`.                                               |
 | PATCH  | `/segments/:id`               | Update name, description, condition (dynamic only), or `trackMembership`.                    |
-| DELETE | `/segments/:id`               | Delete a segment. Returns 409 if used by an active campaign, by a workflow's Update contact or Condition step, or as a template's opt-out topic (Plunk Lite). |
+| DELETE | `/segments/:id`               | Delete a segment. Returns 409 if used by an active campaign, by a workflow's Update contact or Condition step, or as the opt-out topic of a template, or of a transactional campaign that is a draft (archived or not), scheduled or sending, or sent or cancelled and not archived (Plunk Lite). |
 | GET    | `/segments/:id/contacts`      | Page-based list of segment members. `page`, `pageSize` (max 100). Live for dynamic segments. |
 | POST   | `/segments/:id/members`       | Add emails to a **static** segment (max 500). Body: `{ emails, createMissing? }`; the contacts created are unsubscribed. See [Segments](/concepts/segments). |
 | DELETE | `/segments/:id/members`       | Remove emails from a **static** segment (max 500). Body: `{ emails }`.                         |

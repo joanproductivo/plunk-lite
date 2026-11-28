@@ -5,33 +5,45 @@ import {prisma} from '../database/prisma.js';
 import {ErrorCode, HttpException} from '../exceptions/index.js';
 
 /**
- * Plunk Lite: opt-out topics, the sending side. A TRANSACTIONAL template can name a static segment
- * (its "opt-out topic"): its emails carry a one-click `List-Unsubscribe` that puts the contact in
- * that segment, and are not sent to its members. Other transactional emails still reach them.
+ * Plunk Lite: opt-out topics, the sending side. A TRANSACTIONAL template or campaign can name a
+ * static segment (its "opt-out topic"): its emails carry a one-click `List-Unsubscribe` that puts the
+ * contact in that segment, and are not sent to its members. Other transactional emails still reach
+ * them. The link names where the email came from, `?t=<templateId>` or `?c=<campaignId>`, and that
+ * template or campaign says the topic when the contact opts out.
  *
- * Kept free of service imports: EmailService, the email processor, /v1/send and workflows use it, and
- * SegmentService would close an import cycle through ContactService and OptInService. Managing
- * topics lives in TemplateOptOutAdmin.
+ * Kept free of service imports: EmailService, CampaignService, the email processor, /v1/send and
+ * workflows use it, and SegmentService would close an import cycle through ContactService and
+ * OptInService. Managing topics lives in TemplateOptOutAdmin.
  */
 
-/** The fields of a template that decide its opt-out topic */
+/** The fields of a template that decide its opt-out topic (optOutTopic takes a campaign's type and topic too) */
 export interface OptOutTemplate {
   id: string;
   type: TemplateType;
   optOutSegmentId: string | null;
 }
 
-/** The error of an email skipped because its contact opted out of its template's topic */
+/** The error of an email skipped because its contact opted out of its template's or campaign's topic */
 export const OPTED_OUT_EMAIL_ERROR = 'Contact opted out of this kind of email';
 
-/** The error of an email not sent because its template's topic is gone, naming the template to fix */
+/** The error of an email not sent because its template's topic is gone, naming the template to fix (campaigns: MISSING_CAMPAIGN_TOPIC) */
 export function missingTopicError(templateName: string): string {
   return `The opt-out segment of template "${templateName}" no longer exists, so it was not sent. Pick another segment in the template, or remove it`;
 }
 
 /**
- * The segment an email of `template` must skip and offers to join: its topic, when the template is
- * TRANSACTIONAL and the email goes to its contact. A workflow's custom recipient is someone else, so
+ * The error of a campaign whose topic is gone: the 400 of counting or sending it, and the failure of
+ * the emails still queued. Nothing goes until it is fixed, rather than reaching those who opted out.
+ */
+export const MISSING_CAMPAIGN_TOPIC =
+  'The opt-out segment of this campaign no longer exists. Pick another one in its settings, or remove it; a scheduled campaign has to be cancelled back to a draft first.';
+
+/** Where an opt-out link came from: the template or the campaign whose topic it joins */
+export type OptOutSource = {templateId: string} | {campaignId: string};
+
+/**
+ * The segment an email of `template` (or campaign) must skip and offers to join: its topic, when it
+ * is TRANSACTIONAL and the email goes to its contact. A workflow's custom recipient is someone else, so
  * the topic does not apply to them.
  */
 export function optOutTopic(
@@ -42,25 +54,29 @@ export function optOutTopic(
   return template.optOutSegmentId || null;
 }
 
-/** The opt-out link of a contact for a template, on `base` (the API for headers, the dashboard for bodies) */
-export function optOutLink(base: string, contactId: string, templateId: string): string {
-  return `${base}/opt-out/${encodeURIComponent(contactId)}?t=${encodeURIComponent(templateId)}`;
+/** The opt-out link of a contact for a template or campaign, on `base` (the API for headers, the dashboard for bodies) */
+export function optOutLink(base: string, contactId: string, source: OptOutSource): string {
+  const query =
+    'campaignId' in source
+      ? `c=${encodeURIComponent(source.campaignId)}`
+      : `t=${encodeURIComponent(source.templateId)}`;
+  return `${base}/opt-out/${encodeURIComponent(contactId)}?${query}`;
 }
 
-/** The `optOutUrl` variable: the dashboard's opt-out page, or empty when the email has no topic */
+/** A template email's `optOutUrl` variable: the dashboard's opt-out page, or empty when it has no topic (campaigns: processBatch) */
 export function optOutUrl(
   contactId: string,
   template: OptOutTemplate | null | undefined,
   hasRecipientOverride: boolean,
 ): string {
   return template && optOutTopic(template, hasRecipientOverride)
-    ? optOutLink(DASHBOARD_URI, contactId, template.id)
+    ? optOutLink(DASHBOARD_URI, contactId, {templateId: template.id})
     : '';
 }
 
 /**
  * Whether the topic `segmentId` is gone: no static segment of the project has that id. The template
- * keeps it without a foreign key, and the API refuses to delete a segment a template uses, so it
+ * (or campaign) keeps it without a foreign key, and the API refuses to delete a segment one uses, so it
  * goes only by SQL, from an earlier image, or deleted while it was being chosen. Its emails then
  * reach no one, with an alert, rather than reaching those who opted out.
  */
@@ -106,8 +122,17 @@ export function missingTopicHttpError(templateName: string): HttpException {
   return new HttpException(422, `${missingTopicError(templateName)}.`, ErrorCode.OPT_OUT_SEGMENT_MISSING);
 }
 
-/** The template id an opt-out link carries in `t`: a non-empty string, or undefined (absent, or repeated) */
-export function readTemplateParam(query: Record<string, unknown>): string | undefined {
-  const value = query.t;
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
+/**
+ * Where an opt-out link came from: `{templateId}` when it carries only `t`, `{campaignId}` when only
+ * `c`, and undefined when it carries neither, both, or one that is not a non-empty string (repeated).
+ * Never one picked out of two.
+ */
+export function readOptOutSource(query: Record<string, unknown>): OptOutSource | undefined {
+  const read = (value: unknown) => (typeof value === 'string' && value.length > 0 ? value : undefined);
+  const templateId = read(query.t);
+  const campaignId = read(query.c);
+  if (query.t !== undefined && query.c !== undefined) return undefined;
+  if (templateId) return {templateId};
+  if (campaignId) return {campaignId};
+  return undefined;
 }

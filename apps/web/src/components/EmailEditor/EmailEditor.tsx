@@ -6,7 +6,7 @@ import {TextStyle} from '@tiptap/extension-text-style';
 import {Link} from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
 import {Variable} from './VariableExtension';
-import {setAvailableVariables, setOptOutVariable, VariableMention} from './VariableMention';
+import {setAvailableVariables, VariableMention} from './VariableMention';
 import {LogicMention} from './LogicMention';
 import {subscribeSuggestionOpen} from './suggestionPopup';
 import {Toolbar} from './Toolbar';
@@ -79,8 +79,6 @@ interface EmailEditorProps {
   segmentId?: string;
   // On wide screens, fill the parent's height instead of stopping at 600px
   fillHeight?: boolean;
-  // Plunk Lite: offers {{optOutUrl}}, which only a template's opt-out topic fills (never a campaign)
-  optOutVariable?: boolean;
 }
 
 const commonVariables = [
@@ -89,10 +87,9 @@ const commonVariables = [
   {name: 'unsubscribeUrl', description: 'Unsubscribe link'},
   {name: 'subscribeUrl', description: 'Subscribe link'},
   {name: 'manageUrl', description: 'Manage link'},
+  // Plunk Lite: filled by the opt-out topic of a transactional template or campaign; empty without one
+  {name: 'optOutUrl', description: 'Opt-out link'},
 ];
-
-/** Plunk Lite: offered in templates only, where an opt-out topic gives it a value */
-const optOutVariableEntry = {name: 'optOutUrl', description: 'Opt-out link'};
 
 export function EmailEditor({
   value,
@@ -103,9 +100,7 @@ export function EmailEditor({
   replyTo,
   segmentId,
   fillHeight,
-  optOutVariable = false,
 }: EmailEditorProps) {
-  const variables = optOutVariable ? [...commonVariables, optOutVariableEntry] : commonVariables;
   // The preview text and the brand travel with the body; the editors below only ever see the body
   const {preheader, brand, body} = splitEmailMarkers(value);
   const {activeProject} = useActiveProject();
@@ -151,11 +146,7 @@ export function EmailEditor({
   // Fields that parse but resolve to nothing: a typo, or a field so few contacts carry
   // that the template is blank for most of the audience. Only shown once the template
   // parses — a broken template makes every reference in it suspect.
-  const fieldWarnings = useTemplateFieldWarnings(htmlContent, fieldDetails, optOutVariable);
-
-  useEffect(() => {
-    setOptOutVariable(optOutVariable);
-  }, [optOutVariable]);
+  const fieldWarnings = useTemplateFieldWarnings(htmlContent, fieldDetails);
 
   // A trigger being completed (`{%ema` with its menu open) is not valid Liquid yet.
   // Reporting that as an error would contradict the menu offering to finish it.
@@ -344,8 +335,8 @@ export function EmailEditor({
       unsubscribeUrl: `${window.location.origin}/unsubscribe/${previewContact.id}`,
       subscribeUrl: `${window.location.origin}/subscribe/${previewContact.id}`,
       manageUrl: `${window.location.origin}/manage/${previewContact.id}`,
-      // Plunk Lite: its shape only; the template it opts out of is added when sending
-      ...(optOutVariable ? {optOutUrl: `${window.location.origin}/opt-out/${previewContact.id}`} : {}),
+      // Plunk Lite: its shape only; the template or campaign it opts out of is added when sending
+      optOutUrl: `${window.location.origin}/opt-out/${previewContact.id}`,
       data: previewContact.data || {},
       ...((previewContact.data as Record<string, unknown> | null) || {}),
     };
@@ -714,7 +705,7 @@ export function EmailEditor({
             <div>
               <Label className="text-sm font-medium mb-2 block">Common variables</Label>
               <div className="grid grid-cols-2 gap-2">
-                {variables.map(v => (
+                {commonVariables.map(v => (
                   <Button
                     key={v.name}
                     type="button"
@@ -734,7 +725,7 @@ export function EmailEditor({
                 <Label className="text-sm font-medium mb-2 block">Contact fields</Label>
                 <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
                   {availableFields
-                    .filter(field => !variables.some(v => v.name === field))
+                    .filter(field => !commonVariables.some(v => v.name === field))
                     .map(field => (
                       <Button
                         key={field}

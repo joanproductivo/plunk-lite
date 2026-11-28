@@ -85,3 +85,59 @@ describe('excludedSegmentIds on the campaign routes', () => {
     expect((await post({...campaign, excludedSegmentIds: [theirs.id]})).status).toBe(400);
   });
 });
+
+/** Plunk Lite: the opt-out topic of a TRANSACTIONAL campaign, as POST and PUT /campaigns take it */
+describe('optOutSegmentId on the campaign routes', () => {
+  const prisma = getPrismaClient();
+  const app = createApp();
+  let project: {id: string; secret: string};
+  let segmentId: string;
+  const campaign = {
+    name: 'Notice',
+    subject: 'Hi',
+    body: '<p>Hi</p>',
+    from: 'news@example.com',
+    type: 'TRANSACTIONAL',
+    audienceType: CampaignAudienceType.ALL,
+  };
+
+  beforeEach(async () => {
+    const created = await factories.createUserWithProject();
+    project = created.project;
+    await prisma.user.update({where: {id: created.user.id}, data: {emailVerified: true}});
+    await factories.createDomain({projectId: project.id, domain: 'example.com'});
+    segmentId = (await factories.createSegment(project.id, {type: SegmentType.STATIC})).id;
+  });
+
+  const post = (body: object) =>
+    request(app).post('/campaigns').set('Authorization', `Bearer ${project.secret}`).send(body);
+  const put = (id: string, body: object) =>
+    request(app).put(`/campaigns/${id}`).set('Authorization', `Bearer ${project.secret}`).send(body);
+
+  it('creates and updates a TRANSACTIONAL campaign with it, and removes it with null', async () => {
+    const created = await post({...campaign, optOutSegmentId: segmentId});
+    expect(created.status).toBe(201);
+    expect(created.body.data.optOutSegmentId).toBe(segmentId);
+
+    const removed = await put(created.body.data.id, {optOutSegmentId: null});
+    expect(removed.status).toBe(200);
+    expect(removed.body.data.optOutSegmentId).toBeNull();
+  });
+
+  it('refuses a value that is not a segment id, on POST (the schema) and on PUT', async () => {
+    expect((await post({...campaign, optOutSegmentId: 123})).status).toBe(422);
+    const draft = await factories.createCampaign({projectId: project.id, type: 'TRANSACTIONAL'});
+    expect((await put(draft.id, {optOutSegmentId: 123})).status).toBe(400);
+  });
+
+  it('refuses it on a MARKETING campaign, and a change of type that keeps it', async () => {
+    expect((await post({...campaign, type: 'MARKETING', optOutSegmentId: segmentId})).status).toBe(400);
+    const draft = await factories.createCampaign({
+      projectId: project.id,
+      type: 'TRANSACTIONAL',
+      optOutSegmentId: segmentId,
+    });
+    expect((await put(draft.id, {type: 'MARKETING'})).status).toBe(400);
+    expect((await put(draft.id, {type: 'MARKETING', optOutSegmentId: null})).status).toBe(200);
+  });
+});

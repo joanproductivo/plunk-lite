@@ -124,4 +124,37 @@ describe('OptOut controller', () => {
 
     expect(captured).toMatchObject({status: 302, redirectedTo: `${DASHBOARD_URI}/opt-out/c%201?t=${templateId}`});
   });
+
+  it('takes a campaign with `c`, on POST and GET, and neither with `t` and `c` together', async () => {
+    const contact = await factories.createContact({projectId});
+    const campaignId = (
+      await factories.createCampaign({projectId, type: TemplateType.TRANSACTIONAL, optOutSegmentId: segmentId})
+    ).id;
+
+    expect(await post(contact.id, {t: templateId, c: campaignId})).toMatchObject({
+      status: 200,
+      body: {status: 'unavailable'},
+    });
+    expect(await prisma.segmentMembership.count({where: {segmentId}})).toBe(0);
+
+    expect(await post(contact.id, {c: campaignId})).toMatchObject({status: 200, body: {status: 'opted-out'}});
+    expect(await prisma.segmentMembership.count({where: {segmentId, contactId: contact.id, exitedAt: null}})).toBe(1);
+
+    const {res, captured, sent} = mockResponse();
+    controller.redirect({params: {id: contact.id}, query: {c: campaignId}} as unknown as Request, res, next);
+    await sent;
+    expect(captured).toMatchObject({
+      status: 302,
+      redirectedTo: `${DASHBOARD_URI}/opt-out/${contact.id}?c=${campaignId}`,
+    });
+
+    const both = mockResponse();
+    controller.redirect(
+      {params: {id: contact.id}, query: {c: campaignId, t: templateId}} as unknown as Request,
+      both.res,
+      next,
+    );
+    await both.sent;
+    expect(both.captured.redirectedTo).toBe(`${DASHBOARD_URI}/opt-out/${contact.id}`);
+  });
 });

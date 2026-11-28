@@ -137,7 +137,7 @@ describe('FooterSettings', () => {
     expect(link().disabled).toBe(true);
   });
 
-  // Plunk Lite: the notices footer of transactional templates with an opt-out topic
+  // Plunk Lite: the notices footer of transactional templates and campaigns with an opt-out topic
   it("edits the notices footer on its own endpoint, from Plunk's notices text", async () => {
     vi.mocked(network.fetch).mockImplementationOnce(async (_method, _url, body) => body);
     await act(async () => {

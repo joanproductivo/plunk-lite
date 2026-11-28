@@ -26,6 +26,8 @@ export interface CreateCampaignData {
   segmentId?: string;
   /** Plunk Lite: segments whose contacts never get the campaign */
   excludedSegmentIds?: string[];
+  /** Plunk Lite: the static segment a contact joins to stop getting this TRANSACTIONAL campaign (its opt-out topic) */
+  optOutSegmentId?: string | null;
 }
 
 /**
@@ -45,6 +47,8 @@ export interface UpdateCampaignData {
   segmentId?: string;
   /** Plunk Lite: segments whose contacts never get the campaign */
   excludedSegmentIds?: string[];
+  /** Plunk Lite: the static segment a contact joins to stop getting this TRANSACTIONAL campaign (its opt-out topic) */
+  optOutSegmentId?: string | null;
 }
 
 /**

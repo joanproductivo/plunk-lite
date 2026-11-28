@@ -40,6 +40,8 @@ import {ExcludedSegmentsField, ExcludedSegmentsSuffix} from '../../components/ca
 import {DashboardLayout} from '../../components/DashboardLayout';
 import {EmailSettings} from '../../components/EmailSettings';
 import {EmailEditor} from '../../components/EmailEditor';
+import {useSegmentName} from '../../components/segments/SegmentPicker';
+import {OptOutTopicField, templateTypeDescription, TOPIC_DROPPED} from '../../components/templates/OptOutTopicField';
 import {network} from '../../lib/network';
 import {formatFullDateTime, formatUTCDateTime, getUserTimezone, schedulePresets} from '../../lib/dateUtils';
 import {useChangeTracking} from '../../lib/hooks/useChangeTracking';
@@ -179,6 +181,11 @@ function UnsubscribedNotice({campaignId}: {campaignId: string}) {
   );
 }
 
+/** Plunk Lite: the segments a campaign leaves out, its opt-out topic among them, each once */
+function withTopic(excludedSegmentIds: string[], topic: string | null): string[] {
+  return topic && !excludedSegmentIds.includes(topic) ? [...excludedSegmentIds, topic] : excludedSegmentIds;
+}
+
 // Going from one campaign to another keeps this page mounted: the key starts the form again, so
 // saving can't write the first campaign's fields over the second.
 export default function CampaignDetailsPage() {
@@ -248,6 +255,15 @@ function CampaignDetails() {
   );
 
   const [editedCampaign, setEditedCampaign] = useState<Partial<Campaign>>({});
+  const segmentNameOf = useSegmentName();
+  // Plunk Lite: only a TRANSACTIONAL campaign keeps its opt-out topic; any other type saves without it.
+  // A topic saved on another type does nothing, so opening that campaign is not a change
+  const optOutSegmentId =
+    (editedCampaign.type ?? campaign?.data.type) === TemplateType.TRANSACTIONAL
+      ? (editedCampaign.optOutSegmentId ?? null)
+      : null;
+  const savedOptOutSegmentId =
+    campaign?.data.type === TemplateType.TRANSACTIONAL ? (campaign.data.optOutSegmentId ?? null) : null;
   const [scheduledDateTime, setScheduledDateTime] = useState('');
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [testEmailAddress, setTestEmailAddress] = useState('');
@@ -425,6 +441,8 @@ function CampaignDetails() {
         )
           ? undefined
           : editedCampaign.excludedSegmentIds,
+        // Plunk Lite: likewise only when changed, so a topic whose segment is gone does not block saving
+        optOutSegmentId: optOutSegmentId === (campaign?.data.optOutSegmentId ?? null) ? undefined : optOutSegmentId,
       });
       // Silent save - no toast notification
       setHasChanges(false);
@@ -443,6 +461,7 @@ function CampaignDetails() {
           audienceType: updated.data.audienceType,
           segmentId: updated.data.segmentId || undefined,
           excludedSegmentIds: updated.data.excludedSegmentIds,
+          optOutSegmentId: updated.data.optOutSegmentId ?? null,
         });
       }
     } catch (error) {
@@ -467,6 +486,7 @@ function CampaignDetails() {
         audienceType: campaign.data.audienceType,
         segmentId: campaign.data.segmentId || undefined,
         excludedSegmentIds: campaign.data.excludedSegmentIds,
+        optOutSegmentId: campaign.data.optOutSegmentId ?? null,
       });
       // Reset hasChanges when loading fresh data
       setHasChanges(false);
@@ -488,10 +508,11 @@ function CampaignDetails() {
       editedCampaign.type !== campaign.data.type ||
       editedCampaign.audienceType !== campaign.data.audienceType ||
       (editedCampaign.segmentId || null) !== (campaign.data.segmentId || null) ||
-      !sameSegmentIds(editedCampaign.excludedSegmentIds ?? [], campaign.data.excludedSegmentIds);
+      !sameSegmentIds(editedCampaign.excludedSegmentIds ?? [], campaign.data.excludedSegmentIds) ||
+      optOutSegmentId !== savedOptOutSegmentId;
 
     setHasChanges(changed);
-  }, [editedCampaign, campaign]);
+  }, [editedCampaign, campaign, optOutSegmentId, savedOptOutSegmentId]);
 
   // Warn before leaving page with unsaved changes (only in edit mode)
   useChangeTracking(hasChanges, isEditMode);
@@ -731,14 +752,17 @@ function CampaignDetails() {
                         onValueChange={(value: CampaignAudienceType) => {
                           const segmentId =
                             value === CampaignAudienceType.SEGMENT ? editedCampaign.segmentId : undefined;
+                          const dropsTopic = Boolean(segmentId) && editedCampaign.optOutSegmentId === segmentId;
+                          if (dropsTopic) toast.info(TOPIC_DROPPED);
                           setEditedCampaign({
                             ...editedCampaign,
                             audienceType: value,
                             segmentId,
-                            // Plunk Lite: back on a segment, that segment cannot also be left out
+                            // Plunk Lite: back on a segment, that segment cannot also be left out, nor be the topic
                             excludedSegmentIds: (editedCampaign.excludedSegmentIds ?? c.excludedSegmentIds).filter(
                               id => id !== segmentId,
                             ),
+                            ...(dropsTopic && {optOutSegmentId: null}),
                           });
                         }}
                       >
@@ -768,13 +792,16 @@ function CampaignDetails() {
                         <Select
                           value={editedCampaign.segmentId ?? c.segmentId ?? undefined}
                           onValueChange={(value: string) => {
+                            const dropsTopic = editedCampaign.optOutSegmentId === value;
+                            if (dropsTopic) toast.info(TOPIC_DROPPED);
                             setEditedCampaign({
                               ...editedCampaign,
                               segmentId: value,
-                              // Plunk Lite: the segment it is sent to cannot also be left out
+                              // Plunk Lite: the segment it is sent to cannot also be left out, nor be the topic
                               excludedSegmentIds: (editedCampaign.excludedSegmentIds ?? c.excludedSegmentIds).filter(
                                 id => id !== value,
                               ),
+                              ...(dropsTopic && {optOutSegmentId: null}),
                             });
                           }}
                           disabled={!segments || segments.length === 0}
@@ -875,7 +902,12 @@ function CampaignDetails() {
                 <Card>
                   <CardHeader>
                     <CardTitle>Campaign type</CardTitle>
-                    <CardDescription>Choose how this campaign should be treated</CardDescription>
+                    {/* Plunk Lite: with a topic, Transactional no longer means "all contacts, no footer" */}
+                    <CardDescription>
+                      {optOutSegmentId
+                        ? templateTypeDescription(true, 'campaign')
+                        : 'Choose how this campaign should be treated'}
+                    </CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="flex flex-col gap-2">
@@ -899,6 +931,20 @@ function CampaignDetails() {
                         </button>
                       ))}
                     </div>
+                    <OptOutTopicField
+                      owner="campaign"
+                      type={editedCampaign.type ?? c.type}
+                      value={optOutSegmentId}
+                      saved={savedOptOutSegmentId}
+                      body={editedCampaign.body ?? c.body}
+                      onChange={topic => setEditedCampaign({...editedCampaign, optOutSegmentId: topic})}
+                      exclude={
+                        (editedCampaign.audienceType ?? c.audienceType) === CampaignAudienceType.SEGMENT &&
+                        (editedCampaign.segmentId ?? c.segmentId)
+                          ? [(editedCampaign.segmentId ?? c.segmentId)!]
+                          : []
+                      }
+                    />
                     {(editedCampaign.type ?? c.type) === TemplateType.HEADLESS &&
                       !detectUnsubscribeSignal(editedCampaign.body ?? c.body) && (
                       <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 overflow-hidden">
@@ -1149,7 +1195,12 @@ function CampaignDetails() {
                           {(editedCampaign.audienceType ?? c.audienceType) === CampaignAudienceType.SEGMENT &&
                             (segments?.find(s => s.id === (editedCampaign.segmentId ?? c.segmentId))?.name ?? 'the selected segment')}
                           {(editedCampaign.audienceType ?? c.audienceType) === CampaignAudienceType.FILTERED && 'filtered contacts'}
-                          <ExcludedSegmentsSuffix ids={editedCampaign.excludedSegmentIds ?? c.excludedSegmentIds} />
+                          <ExcludedSegmentsSuffix
+                            ids={withTopic(
+                              editedCampaign.excludedSegmentIds ?? c.excludedSegmentIds,
+                              savedOptOutSegmentId,
+                            )}
+                          />
                         </p>
                       </div>
                     )}
@@ -1210,7 +1261,9 @@ function CampaignDetails() {
                   {(editedCampaign.audienceType ?? c.audienceType) === CampaignAudienceType.SEGMENT &&
                     (segments?.find(s => s.id === (editedCampaign.segmentId ?? c.segmentId))?.name ?? 'Selected segment')}
                   {(editedCampaign.audienceType ?? c.audienceType) === CampaignAudienceType.FILTERED && 'Filtered contacts'}
-                  <ExcludedSegmentsSuffix ids={editedCampaign.excludedSegmentIds ?? c.excludedSegmentIds} />
+                  <ExcludedSegmentsSuffix
+                    ids={withTopic(editedCampaign.excludedSegmentIds ?? c.excludedSegmentIds, savedOptOutSegmentId)}
+                  />
                 </div>
               </div>
 
@@ -1289,6 +1342,9 @@ function CampaignDetails() {
                 )}
               </div>
               {c.description && <p className="text-neutral-500 text-sm sm:text-base">{c.description}</p>}
+              {savedOptOutSegmentId && (
+                <p className="text-neutral-500 text-sm">Opt-out topic: {segmentNameOf(savedOptOutSegmentId)}</p>
+              )}
             </div>
           </div>
 

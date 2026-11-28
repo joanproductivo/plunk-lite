@@ -22,6 +22,7 @@ import {ExcludedSegmentsField} from '../../components/campaigns/ExcludedSegments
 import {DashboardLayout} from '../../components/DashboardLayout';
 import {EmailSettings} from '../../components/EmailSettings';
 import {EmailEditor} from '../../components/EmailEditor';
+import {OptOutTopicField, templateTypeDescription, TOPIC_DROPPED} from '../../components/templates/OptOutTopicField';
 import {network} from '../../lib/network';
 import {EmailFormValidator} from '../../lib/validation';
 import {ArrowLeft, TriangleAlert} from 'lucide-react';
@@ -47,6 +48,9 @@ export default function CreateCampaignPage() {
   const [audienceType, setAudienceType] = useState<CampaignAudienceType>(CampaignAudienceType.ALL);
   const [segmentId, setSegmentId] = useState('');
   const [excludedSegmentIds, setExcludedSegmentIds] = useState<string[]>([]);
+  // Plunk Lite: the opt-out topic, kept while switching types; only a TRANSACTIONAL campaign sends it
+  const [topic, setTopic] = useState<string | null>(null);
+  const optOutSegmentId = campaignType === TemplateType.TRANSACTIONAL ? topic : null;
   const [saving, setSaving] = useState(false);
   const [loadingTemplate, setLoadingTemplate] = useState(false);
 
@@ -148,6 +152,7 @@ export default function CreateCampaignPage() {
         audienceType,
         segmentId: audienceType === CampaignAudienceType.SEGMENT ? segmentId : undefined,
         excludedSegmentIds,
+        optOutSegmentId,
       } as any);
 
       toast.success('Campaign created');
@@ -247,7 +252,9 @@ export default function CreateCampaignPage() {
                     <Card className="xl:order-4">
                       <CardHeader>
                         <CardTitle>Campaign type</CardTitle>
-                        <CardDescription>Transactional campaigns skip the subscription check and the footer.</CardDescription>
+                        <CardDescription>
+                          {templateTypeDescription(Boolean(optOutSegmentId), 'campaign')}
+                        </CardDescription>
                       </CardHeader>
                       <CardContent>
                         <div className="flex flex-col gap-2">
@@ -271,6 +278,14 @@ export default function CreateCampaignPage() {
                             </button>
                           ))}
                         </div>
+                        <OptOutTopicField
+                          owner="campaign"
+                          type={campaignType}
+                          value={optOutSegmentId}
+                          body={body}
+                          onChange={setTopic}
+                          exclude={audienceType === CampaignAudienceType.SEGMENT && segmentId ? [segmentId] : []}
+                        />
                         {campaignType === TemplateType.HEADLESS && !detectUnsubscribeSignal(body) && (
                           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 overflow-hidden">
                             <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-100/60 px-3 py-2">
@@ -341,9 +356,13 @@ export default function CreateCampaignPage() {
                           value={audienceType}
                           onValueChange={value => {
                             setAudienceType(value as CampaignAudienceType);
-                            // Plunk Lite: back on a segment, that segment cannot also be left out
+                            // Plunk Lite: back on a segment, that segment cannot also be left out, nor be the topic
                             if (value === CampaignAudienceType.SEGMENT) {
                               setExcludedSegmentIds(ids => ids.filter(id => id !== segmentId));
+                              if (segmentId && topic === segmentId) {
+                                setTopic(null);
+                                toast.info(TOPIC_DROPPED);
+                              }
                             }
                           }}
                           required
@@ -375,8 +394,12 @@ export default function CreateCampaignPage() {
                             value={segmentId}
                             onValueChange={value => {
                               setSegmentId(value);
-                              // Plunk Lite: the segment it is sent to cannot also be left out
+                              // Plunk Lite: the segment it is sent to cannot also be left out, nor be the topic
                               setExcludedSegmentIds(ids => ids.filter(id => id !== value));
+                              if (topic === value) {
+                                setTopic(null);
+                                toast.info(TOPIC_DROPPED);
+                              }
                             }}
                             required
                           >
@@ -405,7 +428,7 @@ export default function CreateCampaignPage() {
                           {estimatedRecipients > 0 && (
                             <p className="text-sm text-neutral-500">
                               <span className="font-medium text-neutral-900">{estimatedRecipients.toLocaleString()} recipients</span> in this segment
-                              {excludedSegmentIds.length > 0 && ', before exclusions'}
+                              {(excludedSegmentIds.length > 0 || optOutSegmentId) && ', before exclusions'}
                             </p>
                           )}
                         </div>

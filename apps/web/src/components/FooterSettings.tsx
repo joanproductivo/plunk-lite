@@ -37,9 +37,9 @@ const COPY: Record<FooterKind, {title: string; description: string; link: string
     idPrefix: 'footer',
   },
   optOut: {
-    title: 'Notices footer (transactional templates with an opt-out topic)',
+    title: 'Notices footer (transactional templates and campaigns with an opt-out topic)',
     description:
-      "The text at the end of every email of a transactional template with an opt-out topic, in each contact's language, unless its body has its own {{optOutUrl}} link. Languages without a text of their own use Plunk's.",
+      "The text at the end of every email of a transactional template or campaign with an opt-out topic, in each contact's language, unless its body has its own {{optOutUrl}} link. Languages without a text of their own use Plunk's.",
     link: 'the link to stop these notices',
     idPrefix: 'optout-footer',
   },

@@ -25,7 +25,7 @@ function toSets(row: {footers: unknown; optOutFooters: unknown} | null): FooterS
 
 /**
  * A project's own footers, by language (Plunk Lite): the unsubscribe footer of marketing emails, and
- * the notices footer of transactional templates with an opt-out topic (`optOut`).
+ * the notices footer of transactional templates and campaigns with an opt-out topic (`optOut`).
  */
 export class ProjectFooterService {
   /** The project's footers of `kind`, read through the same checks as a request; {} if it has none. */
