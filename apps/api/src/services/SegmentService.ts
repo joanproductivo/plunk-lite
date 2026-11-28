@@ -17,6 +17,8 @@ export type {FilterCondition, FilterGroup, SegmentFilter} from '@plunk/types';
 
 /** Campaigns in these states still send to their segment, so it cannot be deleted. */
 const ACTIVE_CAMPAIGN_STATUSES: CampaignStatus[] = ['DRAFT', 'SCHEDULED', 'SENDING'];
+/** Plunk Lite: campaigns in these states have emails out, whose opt-out links name their topic */
+const DEPARTED_CAMPAIGN_STATUSES: CampaignStatus[] = ['SENT', 'CANCELLED'];
 /**
  * Most blocked segments a refused bulk delete names, and most workflows, segments or filtered
  * campaigns a refused delete names for each one.
@@ -38,6 +40,8 @@ interface SegmentBlockers<Names> {
   excludingCampaigns: Names;
   /** Plunk Lite: the templates whose opt-out topic it is */
   optOutTemplates: Names;
+  /** Plunk Lite: the TRANSACTIONAL campaigns whose opt-out topic it is, active, or sent or cancelled and not archived */
+  optOutCampaigns: Names;
   workflows: Names;
   segments: Names;
 }
@@ -335,6 +339,13 @@ export class SegmentService {
       );
     }
 
+    if (blockers?.optOutCampaigns.length) {
+      throw new HttpException(
+        409,
+        `Cannot delete segment: it is the opt-out topic of the campaign(s) ${listNames(blockers.optOutCampaigns, MAX_BLOCKING_NAMES_LISTED)}. Remove it from the drafts (archived ones included; cancel a scheduled one back to a draft first, and let one that is sending finish), and archive the ones sent or cancelled: their emails link to it.`,
+      );
+    }
+
     if (blockers?.workflows.length) {
       throw new HttpException(
         409,
@@ -360,7 +371,7 @@ export class SegmentService {
   /**
    * Apply a bulk operation to several segments. Only `delete` exists: it deletes all of them or,
    * when any is missing or still used by an active campaign, a workflow or a segment outside the
-   * batch, none.
+   * batch, or is the opt-out topic of a template or of a campaign (Plunk Lite), none.
    */
   public static async bulkUpdate(
     projectId: string,
@@ -376,8 +387,8 @@ export class SegmentService {
       // check below or waits and then fails on its foreign key; a concurrent bulk delete of the
       // same segments waits too and then finds them gone. Plunk Lite: a campaign's excluded segments
       // have no foreign key, so one excluded meanwhile is left dangling, and that campaign does not
-      // send until it is removed. Likewise a template's opt-out topic set meanwhile is left dangling,
-      // and that template is then sent to no one, with an alert, until it gets another topic or none.
+      // send until it is removed. Likewise a template's or campaign's opt-out topic set meanwhile is
+      // left dangling, and it is then sent to no one, with an alert, until it gets another topic or none.
       await tx.$queryRaw`SELECT 1 FROM segments WHERE id IN (${Prisma.join(ids)}) AND "projectId" = ${projectId} FOR UPDATE`;
       const segments = await tx.segment.findMany({
         where: {id: {in: ids}, projectId},
@@ -401,6 +412,9 @@ export class SegmentService {
             : null,
           blocker?.optOutTemplates.length
             ? `the opt-out topic of the template(s) ${listNames(blocker.optOutTemplates, MAX_BLOCKING_NAMES_LISTED)}`
+            : null,
+          blocker?.optOutCampaigns.length
+            ? `the opt-out topic of the campaign(s) ${listNames(blocker.optOutCampaigns, MAX_BLOCKING_NAMES_LISTED)}`
             : null,
           blocker?.workflows.length
             ? `the workflow(s) ${listNames(blocker.workflows, MAX_BLOCKING_NAMES_LISTED)}`
@@ -442,7 +456,8 @@ export class SegmentService {
    * What keeps each segment from being deleted: how many active campaigns send to it, the names of
    * the active campaigns whose audience filter uses its `segment.<id>` field, the names of the
    * active campaigns that exclude it (Plunk Lite), the names of the templates whose opt-out topic it
-   * is (Plunk Lite), the names of the workflows with an Update
+   * is (Plunk Lite), the names of the TRANSACTIONAL campaigns whose opt-out topic it is, active or
+   * sent (or cancelled) and not archived (Plunk Lite), the names of the workflows with an Update
    * contact step that adds or removes it or a Condition step on that field, and the names of the
    * other segments whose condition uses that field. Segments among
    * `segmentIds` do not count, since they go together. Triggers and waits on its
@@ -463,6 +478,7 @@ export class SegmentService {
           filteredCampaigns: new Set(),
           excludingCampaigns: new Set(),
           optOutTemplates: new Set(),
+          optOutCampaigns: new Set(),
           workflows: new Set(),
           segments: new Set(),
         };
@@ -536,6 +552,23 @@ export class SegmentService {
       if (template.optOutSegmentId) blockerFor(template.optOutSegmentId).optOutTemplates.add(template.name);
     }
 
+    // Plunk Lite: the TRANSACTIONAL campaigns whose opt-out topic any of them is (on another type the
+    // topic does nothing). Active ones send with it; sent or cancelled ones until archived, as their
+    // emails link to it and archiving one says it no longer matters. A draft archived still counts:
+    // it can be sent again
+    const optOutCampaigns = await db.campaign.findMany({
+      where: {
+        projectId,
+        type: 'TRANSACTIONAL',
+        optOutSegmentId: {in: segmentIds},
+        OR: [{status: {in: ACTIVE_CAMPAIGN_STATUSES}}, {status: {in: DEPARTED_CAMPAIGN_STATUSES}, archived: false}],
+      },
+      select: {name: true, optOutSegmentId: true},
+    });
+    for (const campaign of optOutCampaigns) {
+      if (campaign.optOutSegmentId) blockerFor(campaign.optOutSegmentId).optOutCampaigns.add(campaign.name);
+    }
+
     const referencing = await db.segment.findMany({
       where: {projectId, id: {notIn: segmentIds}, type: 'DYNAMIC'},
       select: {name: true, condition: true},
@@ -556,6 +589,7 @@ export class SegmentService {
           filteredCampaigns: sorted(blocker.filteredCampaigns),
           excludingCampaigns: sorted(blocker.excludingCampaigns),
           optOutTemplates: sorted(blocker.optOutTemplates),
+          optOutCampaigns: sorted(blocker.optOutCampaigns),
           workflows: sorted(blocker.workflows),
           segments: sorted(blocker.segments),
         },

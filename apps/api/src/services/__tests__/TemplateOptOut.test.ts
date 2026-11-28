@@ -6,9 +6,19 @@ import {API_URI, DASHBOARD_URI} from '../../app/constants';
 import {HttpException} from '../../exceptions/index.js';
 import {QueueService} from '../QueueService';
 import {SegmentMembershipService} from '../SegmentMembershipService';
-import {optOutBlock, optOutLink, optOutTopic, optOutUrl, readTemplateParam} from '../TemplateOptOut';
+import {optOutBlock, optOutLink, optOutTopic, optOutUrl, readOptOutSource} from '../TemplateOptOut';
 import {assertValidTopic, optOut} from '../TemplateOptOutAdmin';
 import {TemplateService} from '../TemplateService';
+
+/** What a check ends in: 'ok', the HttpException's status, or 'other' */
+async function status(promise: Promise<unknown>) {
+  try {
+    await promise;
+    return 'ok';
+  } catch (error) {
+    return error instanceof HttpException ? error.code : 'other';
+  }
+}
 
 /**
  * Plunk Lite: opt-out topics. A TRANSACTIONAL template names a static segment; its opt-out link puts
@@ -44,18 +54,23 @@ describe('opt-out topics', () => {
   });
 
   it('builds the link with the template, and no email id', () => {
-    expect(optOutLink(API_URI, 'c 1', 't/1')).toBe(`${API_URI}/opt-out/c%201?t=t%2F1`);
+    expect(optOutLink(API_URI, 'c 1', {templateId: 't/1'})).toBe(`${API_URI}/opt-out/c%201?t=t%2F1`);
+    expect(optOutLink(API_URI, 'c 1', {campaignId: 'k/1'})).toBe(`${API_URI}/opt-out/c%201?c=k%2F1`);
     const template = {id: 't1', type: TemplateType.TRANSACTIONAL, optOutSegmentId: 'seg'};
     expect(optOutUrl('c1', template, false)).toBe(`${DASHBOARD_URI}/opt-out/c1?t=t1`);
     expect(optOutUrl('c1', template, true)).toBe('');
     expect(optOutUrl('c1', undefined, false)).toBe('');
   });
 
-  it('reads `t` only as one non-empty string', () => {
-    expect(readTemplateParam({t: 'abc'})).toBe('abc');
-    expect(readTemplateParam({t: ''})).toBeUndefined();
-    expect(readTemplateParam({t: ['a', 'b']})).toBeUndefined();
-    expect(readTemplateParam({})).toBeUndefined();
+  it('reads `t` or `c` only as one non-empty string, and neither when both come', () => {
+    expect(readOptOutSource({t: 'abc'})).toEqual({templateId: 'abc'});
+    expect(readOptOutSource({c: 'abc'})).toEqual({campaignId: 'abc'});
+    expect(readOptOutSource({t: 'a', c: 'b'})).toBeUndefined();
+    expect(readOptOutSource({t: '', c: 'b'})).toBeUndefined();
+    expect(readOptOutSource({t: ''})).toBeUndefined();
+    expect(readOptOutSource({t: ['a', 'b']})).toBeUndefined();
+    expect(readOptOutSource({c: ['a', 'b']})).toBeUndefined();
+    expect(readOptOutSource({})).toBeUndefined();
   });
 
   describe('optOutBlock', () => {
@@ -97,8 +112,8 @@ describe('opt-out topics', () => {
       });
       const events = vi.spyOn(QueueService, 'queueSegmentMembershipEvents').mockResolvedValue(undefined);
 
-      expect(await optOut(contact.id, template.id)).toBe('opted-out');
-      expect(await optOut(contact.id, template.id)).toBe('opted-out');
+      expect(await optOut(contact.id, {templateId: template.id})).toBe('opted-out');
+      expect(await optOut(contact.id, {templateId: template.id})).toBe('opted-out');
 
       expect(await optOutBlock(projectId, segmentId, contact.id)).toBe('opted-out');
       const entries = events.mock.calls.flatMap(([job]) => job.contactIds);
@@ -123,11 +138,11 @@ describe('opt-out topics', () => {
         optOutSegmentId: '00000000-0000-4000-8000-000000000000',
       });
 
-      expect(await optOut(contact.id, foreign.id)).toBe('unavailable');
-      expect(await optOut(contact.id, plain.id)).toBe('unavailable');
-      expect(await optOut(contact.id, marketing.id)).toBe('unavailable');
-      expect(await optOut(contact.id, orphan.id)).toBe('unavailable');
-      expect(await optOut('missing-contact', plain.id)).toBe('unavailable');
+      expect(await optOut(contact.id, {templateId: foreign.id})).toBe('unavailable');
+      expect(await optOut(contact.id, {templateId: plain.id})).toBe('unavailable');
+      expect(await optOut(contact.id, {templateId: marketing.id})).toBe('unavailable');
+      expect(await optOut(contact.id, {templateId: orphan.id})).toBe('unavailable');
+      expect(await optOut('missing-contact', {templateId: plain.id})).toBe('unavailable');
       expect(await prisma.segmentMembership.count({where: {segmentId: otherSegment.id}})).toBe(0);
     });
 
@@ -142,21 +157,12 @@ describe('opt-out topics', () => {
         new HttpException(404, 'Segment not found'),
       );
 
-      expect(await optOut(contact.id, template.id)).toBe('unavailable');
+      expect(await optOut(contact.id, {templateId: template.id})).toBe('unavailable');
       vi.restoreAllMocks();
     });
   });
 
   describe('assertValidTopic', () => {
-    const status = async (promise: Promise<unknown>) => {
-      try {
-        await promise;
-        return 'ok';
-      } catch (error) {
-        return error instanceof HttpException ? error.code : 'other';
-      }
-    };
-
     it('takes a static segment of the project on a TRANSACTIONAL template, or none', async () => {
       expect(await status(assertValidTopic(projectId, segmentId, TemplateType.TRANSACTIONAL))).toBe('ok');
       expect(await status(assertValidTopic(projectId, null, TemplateType.MARKETING))).toBe('ok');
@@ -181,8 +187,10 @@ describe('opt-out topics', () => {
       const transactional = await factories.createTemplate({projectId, type: TemplateType.TRANSACTIONAL});
       const marketing = await factories.createTemplate({projectId});
 
-      expect(await status(assertValidTopic(projectId, segmentId, undefined, transactional.id))).toBe('ok');
-      expect(await status(assertValidTopic(projectId, segmentId, undefined, marketing.id))).toBe(400);
+      expect(await status(assertValidTopic(projectId, segmentId, undefined, {templateId: transactional.id}))).toBe(
+        'ok',
+      );
+      expect(await status(assertValidTopic(projectId, segmentId, undefined, {templateId: marketing.id}))).toBe(400);
     });
 
     it('refuses another type for a template with a topic unless the topic goes in the same request', async () => {
@@ -192,8 +200,12 @@ describe('opt-out topics', () => {
         optOutSegmentId: segmentId,
       });
 
-      expect(await status(assertValidTopic(projectId, undefined, TemplateType.MARKETING, template.id))).toBe(400);
-      expect(await status(assertValidTopic(projectId, null, TemplateType.MARKETING, template.id))).toBe('ok');
+      expect(
+        await status(assertValidTopic(projectId, undefined, TemplateType.MARKETING, {templateId: template.id})),
+      ).toBe(400);
+      expect(await status(assertValidTopic(projectId, null, TemplateType.MARKETING, {templateId: template.id}))).toBe(
+        'ok',
+      );
     });
 
     it('does not check again a saved topic whose segment is gone, so other edits go through', async () => {
@@ -204,8 +216,10 @@ describe('opt-out topics', () => {
       });
       await prisma.segment.delete({where: {id: segmentId}});
 
-      expect(await status(assertValidTopic(projectId, undefined, undefined, template.id))).toBe('ok');
-      expect(await status(assertValidTopic(projectId, segmentId, TemplateType.TRANSACTIONAL, template.id))).toBe('ok');
+      expect(await status(assertValidTopic(projectId, undefined, undefined, {templateId: template.id}))).toBe('ok');
+      expect(
+        await status(assertValidTopic(projectId, segmentId, TemplateType.TRANSACTIONAL, {templateId: template.id})),
+      ).toBe('ok');
     });
   });
 
@@ -229,6 +243,81 @@ describe('opt-out topics', () => {
 
       const removed = await TemplateService.update(projectId, created.id, {optOutSegmentId: null});
       expect(removed.optOutSegmentId).toBeNull();
+    });
+  });
+
+  describe('campaigns (?c=)', () => {
+    it("puts the contact in the campaign's topic once", async () => {
+      const contact = await factories.createContact({projectId});
+      const campaign = await factories.createCampaign({
+        projectId,
+        type: TemplateType.TRANSACTIONAL,
+        optOutSegmentId: segmentId,
+      });
+      const events = vi.spyOn(QueueService, 'queueSegmentMembershipEvents').mockResolvedValue(undefined);
+
+      expect(await optOut(contact.id, {campaignId: campaign.id})).toBe('opted-out');
+      expect(await optOut(contact.id, {campaignId: campaign.id})).toBe('opted-out');
+
+      expect(await optOutBlock(projectId, segmentId, contact.id)).toBe('opted-out');
+      expect(events.mock.calls.flatMap(([job]) => job.contactIds)).toEqual([contact.id]);
+      events.mockRestore();
+    });
+
+    it("is unavailable for another project's campaign, a MARKETING one, one without a topic or with its segment gone", async () => {
+      const contact = await factories.createContact({projectId});
+      const {project: other} = await factories.createUserWithProject();
+      const otherSegment = await factories.createSegment(other.id, {type: SegmentType.STATIC});
+      const foreign = await factories.createCampaign({
+        projectId: other.id,
+        type: TemplateType.TRANSACTIONAL,
+        optOutSegmentId: otherSegment.id,
+      });
+      const marketing = await factories.createCampaign({projectId, optOutSegmentId: segmentId});
+      const plain = await factories.createCampaign({projectId, type: TemplateType.TRANSACTIONAL});
+      const orphan = await factories.createCampaign({
+        projectId,
+        type: TemplateType.TRANSACTIONAL,
+        optOutSegmentId: '00000000-0000-4000-8000-000000000000',
+      });
+
+      for (const campaign of [foreign, marketing, plain, orphan]) {
+        expect(await optOut(contact.id, {campaignId: campaign.id})).toBe('unavailable');
+      }
+      expect(await optOut(contact.id, {campaignId: 'missing-campaign'})).toBe('unavailable');
+      expect(await prisma.segmentMembership.count({where: {segmentId: {in: [segmentId, otherSegment.id]}}})).toBe(0);
+    });
+
+    it('checks a campaign topic like a template one', async () => {
+      const dynamic = await factories.createSegment(projectId);
+      const {project: other} = await factories.createUserWithProject();
+      const foreign = await factories.createSegment(other.id, {type: SegmentType.STATIC});
+      const marketing = await factories.createCampaign({projectId});
+      const withTopic = await factories.createCampaign({
+        projectId,
+        type: TemplateType.TRANSACTIONAL,
+        optOutSegmentId: segmentId,
+      });
+      const campaign = (id: string) => ({campaignId: id});
+
+      expect(
+        await status(assertValidTopic(projectId, dynamic.id, TemplateType.TRANSACTIONAL, campaign(marketing.id))),
+      ).toBe(400);
+      expect(
+        await status(assertValidTopic(projectId, foreign.id, TemplateType.TRANSACTIONAL, campaign(marketing.id))),
+      ).toBe(400);
+      // A topic sent alone takes the saved type: MARKETING
+      expect(await status(assertValidTopic(projectId, segmentId, undefined, campaign(marketing.id)))).toBe(400);
+      expect(
+        await status(assertValidTopic(projectId, segmentId, TemplateType.TRANSACTIONAL, campaign(marketing.id))),
+      ).toBe('ok');
+      // Another type with a topic saved needs null in the same request
+      expect(await status(assertValidTopic(projectId, undefined, TemplateType.MARKETING, campaign(withTopic.id)))).toBe(
+        400,
+      );
+      expect(await status(assertValidTopic(projectId, null, TemplateType.MARKETING, campaign(withTopic.id)))).toBe(
+        'ok',
+      );
     });
   });
 });

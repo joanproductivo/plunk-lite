@@ -33,6 +33,7 @@ import {FailureAlertService} from './FailureAlertService.js';
 import {NtfyService} from './NtfyService.js';
 import {QueueService} from './QueueService.js';
 import {SegmentService} from './SegmentService.js';
+import {MISSING_CAMPAIGN_TOPIC, optOutLink, optOutTopic} from './TemplateOptOut.js';
 import {Keys} from './keys.js';
 import {DASHBOARD_URI, STRIPE_ENABLED} from '../app/constants.js';
 import {getDailyQuotaQuick, sendRawEmail} from './SESService.js';
@@ -44,6 +45,9 @@ const DAILY_QUOTA_SHARE = 0.95;
 /** Plunk Lite: what counting or sending a campaign says when one of its excluded segments was deleted */
 const MISSING_EXCLUDED_SEGMENT =
   'An excluded segment no longer exists (it shows as "Deleted segment"). Remove it from the campaign\'s audience.';
+
+/** What updating a campaign says once it is sending or sent */
+const NOT_EDITABLE = 'Cannot update campaign that is sending or has been sent';
 
 /** Namespace of the campaign email ids; fixed, and used for nothing else */
 const CAMPAIGN_EMAIL_ID_NAMESPACE = 'b438d7ec-4f8c-4929-b750-e677bcec6d06';
@@ -92,6 +96,12 @@ export class CampaignService {
     }
 
     const excludedSegmentIds = await this.resolveExcludedSegmentIds(projectId, data.excludedSegmentIds ?? [], data);
+    // Plunk Lite: the opt-out topic (checked by the controller) cannot be the segment it is sent to
+    const optOutSegmentId = data.optOutSegmentId ?? null;
+    this.assertNotOwnTopicAudience(
+      optOutTopic({type: data.type ?? TemplateType.MARKETING, optOutSegmentId}, false),
+      data,
+    );
 
     // Create campaign with initial recipient count of 0
     const campaign = await prisma.campaign.create({
@@ -109,6 +119,7 @@ export class CampaignService {
         audienceCondition: toPrismaJson(data.audienceCondition || null),
         segmentId: data.segmentId,
         excludedSegmentIds,
+        optOutSegmentId,
         status: CampaignStatus.DRAFT,
         totalRecipients: 0, // Will be updated below
       },
@@ -119,8 +130,9 @@ export class CampaignService {
       },
     });
 
-    // Calculate and update recipient count for the draft. Plunk Lite: an excluded segment deleted
-    // between the check above and here leaves it at 0 rather than failing a campaign already created
+    // Calculate and update recipient count for the draft. Plunk Lite: an excluded segment (or the
+    // opt-out topic) deleted between the check above and here leaves it at 0 rather than failing a
+    // campaign already created
     const recipientCount = await this.draftRecipientCount(projectId, campaign);
     const updatedCampaign = await prisma.campaign.update({
       where: {id: campaign.id},
@@ -141,7 +153,7 @@ export class CampaignService {
 
     // Can only update draft or scheduled campaigns
     if (campaign.status !== CampaignStatus.DRAFT && campaign.status !== CampaignStatus.SCHEDULED) {
-      throw new HttpException(400, 'Cannot update campaign that is sending or has been sent');
+      throw new HttpException(400, NOT_EDITABLE);
     }
 
     // Build base update data using shared utility
@@ -149,6 +161,11 @@ export class CampaignService {
 
     // Handle campaign-specific fields
     if (data.type !== undefined) {
+      // Plunk Lite: the type decides whether the campaign reaches unsubscribed contacts and whether
+      // its opt-out topic counts, so it is part of the audience a scheduled campaign keeps
+      if (campaign.status === CampaignStatus.SCHEDULED && data.type !== campaign.type) {
+        throw new HttpException(400, 'Cannot change the type of a scheduled campaign');
+      }
       updateData.type = data.type;
     }
 
@@ -208,29 +225,63 @@ export class CampaignService {
       this.assertNotExcludingAudience(campaign.excludedSegmentIds, audience);
     }
 
-    // Update the campaign first
-    const updatedCampaign = await prisma.campaign.update({
-      where: {id: campaignId},
-      data: updateData,
-    });
+    // Plunk Lite: the opt-out topic (checked by the controller), written only when it changes, and
+    // never on a scheduled campaign, like the excluded segments
+    delete (updateData as Record<string, unknown>).optOutSegmentId;
+    const optOutSegmentId = data.optOutSegmentId !== undefined ? data.optOutSegmentId : campaign.optOutSegmentId;
+    if (data.optOutSegmentId !== undefined && optOutSegmentId !== campaign.optOutSegmentId) {
+      if (campaign.status === CampaignStatus.SCHEDULED) {
+        throw new HttpException(400, 'Cannot change the opt-out topic of a scheduled campaign');
+      }
+      updateData.optOutSegmentId = optOutSegmentId;
+    }
+    this.assertNotOwnTopicAudience(optOutTopic({type: data.type ?? campaign.type, optOutSegmentId}, false), audience);
 
-    // If audience-related fields changed and campaign is still a draft, recalculate totalRecipients
+    // Update the campaign first. Plunk Lite: only while it is still in the status read above, so a
+    // save crossing the start of its send cannot change a campaign that is already sending
+    const updatedCampaign = await prisma.campaign
+      .update({
+        where: {id: campaignId, status: campaign.status},
+        data: updateData,
+      })
+      .catch(async error => {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2025') throw error;
+        const current = await prisma.campaign.findUnique({where: {id: campaignId}, select: {status: true}});
+        if (!current) throw new HttpException(404, 'Campaign not found');
+        if (current.status !== campaign.status) {
+          throw new HttpException(
+            400,
+            current.status === CampaignStatus.DRAFT || current.status === CampaignStatus.SCHEDULED
+              ? 'The campaign changed status while it was being saved. Reload it and try again.'
+              : NOT_EDITABLE,
+          );
+        }
+        // Still in that status: the P2025 was something else (the segment to connect, deleted since)
+        throw error;
+      });
+
+    // If audience-related fields changed and campaign is still a draft, recalculate totalRecipients.
+    // Plunk Lite: the type too, which decides the subscription filter and whether the topic counts
     const audienceChanged =
       data.audienceType !== undefined ||
       data.segmentId !== undefined ||
       data.audienceCondition !== undefined ||
-      data.excludedSegmentIds !== undefined;
+      data.excludedSegmentIds !== undefined ||
+      data.optOutSegmentId !== undefined ||
+      data.type !== undefined;
 
     if (audienceChanged && updatedCampaign.status === CampaignStatus.DRAFT) {
-      // Plunk Lite: an excluded segment deleted since leaves the count as it was
+      // Plunk Lite: an excluded segment (or the opt-out topic) deleted since leaves the count as it
+      // was. Written only while it is still a draft: a send started meanwhile sets its own count
       const recipientCount = await this.draftRecipientCount(projectId, updatedCampaign);
       if (recipientCount === null) {
         return updatedCampaign;
       }
-      return prisma.campaign.update({
-        where: {id: campaignId},
+      const {count} = await prisma.campaign.updateMany({
+        where: {id: campaignId, status: CampaignStatus.DRAFT},
         data: {totalRecipients: recipientCount},
       });
+      return count > 0 ? {...updatedCampaign, totalRecipients: recipientCount} : updatedCampaign;
     }
 
     return updatedCampaign;
@@ -543,6 +594,8 @@ export class CampaignService {
         audienceCondition: campaign.audienceCondition as Prisma.InputJsonValue,
         segmentId: campaign.segmentId,
         excludedSegmentIds,
+        // Plunk Lite: the opt-out topic as it is; a segment gone since stops the copy's send until fixed
+        optOutSegmentId: campaign.optOutSegmentId,
         status: CampaignStatus.DRAFT,
         totalRecipients: 0, // Will be updated below
         sentCount: 0,
@@ -555,11 +608,11 @@ export class CampaignService {
       },
     });
 
-    // Calculate and update recipient count
-    const recipientCount = await this.getRecipientCount(projectId, duplicatedCampaign);
+    // Calculate and update recipient count. Plunk Lite: 0 while its opt-out topic is gone
+    const recipientCount = await this.draftRecipientCount(projectId, duplicatedCampaign);
     return prisma.campaign.update({
       where: {id: duplicatedCampaign.id},
-      data: {totalRecipients: recipientCount},
+      data: {totalRecipients: recipientCount ?? 0},
     });
   }
 
@@ -831,6 +884,8 @@ export class CampaignService {
     // subject and body are identical for every contact, only the variables differ.
     const subjectTemplate = compileSubjectTemplate(campaign.subject);
     const bodyTemplate = compileTemplate(campaign.body);
+    // Plunk Lite: the opt-out topic, the same for every contact of the batch
+    const topic = optOutTopic(campaign, false);
 
     // Queue emails for each contact
     for (const contact of contacts) {
@@ -848,8 +903,8 @@ export class CampaignService {
           unsubscribeUrl: withSourceEmail(`${DASHBOARD_URI}/unsubscribe/${contact.id}`, id),
           subscribeUrl: withSourceEmail(`${DASHBOARD_URI}/subscribe/${contact.id}`, id),
           manageUrl: withSourceEmail(`${DASHBOARD_URI}/manage/${contact.id}`, id),
-          // Plunk Lite: campaigns have no template, so no opt-out topic; set so contact data cannot fill it
-          optOutUrl: '',
+          // Plunk Lite: the opt-out page of a campaign with a topic; else empty, set so contact data cannot fill it
+          optOutUrl: topic ? optOutLink(DASHBOARD_URI, contact.id, {campaignId: campaign.id}) : '',
         };
 
         const renderedSubject = subjectTemplate.render(variables);
@@ -1941,12 +1996,18 @@ export class CampaignService {
   }
 
   /**
-   * Plunk Lite: a draft's recipient count, or null when one of its excluded segments was deleted
-   * since. A save that was already written does not fail on it: sending is what it stops.
+   * Plunk Lite: a draft's recipient count, or null when one of its excluded segments, or its opt-out
+   * topic, was deleted since. A save that was already written does not fail on it: sending is what
+   * it stops.
    */
   private static async draftRecipientCount(projectId: string, campaign: Campaign): Promise<number | null> {
     return this.getRecipientCount(projectId, campaign).catch(error => {
-      if (error instanceof HttpException && error.message === MISSING_EXCLUDED_SEGMENT) return null;
+      if (
+        error instanceof HttpException &&
+        (error.message === MISSING_EXCLUDED_SEGMENT || error.message === MISSING_CAMPAIGN_TOPIC)
+      ) {
+        return null;
+      }
       throw error;
     });
   }
@@ -1965,6 +2026,16 @@ export class CampaignService {
     }
   }
 
+  /** Plunk Lite: a campaign cannot be sent to its own opt-out topic (`topic`, as optOutTopic gives it) */
+  private static assertNotOwnTopicAudience(
+    topic: string | null,
+    audience: {audienceType?: CampaignAudienceType; segmentId?: string | null},
+  ): void {
+    if (topic && audience.audienceType === CampaignAudienceType.SEGMENT && audience.segmentId === topic) {
+      throw new HttpException(400, 'A campaign cannot be sent to its own opt-out segment');
+    }
+  }
+
   /** Plunk Lite: the project's segments among `ids`, each once; the missing ones are left out */
   private static async findSegments(projectId: string, ids: string[]): Promise<Segment[]> {
     const unique = Array.from(new Set(ids));
@@ -1972,19 +2043,22 @@ export class CampaignService {
   }
 
   /**
-   * Plunk Lite: who the campaign's excluded segments leave out -- anyone a campaign to one of them
-   * would reach now -- or null when it excludes none. Positive on purpose, and taken away by the
+   * Plunk Lite: who the campaign's excluded segments and its opt-out topic leave out -- anyone a
+   * campaign to one of them would reach now -- or null when it excludes none and has no topic. A
+   * segment in both is taken away once. Positive on purpose, and taken away by the
    * callers: Prisma's NOT on a typed `data.*` filter also requires the value's type, and
    * equals/notEquals null are still NULL without the key, so negating a dynamic segment would still
    * leave out a contact whose value has another type (a number where the filter compares text) or
-   * who lacks a key compared with null. A segment that no longer exists stops the count and the send.
+   * who lacks a key compared with null. A segment that no longer exists stops the count and the send,
+   * and so does a topic that is no longer a static segment of the project.
    */
   private static async buildExclusionWhereAsync(
     projectId: string,
     campaign: Campaign,
   ): Promise<Prisma.ContactWhereInput | null> {
     const ids = new Set(campaign.excludedSegmentIds);
-    if (ids.size === 0) {
+    const topic = optOutTopic(campaign, false);
+    if (ids.size === 0 && !topic) {
       return null;
     }
 
@@ -1992,7 +2066,19 @@ export class CampaignService {
     if (segments.length !== ids.size) {
       throw new HttpException(400, MISSING_EXCLUDED_SEGMENT);
     }
+    const clauses = await Promise.all(segments.map(segment => this.segmentClause(projectId, segment)));
 
-    return {OR: await Promise.all(segments.map(segment => this.segmentClause(projectId, segment)))};
+    if (topic) {
+      // Read here rather than with isTopicMissing: its clause needs the row. Also excluded, it is
+      // already among the clauses, and only its type is checked
+      const excluded = segments.find(segment => segment.id === topic);
+      const segment = excluded ?? (await prisma.segment.findFirst({where: {id: topic, projectId}}));
+      if (segment?.type !== 'STATIC') {
+        throw new HttpException(400, MISSING_CAMPAIGN_TOPIC);
+      }
+      if (!excluded) clauses.push(await this.segmentClause(projectId, segment));
+    }
+
+    return {OR: clauses};
   }
 }

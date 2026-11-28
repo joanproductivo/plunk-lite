@@ -371,7 +371,10 @@ export class FailureAlertService {
     }
   }
 
-  /** A campaign batch job that ran out of attempts */
+  /**
+   * A campaign batch job that ran out of attempts. Plunk Lite: also a campaign email that could not
+   * be sent because its opt-out topic is gone (MISSING_CAMPAIGN_TOPIC)
+   */
   public static async recordCampaignJob(campaignId: string, error: string): Promise<void> {
     try {
       const campaign = await prisma.campaign.findUnique({

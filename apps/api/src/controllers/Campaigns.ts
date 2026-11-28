@@ -8,6 +8,7 @@ import {HttpException} from '../exceptions/index.js';
 import {requireAuth, requireEmailVerified} from '../middleware/auth.js';
 import {CampaignService} from '../services/CampaignService.js';
 import {DomainService} from '../services/DomainService.js';
+import {assertValidTopic} from '../services/TemplateOptOutAdmin.js';
 import {CatchAsync} from '../utils/asyncHandler.js';
 import {parseListSort} from '../utils/listSort.js';
 import {assertValidReplyTo, assertValidTemplateSyntax} from '../utils/templateValidation.js';
@@ -38,6 +39,7 @@ export class Campaigns {
       audienceCondition,
       segmentId,
       excludedSegmentIds,
+      optOutSegmentId,
     } = CampaignSchemas.create.parse(req.body);
 
     if (audienceType === CampaignAudienceType.SEGMENT && !segmentId) {
@@ -49,6 +51,8 @@ export class Campaigns {
     }
 
     assertValidTemplateSyntax({subject, body});
+    // Plunk Lite: the opt-out topic, a static segment of the project on a TRANSACTIONAL campaign
+    await assertValidTopic(auth.projectId, optOutSegmentId, type);
 
     // Verify domain ownership and verification
     await DomainService.verifyEmailDomain(from, auth.projectId);
@@ -66,6 +70,7 @@ export class Campaigns {
       audienceCondition,
       segmentId,
       excludedSegmentIds,
+      optOutSegmentId,
     });
 
     return res.status(201).json({
@@ -195,6 +200,10 @@ export class Campaigns {
 
     assertValidTemplateSyntax({subject, body});
     assertValidReplyTo(replyTo);
+    // Plunk Lite: the opt-out topic, checked (its shape too) against the type sent or saved
+    const campaignType = type as TemplateType | undefined;
+    const optOutSegmentId = req.body?.optOutSegmentId as string | null | undefined;
+    await assertValidTopic(auth.projectId, optOutSegmentId, campaignType, {campaignId: id!});
 
     // Verify domain ownership and verification if 'from' is being updated
     if (from) {
@@ -209,11 +218,12 @@ export class Campaigns {
       from,
       fromName,
       replyTo,
-      type: type as TemplateType | undefined,
+      type: campaignType,
       audienceType,
       audienceCondition,
       segmentId,
       excludedSegmentIds,
+      optOutSegmentId,
     });
 
     return res.json({

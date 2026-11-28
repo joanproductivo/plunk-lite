@@ -578,6 +578,8 @@ export const CampaignSchemas = {
     audienceCondition: filterConditionSchema.optional(),
     segmentId: uuid.optional(),
     excludedSegmentIds: campaignExcludedSegments,
+    // Plunk Lite: the opt-out topic, a static segment (TRANSACTIONAL campaigns only)
+    optOutSegmentId: uuid.nullish(),
   }),
   schedule: z.object({
     scheduledFor: z.string(),
@@ -595,6 +597,8 @@ export const CampaignSchemas = {
     audienceCondition: filterConditionSchema.optional(),
     segmentId: z.string().optional(),
     excludedSegmentIds: campaignExcludedSegments,
+    // Plunk Lite: the opt-out topic, a static segment (TRANSACTIONAL campaigns only); null removes it
+    optOutSegmentId: uuid.nullish(),
   }),
   sendTest: z.object({
     email,

@@ -518,8 +518,8 @@ export class EmailService {
     /** The project's own footers by language (ProjectFooterService); Plunk's for the rest. */
     footers?: ProjectFooters;
     /**
-     * Plunk Lite: the opt-out page of a transactional email with an opt-out topic. With it, the
-     * notices footer goes at the end, unless the content already links that contact's opt-out page.
+     * Plunk Lite: the opt-out page of a transactional email with an opt-out topic (its template's or
+     * its campaign's). With it, the notices footer goes at the end, unless the content already links that contact's opt-out page.
      */
     optOutHref?: string;
     /** Plunk Lite: the project's own notices footers by language; Plunk's for the rest. */

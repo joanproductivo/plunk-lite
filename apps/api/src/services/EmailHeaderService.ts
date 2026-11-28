@@ -137,8 +137,8 @@ export interface BuildEmailHeadersParams {
    */
   sourceEmailId?: string;
   /**
-   * Plunk Lite: the API's opt-out link of a transactional email with an opt-out topic
-   * (TemplateOptOut.optOutLink). When given, the List-Unsubscribe pair points at it -- even if the
+   * Plunk Lite: the API's opt-out link of a transactional email with an opt-out topic, its template's
+   * or its campaign's (TemplateOptOut.optOutLink). When given, the List-Unsubscribe pair points at it -- even if the
    * body also links the marketing unsubscribe, as the recipient wants to stop *this* kind of email --
    * and the email gets the bulk headers too.
    */
@@ -183,8 +183,8 @@ export function buildEmailHeaders({
   const isMarketing = emailClass === 'marketing';
 
   // One-click unsubscribe — for subscribed marketing mail, or any message whose
-  // body advertises an opt-out link, and (Plunk Lite) a transactional template's
-  // opt-out topic, whose own one-click link it points at instead. Both headers must be present for mailbox
+  // body advertises an opt-out link, and (Plunk Lite) a transactional template's or
+  // campaign's opt-out topic, whose own one-click link it points at instead. Both headers must be present for mailbox
   // providers to render the one-click control, and List-Unsubscribe-Post is
   // meaningless without a target, so the pair is only emitted together when we
   // have an unsubscribe URL to point at.

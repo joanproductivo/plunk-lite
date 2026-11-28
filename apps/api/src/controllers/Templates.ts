@@ -128,7 +128,7 @@ export class Templates {
     assertValidTemplateSyntax({subject, body});
     assertValidReplyTo(replyTo);
     // Plunk Lite: the opt-out topic, checked against the saved type when no type is sent
-    await assertValidTopic(auth.projectId!, optOutSegmentId, type, templateId);
+    await assertValidTopic(auth.projectId!, optOutSegmentId, type, {templateId});
 
     // Verify domain ownership and verification if 'from' is being updated
     if (from) {
