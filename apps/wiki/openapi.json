@@ -191,6 +191,12 @@
             },
             "description": "Plunk Lite: segments whose contacts never get this campaign, whatever its audience. One deleted since stops the send until it is removed."
           },
+          "optOutSegmentId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Plunk Lite: the opt-out topic of a `TRANSACTIONAL` campaign, a static segment. Its members do not get the campaign, and its emails carry a one-click opt-out (`/opt-out/<contactId>?c=<campaignId>`) into it. The segment cannot be deleted while the campaign is a draft, scheduled or sending, or sent or cancelled and not archived; one deleted anyway stops the send until it is changed or removed."
+          },
           "scheduledFor": {
             "type": "string",
             "format": "date-time",
@@ -2057,6 +2063,12 @@
                     "maxItems": 20,
                     "description": "Plunk Lite: segments whose contacts never get this campaign, whatever its audience. Up to 20; none of them can be the `segmentId`."
                   },
+                  "optOutSegmentId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "nullable": true,
+                    "description": "Plunk Lite: the opt-out topic, a static segment of the project that is not the `segmentId`. `TRANSACTIONAL` campaigns only."
+                  },
                   "audienceCondition": {
                     "allOf": [
                       {
@@ -2145,7 +2157,7 @@
             }
           },
           "400": {
-            "description": "`segmentId` missing for a `SEGMENT` campaign, or `audienceCondition` missing for a `FILTERED` campaign. Plunk Lite: also an `excludedSegmentIds` entry that is not a segment of the project, or that is the campaign's own `segmentId`.",
+            "description": "`segmentId` missing for a `SEGMENT` campaign, or `audienceCondition` missing for a `FILTERED` campaign. Plunk Lite: also an `excludedSegmentIds` entry that is not a segment of the project, or that is the campaign's own `segmentId`; or an `optOutSegmentId` that is not a static segment of the project, is the `segmentId`, or comes with a type other than `TRANSACTIONAL`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2304,7 +2316,7 @@
             }
           },
           "400": {
-            "description": "Unparseable `scheduledFor`, the campaign is not in a sendable state, or (Plunk Lite) an immediate send would not fit in what is left of the SES 24-hour quota, keeping 5 % of it for transactional and workflow emails, counting what the campaigns still sending have left. The message gives the figures. A scheduled send is checked when its time comes: if it does not fit then, it stays scheduled and an alert says so. Plunk Lite: also when one of the campaign's `excludedSegmentIds` was deleted since; remove it and send again.",
+            "description": "Unparseable `scheduledFor`, the campaign is not in a sendable state, or (Plunk Lite) an immediate send would not fit in what is left of the SES 24-hour quota, keeping 5 % of it for transactional and workflow emails, counting what the campaigns still sending have left. The message gives the figures. A scheduled send is checked when its time comes: if it does not fit then, it stays scheduled and an alert says so. Plunk Lite: also when one of the campaign's `excludedSegmentIds` was deleted since; remove it and send again. Likewise when the segment of its `optOutSegmentId` no longer exists; pick another one or remove it.",
             "content": {
               "application/json": {
                 "schema": {

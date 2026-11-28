@@ -102,7 +102,7 @@ Segments can be used to:
 
 Deleting a segment that's referenced by an active campaign (in `DRAFT`, `SCHEDULED`, or `SENDING` state) returns `409 Conflict`. Cancel the campaign or pick a different audience first.
 
-Deleting a segment that a workflow's `UPDATE_CONTACT` step adds to or removes from, or that a `CONDITION` step checks, also returns `409`, naming the workflows. So does deleting a static segment that is a transactional template's opt-out topic (Plunk Lite), naming the templates. Workflows triggered by, or waiting for, the segment's `segment.<slug>.entry` / `.exit` events are not checked: the slug follows the segment's name and is not unique, so review those yourself.
+Deleting a segment that a workflow's `UPDATE_CONTACT` step adds to or removes from, or that a `CONDITION` step checks, also returns `409`, naming the workflows. So does deleting a static segment that is a transactional template's opt-out topic (Plunk Lite), naming the templates, or a transactional campaign's, naming the campaigns: while the campaign is a draft (archived or not), scheduled or sending, and once it is sent or cancelled until it is archived, since its emails link to the segment. Workflows triggered by, or waiting for, the segment's `segment.<slug>.entry` / `.exit` events are not checked: the slug follows the segment's name and is not unique, so review those yourself.
 
 ## API reference
 

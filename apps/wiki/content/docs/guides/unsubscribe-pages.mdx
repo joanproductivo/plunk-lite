@@ -42,14 +42,16 @@ You can always reference `{{unsubscribeUrl}}` / `{{manageUrl}}` in your inline b
 
 ## Opt-out topics (Plunk Lite)
 
-Transactional templates skip the subscription check, so a recipient cannot stop them from the marketing pages. For notices sent to many people (the days of a course, reminders), give the template an **opt-out topic**: a static segment, in the template's settings. Several templates can share one, and opting out of one stops all of them.
+Transactional templates skip the subscription check, so a recipient cannot stop them from the marketing pages. For notices sent to many people (the days of a course, reminders), give the template an **opt-out topic**: a static segment, in the template's settings. A transactional campaign can have one too, in its settings. Several templates and campaigns can share one, and opting out of one stops all of them.
 
-- **The header.** Its emails carry `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click`, pointing at `/opt-out/<contactId>?t=<templateId>` on the API, even if the body also links `{{unsubscribeUrl}}`, plus `Precedence: bulk`, `Auto-Submitted: auto-generated` and `X-Auto-Response-Suppress: All`. A one-click `POST` puts the contact in the segment at once; a repeat does nothing more.
+- **The header.** Its emails carry `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click`, pointing at `/opt-out/<contactId>?t=<templateId>` (a campaign: `?c=<campaignId>`) on the API, even if the body also links `{{unsubscribeUrl}}`, plus `Precedence: bulk`, `Auto-Submitted: auto-generated` and `X-Auto-Response-Suppress: All`. A one-click `POST` puts the contact in the segment at once; a repeat does nothing more.
 - **The page.** `{{optOutUrl}}` opens the opt-out page, which asks before acting, as mail scanners open every link. It does not change `subscribed`.
-- **The notices footer.** Plunk adds it at the end of every email of the template, in the contact's language, unless the body already has its own `{{optOutUrl}}` link. Its text is set by language in **Settings → Brand**, like the unsubscribe footer.
-- **The sending.** A contact in the segment no longer gets the templates of that topic, from workflows or `/v1/send` (`422` `CONTACT_OPTED_OUT`); other transactional emails still reach them. Joining the segment fires its `entry` event when it tracks membership.
+- **The notices footer.** Plunk adds it at the end of every email of the template or campaign, in the contact's language, unless the body already has its own `{{optOutUrl}}` link. Its text is set by language in **Settings → Brand**, like the unsubscribe footer.
+- **The sending.** A contact in the segment no longer gets the templates of that topic, from workflows or `/v1/send` (`422` `CONTACT_OPTED_OUT`), nor the campaigns with it, which leave the segment's members out of their audience and of `totalRecipients`; other transactional emails still reach them. Joining the segment fires its `entry` event when it tracks membership.
 
 The segment cannot be deleted while it is a template's topic. If it goes anyway (by SQL, from an earlier version, or while it was being chosen), the template is sent to no one, with an alert, until it gets another segment or none: its settings show the topic as a deleted segment, and `/v1/send` answers `422` `OPT_OUT_SEGMENT_MISSING`. Removing the topic from a template sends it again to everyone, those who opted out included.
+
+Nor can it be deleted while it is the topic of a campaign that is a draft (archived or not), scheduled or sending, or sent or cancelled and not archived: the emails of a campaign that went out link to it, and archiving the campaign frees it. A campaign whose topic segment is gone cannot be counted or sent (`400`) until it gets another one or none, and any of its emails still queued fail with an alert on the campaign.
 
 ## What happens when the recipient acts
 
