@@ -53,7 +53,7 @@ A `TRANSACTIONAL` campaign can have an **opt-out topic** (`optOutSegmentId`, or 
 - Its emails carry `List-Unsubscribe` and `List-Unsubscribe-Post` pointing at `/opt-out/<contactId>?c=<campaignId>`, `Precedence: bulk`, and the notices footer of **Settings → Brand** in the contact's language, unless the body has its own `{{optOutUrl}}` link. The test send has neither, as it has no contact.
 - Only `TRANSACTIONAL` campaigns can have one: moving one with a topic to another type needs `optOutSegmentId: null` in the same request. A scheduled campaign cannot change its topic or its type; cancel it back to a draft first.
 - If the segment is gone (deleted by SQL or by an earlier version), counting or sending answers `400` until it gets another segment or none, and the emails still queued fail with an alert on the campaign. Duplicating keeps the topic.
-- The segment cannot be deleted while a draft, scheduled or sending campaign has it, nor while one sent or cancelled with it is not archived: its emails link to it. Archive the campaign to free it.
+- The segment cannot be deleted while a draft, scheduled or sending campaign has it, nor while one sent or cancelled with it is not archived: its emails link to it. Archive the campaign to free it. Sending or scheduling an archived draft takes it out of the archive, so it is archived again only once it has gone out.
 
 ## Sender domain verification
 

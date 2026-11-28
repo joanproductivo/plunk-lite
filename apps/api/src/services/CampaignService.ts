@@ -665,6 +665,8 @@ export class CampaignService {
           status: CampaignStatus.SCHEDULED,
           scheduledFor,
           totalRecipients: recipientCount,
+          // Plunk Lite: an archived draft leaves the archive, as a scheduled campaign cannot be in it
+          archived: false,
         },
         include: {
           project: {
@@ -766,6 +768,9 @@ export class CampaignService {
         status: CampaignStatus.SENDING,
         totalRecipients: recipientCount,
         sentAt,
+        // Plunk Lite: an archived draft leaves the archive, as a sending campaign cannot be in it.
+        // Archiving it again once sent is what frees its opt-out topic's segment (SegmentService)
+        archived: false,
       },
     });
 

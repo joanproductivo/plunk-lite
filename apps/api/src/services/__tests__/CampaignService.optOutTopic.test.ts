@@ -8,7 +8,13 @@ import {DASHBOARD_URI} from '../../app/constants';
 import {prisma as appPrisma} from '../../database/prisma';
 import {CampaignService} from '../CampaignService';
 import {QueueService} from '../QueueService';
+import {SegmentService} from '../SegmentService';
 import {MISSING_CAMPAIGN_TOPIC} from '../TemplateOptOut';
+
+vi.mock('../SESService', async importOriginal => ({
+  ...(await importOriginal<typeof import('../SESService')>()),
+  getDailyQuotaQuick: vi.fn(async () => null),
+}));
 
 /**
  * Plunk Lite: the opt-out topic of a TRANSACTIONAL campaign, a static segment. Its members are left
@@ -254,6 +260,29 @@ describe('CampaignService - opt-out topic', () => {
       expect(error).toMatchObject({code: 'P2025'});
       expect((await prisma.campaign.findUniqueOrThrow({where: {id: campaign.id}})).segmentId).toBeNull();
     });
+  });
+
+  it('takes an archived draft out of the archive as it sends or is scheduled, so its segment stays locked', async () => {
+    await contact('a@x.test');
+    const topic = await staticSegment('Topic', []);
+    const sent = await create({name: 'Sent', optOutSegmentId: topic.id});
+    const scheduled = await create({name: 'Scheduled', optOutSegmentId: topic.id});
+    await prisma.campaign.updateMany({where: {id: {in: [sent.id, scheduled.id]}}, data: {archived: true}});
+    vi.spyOn(QueueService, 'queueCampaignBatch').mockResolvedValue(undefined as never);
+    vi.spyOn(QueueService, 'scheduleCampaign').mockResolvedValue(undefined as never);
+
+    await CampaignService.send(projectId, sent.id);
+    await CampaignService.send(projectId, scheduled.id, new Date(Date.now() + 60 * 60 * 1000));
+    const archived = await prisma.campaign.findMany({
+      where: {id: {in: [sent.id, scheduled.id]}},
+      select: {archived: true},
+    });
+    expect(archived).toEqual([{archived: false}, {archived: false}]);
+
+    // Once sent it would no longer lock the segment if it were still archived
+    await prisma.campaign.update({where: {id: sent.id}, data: {status: CampaignStatus.SENT}});
+    await prisma.campaign.delete({where: {id: scheduled.id}});
+    await expect(SegmentService.delete(projectId, topic.id)).rejects.toMatchObject({code: 409});
   });
 
   describe('a topic whose segment is gone', () => {
